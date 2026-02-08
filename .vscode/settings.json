@@ -1,0 +1,15 @@
+{
+    "idf.adapterTargetName": "esp32c6",
+    "idf.openOcdConfigs": [
+        "board/esp32c6-builtin.cfg"
+    ],
+    "idf.portWin": "COM11",
+    "idf.flashType": "UART",
+    "idf.espIdfPathWin": "C:\\Users\\User\\esp\\v5.5\\esp-idf",
+    "idf.toolsPathWin": "c:\\Espressif\\tools",
+    "idf.pythonInstallPath": "c:\\Espressif\\tools\\tools\\idf-python\\3.11.2\\python.exe",
+    "files.associations": {
+        "gpio.h": "c"
+    },
+    "idf.currentSetup": "C:/Espressif/frameworks/esp-idf-v5.5.2/"
+}
