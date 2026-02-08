@@ -3,8 +3,8 @@ idf_component_register(
         "main.c"
         "config.c"
         "bridge.c"
-        "modbusDecoder.c"
-        "modbusResp.c"
+        # "modbusDecoder.c"
+        # "modbusResp.c"
     INCLUDE_DIRS
         "."
     REQUIRES

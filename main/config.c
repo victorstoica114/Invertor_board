@@ -1,9 +1,10 @@
 #include "config.h"
+
 #include "esp_log.h"
 
 /* Handle-uri CAN păstrate aici (config/init) */
-twai_handle_t twaiBus0; // CAN1
-twai_handle_t twaiBus1; // CAN2
+static twai_handle_t twaiBus0; // CAN1
+static twai_handle_t twaiBus1; // CAN2
 
 twai_handle_t canGetBus0(void) { return twaiBus0; }
 twai_handle_t canGetBus1(void) { return twaiBus1; }

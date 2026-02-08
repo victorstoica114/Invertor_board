@@ -60,9 +60,6 @@ gpio_num_t rs485GetDir2(void);    // RS485_2_DIR
 /* Task LED (cerut explicit să rămână apelat din main) */
 void led_blink_task(void *pvParameters);
 
-extern twai_handle_t gCan1;
-extern twai_handle_t gCan2;
-
 #ifdef __cplusplus
 }
 #endif
