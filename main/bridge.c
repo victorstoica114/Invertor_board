@@ -1,15 +1,14 @@
 #include "bridge.h"
 #include "config.h"
-
+#include "modbusDecoder.h"
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
 #include <stdbool.h>
-
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-
 #include "esp_log.h"
+#include "esp_timer.h"
 
 /* ---------- Helpers: log CAN ---------- */
 static void logCanMsg(const char *ifname, const twai_message_t *m)
@@ -109,15 +108,40 @@ static void rs485BridgeTask(void *pv)
     rs485BridgeCtx_t *ctx = (rs485BridgeCtx_t*)pv;
     uint8_t buf[RS485_BUF_SIZE];
 
-    while (1) {
-        int len = uart_read_bytes(ctx->rxUart, buf, RS485_BUF_SIZE, pdMS_TO_TICKS(20));
-        if (len > 0) {
-            logRs485Bytes(ctx->rxName, buf, len);
+    // Prag gap: 5000us (~5ms) e ok la 9600bps pt Modbus RTU
+    static modbusDecoder_t dec1;
+    static modbusDecoder_t dec2;
+    modbusDecoder_t *dec = NULL;
 
+    // alegem instanța după nume ca să nu alocăm dinamic
+    if (strcmp(ctx->rxName, "RS485_1") == 0) {
+        dec = &dec1;
+        if (dec->ifName == NULL) modbusDecoderInit(dec, "RS485_1", 5000);
+    } else {
+        dec = &dec2;
+        if (dec->ifName == NULL) modbusDecoderInit(dec, "RS485_2", 5000);
+    }
+
+    while (1) {
+        // poți reduce la 5ms dacă vrei; decoderul oricum reface cadrele.
+        int len = uart_read_bytes(ctx->rxUart, buf, RS485_BUF_SIZE, pdMS_TO_TICKS(5));
+        if (len > 0) {
+            int64_t nowUs = esp_timer_get_time();
+            modbusDecoderFeed(dec, buf, len, nowUs);
+
+            // forward ca înainte
             rs485SetTx(ctx->txDirPin, true);
             uart_write_bytes(ctx->txUart, (const char*)buf, len);
             uart_wait_tx_done(ctx->txUart, pdMS_TO_TICKS(100));
             rs485SetTx(ctx->txDirPin, false);
+        } else {
+            // dacă n-au venit bytes, verificăm dacă a trecut gap-ul și flush-uim
+            if (dec->haveLastByte) {
+                int64_t nowUs = esp_timer_get_time();
+                if ((nowUs - dec->lastByteUs) > (int64_t)dec->gapUs) {
+                    modbusDecoderFlush(dec);
+                }
+            }
         }
     }
 }
