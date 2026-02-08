@@ -1,9 +1,9 @@
 #include "modbusDecoder.h"
-
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
-
+#include <stdint.h>
+#include <stdbool.h>
 #include "esp_log.h"
 
 #ifndef EXAMPLE_TAG
@@ -76,61 +76,142 @@ static void printReq03(modbusDecoder_t *d, const uint8_t *f, int len, bool crcOk
     d->lastReqUs    = d->lastByteUs;
 }
 
-static void printResp03(modbusDecoder_t *d, const uint8_t *f, int len, bool crcOk)
+static void printResp03(modbusDecoder_t *d,
+                        const uint8_t *frame,
+                        int len,
+                        bool crcOk)
 {
-    // Response func 0x03: [slave][03][byteCount][data...][crcLo][crcHi]
-    if (len < 5) return;
-
-    uint8_t slave = f[0];
-    uint8_t func  = f[1];
-    uint8_t byteCount = f[2];
-
-    // Minim: slave func bc + data(byteCount) + crc(2)
-    if ((int)byteCount + 5 != len) {
-        // posibil cadru incomplet sau alt format; tot îl afișăm
-        ESP_LOGW(EXAMPLE_TAG,
-                 "RESP on %s: slave=%u func=0x%02X byteCount=%u len=%d (mismatch) crc=%s",
-                 d->ifName, (unsigned)slave, (unsigned)func, (unsigned)byteCount, len,
-                 crcOk ? "OK" : "BAD");
+    // Modbus RTU response for func=0x03:
+    // [0]=slave [1]=func [2]=byteCount [3..]=data (2*regs) [..]=CRClo CRChi
+    if (len < 5) {
+        ESP_LOGI(EXAMPLE_TAG, "RESP on %s: too short (len=%d)", d->ifName, len);
+        return;
     }
 
-    int regCount = byteCount / 2;
+    uint8_t slave = frame[0];
+    uint8_t func  = frame[1];
 
+    if (func != 0x03) {
+        ESP_LOGI(EXAMPLE_TAG, "RESP on %s: func=0x%02X (not 0x03)", d->ifName, func);
+        return;
+    }
+
+    uint8_t byteCount = frame[2];
+    int dataLen = (int)byteCount;
+
+    // Basic sanity:
+    // total length should be: 3 + dataLen + 2(CRC)
+    if (3 + dataLen + 2 > len) {
+        ESP_LOGI(EXAMPLE_TAG, "RESP on %s: length mismatch (len=%d byteCount=%u)",
+                 d->ifName, len, (unsigned)byteCount);
+        return;
+    }
+
+    int regCount = dataLen / 2;
+    const uint8_t *data = &frame[3];
+
+    // Determine base start address from last request (if correlates)
+    uint16_t startBase = 0xFFFF;
     if (d->lastReqValid && d->lastReqSlave == slave && d->lastReqFunc == func) {
+        startBase = d->lastReqStart;
         ESP_LOGI(EXAMPLE_TAG,
-                 "RESP on %s: slave=%u func=0x%02X regs[%d] (for start=0x%04X) crc=%s",
-                 d->ifName, (unsigned)slave, (unsigned)func, regCount,
-                 (unsigned)d->lastReqStart, crcOk ? "OK" : "BAD");
+                 "RESP on %s: slave=%u func=0x%02X start=0x%04X regs[%d] crc=%s",
+                 d->ifName, (unsigned)slave, (unsigned)func,
+                 (unsigned)startBase, regCount, crcOk ? "OK" : "BAD");
     } else {
         ESP_LOGI(EXAMPLE_TAG,
                  "RESP on %s: slave=%u func=0x%02X regs[%d] crc=%s",
-                 d->ifName, (unsigned)slave, (unsigned)func, regCount,
-                 crcOk ? "OK" : "BAD");
+                 d->ifName, (unsigned)slave, (unsigned)func,
+                 regCount, crcOk ? "OK" : "BAD");
     }
 
-    // Printăm registrele ca index + hex + dec
-    const uint8_t *p = &f[3];
-    uint16_t startBase = d->lastReqValid ? d->lastReqStart : 0xFFFF;
+    // If CRC bad, still print generic values (optional)
+    // Dacă vrei să nu mai vezi gunoi, poți pune "if (!crcOk) return;" aici.
+    // if (!crcOk) return;
 
-    // Decodare “cât știm”: bloc 0x0070 (celule mV) — foarte probabil.
-    bool isCellBlock = (d->lastReqValid && d->lastReqStart == 0x0070);
+    // Pretty decode for known ranges
+    bool isCellBlock = (startBase != 0xFFFF && startBase == 0x0070);
+    bool isMainBlock = (startBase != 0xFFFF && startBase == 0x0010);
+
+    // For cell block: compute stats
+    uint16_t minMv = 0xFFFF, maxMv = 0;
+    uint32_t sumMv = 0;
+    uint16_t minCell = 0, maxCell = 0;
 
     for (int i = 0; i < regCount; i++) {
-        uint16_t v = (uint16_t)((p[2*i] << 8) | p[2*i + 1]);
+        uint16_t v = be16(&data[i * 2]);
         uint16_t addr = (startBase != 0xFFFF) ? (uint16_t)(startBase + i) : 0xFFFF;
 
-        if (addr != 0xFFFF) {
-            if (isCellBlock && i < 24) {
-                // Celulele sunt aproape sigur mV
-                ESP_LOGI(EXAMPLE_TAG, "  reg[0x%04X] cell%02d = %u mV (0x%04X)",
-                         (unsigned)addr, i + 1, (unsigned)v, (unsigned)v);
-            } else {
-                ESP_LOGI(EXAMPLE_TAG, "  reg[0x%04X] = 0x%04X (%u)",
-                         (unsigned)addr, (unsigned)v, (unsigned)v);
-            }
-        } else {
-            ESP_LOGI(EXAMPLE_TAG, "  reg[%02d] = 0x%04X (%u)", i, (unsigned)v, (unsigned)v);
+        if (isCellBlock) {
+            // Treat as mV
+            uint16_t cellIndex = (uint16_t)(i + 1);
+
+            // stats
+            if (v < minMv) { minMv = v; minCell = cellIndex; }
+            if (v > maxMv) { maxMv = v; maxCell = cellIndex; }
+            sumMv += v;
+
+            ESP_LOGI(EXAMPLE_TAG,
+                     "  cell[%02u] @0x%04X = %u mV (%.3f V)",
+                     (unsigned)cellIndex, (unsigned)addr,
+                     (unsigned)v, (double)v / 1000.0);
+            continue;
         }
+
+        if (isMainBlock) {
+            // Aici punem câteva corelări confirmate de capturi:
+            // addr 0x0015 = 100 -> SOC%
+            // addr 0x0016 = 6976 -> Pack Voltage in cV => 69.76V
+            // addr 0x0018 = 25 -> Temp °C
+            if (addr == 0x0015) {
+                ESP_LOGI(EXAMPLE_TAG,
+                         "  reg[0x%04X] SOC = %u %% (raw=0x%04X)",
+                         (unsigned)addr, (unsigned)v, (unsigned)v);
+                continue;
+            }
+            if (addr == 0x0016) {
+                ESP_LOGI(EXAMPLE_TAG,
+                         "  reg[0x%04X] PackVoltage = %.2f V (raw=%u cV)",
+                         (unsigned)addr, (double)v / 100.0, (unsigned)v);
+                continue;
+            }
+            if (addr == 0x0018) {
+                ESP_LOGI(EXAMPLE_TAG,
+                         "  reg[0x%04X] Temp = %d C (raw=0x%04X)",
+                         (unsigned)addr, (int16_t)v, (unsigned)v);
+                continue;
+            }
+
+            // generic with address
+            ESP_LOGI(EXAMPLE_TAG,
+                     "  reg[0x%04X] = 0x%04X (%u)",
+                     (unsigned)addr, (unsigned)v, (unsigned)v);
+            continue;
+        }
+
+        // Fallback generic if we don't know startBase
+        if (addr != 0xFFFF) {
+            ESP_LOGI(EXAMPLE_TAG,
+                     "  reg[0x%04X] = 0x%04X (%u)",
+                     (unsigned)addr, (unsigned)v, (unsigned)v);
+        } else {
+            ESP_LOGI(EXAMPLE_TAG,
+                     "  reg[%02d] = 0x%04X (%u)",
+                     i, (unsigned)v, (unsigned)v);
+        }
+    }
+
+    if (isCellBlock && regCount > 0) {
+        double avgV = (double)sumMv / (double)regCount / 1000.0;
+        double minV = (double)minMv / 1000.0;
+        double maxV = (double)maxMv / 1000.0;
+        double deltaV = (double)(maxMv - minMv) / 1000.0;
+
+        ESP_LOGI(EXAMPLE_TAG,
+                 "  Cells: min=cell%u %.3fV  max=cell%u %.3fV  delta=%.3fV  avg=%.3fV",
+                 (unsigned)minCell, minV,
+                 (unsigned)maxCell, maxV,
+                 deltaV, avgV);
     }
 }
 
