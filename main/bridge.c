@@ -1,86 +1,64 @@
+// bridge.c (integral)
+
 #include "bridge.h"
 #include "config.h"
 #include "modbusDecoder.h"
+
 #include <string.h>
 #include <stdbool.h>
 #include <stdint.h>
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+
 #include "esp_log.h"
 #include "esp_err.h"
-#include "esp_check.h"
+
 #include "driver/uart.h"
 #include "driver/gpio.h"
 #include "driver/twai.h"
 
 #define TAG "SNIFFER_BRIDGE"
 
-// ===================== RS485 bridge (sniffer + forward) =====================
+// ============ RS485 sniffer / optional forward ============
+
+// Sniffer only by default (sa nu injectezi trafic pe linie).
+// Pune 1 dacă vrei să forwardezi efectiv bytes între UART-uri.
+#define RS485_FORWARD_ENABLE 1
 
 typedef struct {
-    const char   *ifName;
-    uart_port_t   uartNum;
-    int           txPin;
-    int           rxPin;
-    int           dirPin;
-    uint32_t      baudrate;
+    const char  *ifName;
+    uart_port_t  uartNum;
+    gpio_num_t   dirPin;
 } rs485If_t;
 
 typedef struct {
     rs485If_t a;
     rs485If_t b;
-    bool      enableForward;
 } rs485BridgeCtx_t;
 
 static rs485BridgeCtx_t gRs485Ctx;
-static TaskHandle_t     gRs485TaskHandle = NULL;
+static TaskHandle_t gRs485TaskHandle = NULL;
 
 static inline void rs485SetDirTx(const rs485If_t *iface, bool txEnable)
 {
-    // DE/RE assumed tied together on DIR pin:
-    // 1 = TX enabled, 0 = RX enabled
+    // DE/RE pe același pin (DIR): 1=TX, 0=RX
     gpio_set_level(iface->dirPin, txEnable ? 1 : 0);
 }
 
-static esp_err_t rs485UartInit(const rs485If_t *iface)
+static void rs485WriteBytes(const rs485If_t *dst, const uint8_t *data, int len)
 {
-    uart_config_t cfg = {
-        .baud_rate  = (int)iface->baudrate,
-        .data_bits  = UART_DATA_8_BITS,
-        .parity     = UART_PARITY_DISABLE,
-        .stop_bits  = UART_STOP_BITS_1,
-        .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_DEFAULT
-    };
-
-    ESP_RETURN_ON_ERROR(uart_driver_install(iface->uartNum, 4096, 0, 0, NULL, 0), TAG, "uart_driver_install");
-    ESP_RETURN_ON_ERROR(uart_param_config(iface->uartNum, &cfg), TAG, "uart_param_config");
-    ESP_RETURN_ON_ERROR(uart_set_pin(iface->uartNum, iface->txPin, iface->rxPin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE),
-                        TAG, "uart_set_pin");
-
-    // DIR pin as output
-    gpio_config_t io = {
-        .pin_bit_mask = (1ULL << iface->dirPin),
-        .mode         = GPIO_MODE_OUTPUT,
-        .pull_up_en   = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type    = GPIO_INTR_DISABLE
-    };
-    ESP_RETURN_ON_ERROR(gpio_config(&io), TAG, "gpio_config(dir)");
-
-    // start in RX mode
-    rs485SetDirTx(iface, false);
-    return ESP_OK;
-}
-
-static void rs485WriteFrame(const rs485If_t *dst, const uint8_t *data, int len)
-{
+#if RS485_FORWARD_ENABLE
     if (len <= 0) return;
 
     rs485SetDirTx(dst, true);
     uart_write_bytes(dst->uartNum, (const char *)data, len);
+    // asigură drain TX; timeout suficient pentru 9600 (len mic)
     uart_wait_tx_done(dst->uartNum, pdMS_TO_TICKS(50));
     rs485SetDirTx(dst, false);
+#else
+    (void)dst; (void)data; (void)len;
+#endif
 }
 
 static void rs485BridgeTask(void *arg)
@@ -90,117 +68,120 @@ static void rs485BridgeTask(void *arg)
     modbusDecoder_t decA;
     modbusDecoder_t decB;
 
-    // IMPORTANT: modbusDecoderInit expects baudrate as 3rd argument (per your header)
-    modbusDecoderInit(&decA, ctx->a.ifName, ctx->a.baudrate);
-    modbusDecoderInit(&decB, ctx->b.ifName, ctx->b.baudrate);
+    // modbusDecoderInit(modbusDecoder_t*, ifName, baudrate)
+    modbusDecoderInit(&decA, ctx->a.ifName, RS485_BAUDRATE);
+    modbusDecoderInit(&decB, ctx->b.ifName, RS485_BAUDRATE);
 
     uint8_t bufA[256];
     uint8_t bufB[256];
 
-    // We use a short read timeout; if no data arrives we flush the decoder to close a frame on gap.
+    // Timeout mic: dacă nu vin bytes, flush => închide cadrul pe gap
     const TickType_t readTimeout = pdMS_TO_TICKS(20);
 
     while (1) {
         int nA = uart_read_bytes(ctx->a.uartNum, bufA, sizeof(bufA), readTimeout);
         if (nA > 0) {
-            // Feed decoder (3 args only, per your modbusDecoder.h)
             modbusDecoderFeed(&decA, bufA, nA);
-
-            // Forward A->B if enabled
-            if (ctx->enableForward) {
-                rs485WriteFrame(&ctx->b, bufA, nA);
-            }
+            rs485WriteBytes(&ctx->b, bufA, nA);
         } else {
-            // no bytes for a while => treat as inter-frame gap
             modbusDecoderFlush(&decA);
         }
 
         int nB = uart_read_bytes(ctx->b.uartNum, bufB, sizeof(bufB), readTimeout);
         if (nB > 0) {
             modbusDecoderFeed(&decB, bufB, nB);
-
-            if (ctx->enableForward) {
-                rs485WriteFrame(&ctx->a, bufB, nB);
-            }
+            rs485WriteBytes(&ctx->a, bufB, nB);
         } else {
             modbusDecoderFlush(&decB);
         }
 
-        // yield
         vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
 
-// Public API (must match bridge.h: void rs485BridgeEnable(void);)
 void rs485BridgeEnable(void)
 {
-    // Configure from config.h/config.c – adapt these symbols to what you already have.
-    // I’m assuming you have something like RS485_1_UART, RS485_1_TX, RS485_1_RX, RS485_1_DIR, RS485_BAUDRATE etc.
-    gRs485Ctx.a.ifName   = "RS485_1";
-    gRs485Ctx.a.uartNum  = RS485_1_UART;
-    gRs485Ctx.a.txPin    = RS485_1_TX;
-    gRs485Ctx.a.rxPin    = RS485_1_RX;
-    gRs485Ctx.a.dirPin   = RS485_1_DIR;
-    gRs485Ctx.a.baudrate = RS485_BAUDRATE;
+    // IMPORTANT:
+    // rs485Init() din config.c instalează deja driverul UART.
+    // AICI nu mai chemăm uart_driver_install() deloc.
 
-    gRs485Ctx.b.ifName   = "RS485_2";
-    gRs485Ctx.b.uartNum  = RS485_2_UART;
-    gRs485Ctx.b.txPin    = RS485_2_TX;
-    gRs485Ctx.b.rxPin    = RS485_2_RX;
-    gRs485Ctx.b.dirPin   = RS485_2_DIR;
-    gRs485Ctx.b.baudrate = RS485_BAUDRATE;
+    gRs485Ctx.a.ifName  = "RS485_1";
+    gRs485Ctx.a.uartNum = rs485GetUart1();
+    gRs485Ctx.a.dirPin  = rs485GetDir1();
 
-    gRs485Ctx.enableForward = true;
+    gRs485Ctx.b.ifName  = "RS485_2";
+    gRs485Ctx.b.uartNum = rs485GetUart2();
+    gRs485Ctx.b.dirPin  = rs485GetDir2();
 
-    ESP_ERROR_CHECK(rs485UartInit(&gRs485Ctx.a));
-    ESP_ERROR_CHECK(rs485UartInit(&gRs485Ctx.b));
+    // asigură DIR ca output + RX default (în caz că alt cod l-a lăsat aiurea)
+    gpio_set_direction(gRs485Ctx.a.dirPin, GPIO_MODE_OUTPUT);
+    gpio_set_direction(gRs485Ctx.b.dirPin, GPIO_MODE_OUTPUT);
+    rs485SetDirTx(&gRs485Ctx.a, false);
+    rs485SetDirTx(&gRs485Ctx.b, false);
 
     if (gRs485TaskHandle == NULL) {
         xTaskCreate(rs485BridgeTask, "rs485Bridge", 4096, &gRs485Ctx, 10, &gRs485TaskHandle);
     }
 
-    ESP_LOGI(TAG, "RS485 bridge enabled (%s<->%s)", gRs485Ctx.a.ifName, gRs485Ctx.b.ifName);
+#if RS485_FORWARD_ENABLE
+    ESP_LOGI(TAG, "RS485 bridge enabled (%s<->%s) [FORWARD=ON]", gRs485Ctx.a.ifName, gRs485Ctx.b.ifName);
+#else
+    ESP_LOGI(TAG, "RS485 sniffer enabled (%s & %s) [FORWARD=OFF]", gRs485Ctx.a.ifName, gRs485Ctx.b.ifName);
+#endif
 }
 
-// ===================== CAN bridge =====================
+// ============ CAN bridge (TWAI v2 handles) ============
 
 typedef struct {
-    bool enableForward;
-} canBridgeCtx_t;
+    const char    *name;
+    twai_handle_t  rx;
+    twai_handle_t  tx;
+} canLink_t;
 
-static canBridgeCtx_t gCanCtx;
-static TaskHandle_t   gCanTaskHandle = NULL;
+static TaskHandle_t gCanTask1 = NULL;
+static TaskHandle_t gCanTask2 = NULL;
 
-static void canBridgeTask(void *arg)
+static void canLinkTask(void *arg)
 {
-    (void)arg;
-
+    canLink_t *lnk = (canLink_t *)arg;
     twai_message_t msg;
 
     while (1) {
-        // IDF 5.5 signature: twai_receive(twai_message_t *message, TickType_t ticks_to_wait)
-        esp_err_t err = twai_receive(&msg, pdMS_TO_TICKS(1000));
+        // v2 API: twai_receive_v2(handle, &msg, timeout)
+        esp_err_t err = twai_receive_v2(lnk->rx, &msg, pdMS_TO_TICKS(1000));
         if (err == ESP_OK) {
-            // If you want to forward between two controllers using handles, that’s not the legacy twai API.
-            // With legacy twai driver, there is ONE controller instance.
-            // So here we only log; bridging CAN1<->CAN2 requires two TWAI instances or a different driver layer.
-            // Keep it safe: just log RX for now.
-            ESP_LOGI(TAG, "CAN RX: id=0x%lx dlc=%d", (unsigned long)msg.identifier, msg.data_length_code);
+            // forward
+            (void)twai_transmit_v2(lnk->tx, &msg, pdMS_TO_TICKS(100));
+
+            ESP_LOGI(TAG, "%s: id=0x%lx dlc=%u",
+                     lnk->name, (unsigned long)msg.identifier, (unsigned)msg.data_length_code);
         }
     }
 }
 
 void canBridgeEnable(void)
 {
-    // NOTE: With the classic TWAI driver in IDF, you can only run one TWAI peripheral instance.
-    // If your board truly has two CAN controllers, you need two separate drivers/instances; that’s not this API.
-    // For now, we start the one configured in canInit() and just run RX logging task.
+    // Consistent cu canInit() din config.c (care folosește twai_driver_install_v2)
+    twai_handle_t can1 = canGetBus0();
+    twai_handle_t can2 = canGetBus1();
 
-    gCanCtx.enableForward = true;
+    static canLink_t link12;
+    static canLink_t link21;
 
-    if (gCanTaskHandle == NULL) {
-        xTaskCreate(canBridgeTask, "canBridge", 4096, &gCanCtx, 9, &gCanTaskHandle);
+    link12.name = "CAN1->CAN2";
+    link12.rx   = can1;
+    link12.tx   = can2;
+
+    link21.name = "CAN2->CAN1";
+    link21.rx   = can2;
+    link21.tx   = can1;
+
+    if (gCanTask1 == NULL) {
+        xTaskCreate(canLinkTask, "can12", 4096, &link12, 9, &gCanTask1);
+    }
+    if (gCanTask2 == NULL) {
+        xTaskCreate(canLinkTask, "can21", 4096, &link21, 9, &gCanTask2);
     }
 
-    ESP_LOGI(TAG, "CAN bridge enabled (legacy TWAI: RX task running)");
+    ESP_LOGI(TAG, "CAN bridge enabled (TWAI v2: CAN1<->CAN2)");
 }
