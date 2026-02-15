@@ -103,31 +103,20 @@ static inline void rs485SetTx(gpio_num_t dirPin, bool txEn)
     gpio_set_level(dirPin, txEn ? 1 : 0); // 1=TX, 0=RX (cum ai avut)
 }
 
+static modbusDecoder_t modbusDec;
+
 static void rs485BridgeTask(void *pv)
 {
     rs485BridgeCtx_t *ctx = (rs485BridgeCtx_t*)pv;
     uint8_t buf[RS485_BUF_SIZE];
 
-    // Prag gap: 5000us (~5ms) e ok la 9600bps pt Modbus RTU
-    static modbusDecoder_t dec1;
-    static modbusDecoder_t dec2;
-    modbusDecoder_t *dec = NULL;
-
-    // alegem instanța după nume ca să nu alocăm dinamic
-    if (strcmp(ctx->rxName, "RS485_1") == 0) {
-        dec = &dec1;
-        if (dec->ifName == NULL) modbusDecoderInit(dec, "RS485_1", 5000);
-    } else {
-        dec = &dec2;
-        if (dec->ifName == NULL) modbusDecoderInit(dec, "RS485_2", 5000);
-    }
 
     while (1) {
         // poți reduce la 5ms dacă vrei; decoderul oricum reface cadrele.
         int len = uart_read_bytes(ctx->rxUart, buf, RS485_BUF_SIZE, pdMS_TO_TICKS(5));
         if (len > 0) {
             int64_t nowUs = esp_timer_get_time();
-            modbusDecoderFeed(dec, buf, len, nowUs);
+            modbusDecoderFeed(&modbusDec, buf, len, nowUs);
 
             // forward ca înainte
             rs485SetTx(ctx->txDirPin, true);
@@ -136,10 +125,10 @@ static void rs485BridgeTask(void *pv)
             rs485SetTx(ctx->txDirPin, false);
         } else {
             // dacă n-au venit bytes, verificăm dacă a trecut gap-ul și flush-uim
-            if (dec->haveLastByte) {
-                int64_t nowUs = esp_timer_get_time();
-                if ((nowUs - dec->lastByteUs) > (int64_t)dec->gapUs) {
-                    modbusDecoderFlush(dec);
+            if (modbusDec.haveLastByte) {
+            int64_t nowUs = esp_timer_get_time();
+            if ((nowUs - modbusDec.lastByteUs) > (int64_t)modbusDec.gapUs) {
+                modbusDecoderFlush(&modbusDec);
                 }
             }
         }
@@ -170,6 +159,8 @@ void canBridgeEnable(void)
 
 void rs485BridgeEnable(void)
 {
+    modbusDecoderInit(&modbusDec, "RS485", 5000);
+
     static rs485BridgeCtx_t rs12;
     static rs485BridgeCtx_t rs21;
 
