@@ -4,6 +4,8 @@ idf_component_register(
         "config.c"
         "bridge.c"
         "modbusDecoder.c"
+        "canDecoder.c"
+        "canGrowattDecoder.c"
         # "modbusResp.c"
     INCLUDE_DIRS
         "."

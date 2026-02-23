@@ -1,14 +1,25 @@
+// bridge.c
 #include "bridge.h"
 #include "config.h"
 #include "modbusDecoder.h"
+#include "canDecoder.h"
+// #include "canGrowattDecoder.h"   // opțional, doar dacă vrei și decoderul ăsta
+
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
 #include <stdbool.h>
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+
+// 1 = vezi HEX raw pentru fiecare frame CAN; 0 = doar status compact
+#define CAN_RAW_FRAMES 0
+
+static bmsCanState_t can1State;
+static bmsCanState_t can2State;
 
 /* ---------- Helpers: log CAN ---------- */
 static void logCanMsg(const char *ifname, const twai_message_t *m)
@@ -50,7 +61,20 @@ static void canBridgeTask(void *pv)
                 continue;
             }
 #endif
+
+#if CAN_RAW_FRAMES
             logCanMsg(ctx->rxName, &rx);
+#endif
+
+            bmsCanState_t *st = (strcmp(ctx->rxName, "CAN1") == 0) ? &can1State : &can2State;
+            canDecoderFeed(st, (uint32_t)rx.identifier, rx.data, rx.data_length_code);
+
+            // Trigger: 0x314 e "pack info", după el printăm o singură linie compactă
+            if (rx.identifier == 0x314 && canDecoderCanPrintState(st)) {
+                char line[240];
+                canDecoderFormatState(st, line, sizeof(line));
+                ESP_LOGI(EXAMPLE_TAG, "CAN-%s %s", ctx->rxName, line);
+            }
 
             esp_err_t e = twai_transmit_v2(ctx->txBus, &rx, pdMS_TO_TICKS(50));
             if (e != ESP_OK) {
@@ -58,34 +82,6 @@ static void canBridgeTask(void *pv)
                          ctx->rxName, ctx->txName, (unsigned)e);
             }
         }
-    }
-}
-
-/* ---------- RS485 log (HEX only) ---------- */
-static void logRs485Bytes(const char *ifname, const uint8_t *buf, int len)
-{
-    const int maxHexBytes = 64;
-    int n = (len < maxHexBytes) ? len : maxHexBytes;
-
-    char hex[3 * maxHexBytes + 1];
-    int pos = 0;
-
-    for (int i = 0; i < n; i++) {
-        pos += snprintf(&hex[pos], sizeof(hex) - pos, "%02X ", buf[i]);
-        if (pos >= (int)sizeof(hex)) break;
-    }
-
-    if (pos > 0) hex[pos - 1] = 0;
-    else hex[0] = 0;
-
-    if (len > maxHexBytes) {
-        ESP_LOGI(EXAMPLE_TAG,
-                 "RX on %s: len=%d HEX(first %d)=[%s] ...",
-                 ifname, len, maxHexBytes, hex);
-    } else {
-        ESP_LOGI(EXAMPLE_TAG,
-                 "RX on %s: len=%d HEX=[%s]",
-                 ifname, len, hex);
     }
 }
 
@@ -100,7 +96,7 @@ typedef struct {
 
 static inline void rs485SetTx(gpio_num_t dirPin, bool txEn)
 {
-    gpio_set_level(dirPin, txEn ? 1 : 0); // 1=TX, 0=RX (cum ai avut)
+    gpio_set_level(dirPin, txEn ? 1 : 0);
 }
 
 static modbusDecoder_t modbusDec;
@@ -110,36 +106,35 @@ static void rs485BridgeTask(void *pv)
     rs485BridgeCtx_t *ctx = (rs485BridgeCtx_t*)pv;
     uint8_t buf[RS485_BUF_SIZE];
 
-
     while (1) {
-        // poți reduce la 5ms dacă vrei; decoderul oricum reface cadrele.
         int len = uart_read_bytes(ctx->rxUart, buf, RS485_BUF_SIZE, pdMS_TO_TICKS(5));
         if (len > 0) {
             int64_t nowUs = esp_timer_get_time();
             modbusDecoderFeed(&modbusDec, buf, len, nowUs);
 
-            // forward ca înainte
             rs485SetTx(ctx->txDirPin, true);
             uart_write_bytes(ctx->txUart, (const char*)buf, len);
             uart_wait_tx_done(ctx->txUart, pdMS_TO_TICKS(100));
             rs485SetTx(ctx->txDirPin, false);
         } else {
-            // dacă n-au venit bytes, verificăm dacă a trecut gap-ul și flush-uim
             if (modbusDec.haveLastByte) {
-            int64_t nowUs = esp_timer_get_time();
-            if ((nowUs - modbusDec.lastByteUs) > (int64_t)modbusDec.gapUs) {
-                modbusDecoderFlush(&modbusDec);
+                int64_t nowUs = esp_timer_get_time();
+                if ((nowUs - modbusDec.lastByteUs) > (int64_t)modbusDec.gapUs) {
+                    modbusDecoderFlush(&modbusDec);
                 }
             }
         }
     }
 }
 
-/* ---------- Enable functions (create tasks) ---------- */
+/* ---------- Enable functions ---------- */
 void canBridgeEnable(void)
 {
     static canBridgeCtx_t can12;
     static canBridgeCtx_t can21;
+
+    canDecoderInit(&can1State);
+    canDecoderInit(&can2State);
 
     can12.rxName = "CAN1";
     can12.txName = "CAN2";
