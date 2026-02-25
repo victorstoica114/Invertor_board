@@ -160,29 +160,31 @@ static void printCompact(const canGrowattState_t *s)
     }
 }
 
+static bool pickCellFrameEndian(const canGrowattState_t *s, const uint8_t *d, uint16_t outMv[4]);
+
 /* Decodează 4 celule / frame: 8 bytes => 4x uint16 */
 static void decodeCells4Frame(canGrowattState_t *s, uint8_t frameIndex, const uint8_t *d)
 {
     const uint8_t start = (uint8_t)(frameIndex * 4u);   /* 0,4,8,12 */
+    uint16_t mvFrame[4];
+
+    /* Accept frame-ul doar daca toate cele 4 valori sunt coerente intr-un singur endianness. */
+    if (!pickCellFrameEndian(s, d, mvFrame)) {
+        return;
+    }
 
     for (uint8_t i = 0; i < 4u; i++) {
         const uint8_t idx = (uint8_t)(start + i);
-        const uint16_t mv = decodeCellmVSmart(&d[i * 2u]);
-
-        if (mvPlausible(mv)) {
-            s->cellV[idx] = (float)mv / 1000.0f;
-            s->haveCellMask |= (1u << idx);
-        }
+        s->cellV[idx] = (float)mvFrame[i] / 1000.0f;
+        s->haveCellMask |= (1u << idx);
     }
 
-    /* debug “partial” la fiecare frame: printează exact slot-ul curent */
     {
         char buf[200];
         int pos = 0;
         pos += snprintf(buf + pos, sizeof(buf) - (size_t)pos, "CAN-%s CELLS:", s->ifName);
         for (uint8_t i = 0; i < 4u; i++) {
             const uint8_t idx = (uint8_t)(start + i);
-            if ((s->haveCellMask & (1u << idx)) == 0u) continue;
             pos += snprintf(buf + pos, sizeof(buf) - (size_t)pos,
                             " C%02u=%.3fV", (unsigned)(idx + 1u), (double)s->cellV[idx]);
         }
@@ -217,6 +219,71 @@ static bool all4PlausibleLE(const uint8_t *d, uint16_t outMv[4])
         if (!mvPlausible(outMv[i])) return false;
     }
     return true;
+}
+
+static float absf_local(float x)
+{
+    return (x < 0.0f) ? -x : x;
+}
+
+static bool looksLike4CellsFrame(const uint8_t *d)
+{
+    uint16_t tmp[4];
+    return all4PlausibleBE(d, tmp) || all4PlausibleLE(d, tmp);
+}
+
+static bool pickCellFrameEndian(const canGrowattState_t *s, const uint8_t *d, uint16_t outMv[4])
+{
+    uint16_t beMv[4], leMv[4];
+    const bool beAll = all4PlausibleBE(d, beMv);
+    const bool leAll = all4PlausibleLE(d, leMv);
+
+    if (beAll && !leAll) {
+        memcpy(outMv, beMv, sizeof(beMv));
+        return true;
+    }
+    if (leAll && !beAll) {
+        memcpy(outMv, leMv, sizeof(leMv));
+        return true;
+    }
+    if (!beAll && !leAll) {
+        return false;
+    }
+
+    if (s->have313) {
+        float beScore = 0.0f;
+        float leScore = 0.0f;
+        for (int i = 0; i < 4; i++) {
+            beScore += absf_local(((float)beMv[i] / 1000.0f) - s->avgCellV);
+            leScore += absf_local(((float)leMv[i] / 1000.0f) - s->avgCellV);
+        }
+        if (leScore <= beScore) memcpy(outMv, leMv, sizeof(leMv));
+        else                    memcpy(outMv, beMv, sizeof(beMv));
+        return true;
+    }
+
+    memcpy(outMv, leMv, sizeof(leMv));
+    return true;
+}
+
+static void logUnknownCellLikeFrame(const canGrowattState_t *s, uint32_t canId, const uint8_t *d)
+{
+    uint16_t beMv[4] = {0}, leMv[4] = {0};
+    int beOk = 0, leOk = 0;
+
+    for (int i = 0; i < 4; i++) {
+        beMv[i] = be16(&d[i * 2]);
+        leMv[i] = le16(&d[i * 2]);
+        if (mvPlausible(beMv[i])) beOk++;
+        if (mvPlausible(leMv[i])) leOk++;
+    }
+
+    ESP_LOGI(EXAMPLE_TAG,
+             "CAN-%s 0x%03X RAW cell-like? BE[%u %u %u %u] ok=%d LE[%u %u %u %u] ok=%d",
+             s->ifName,
+             (unsigned)canId,
+             (unsigned)beMv[0], (unsigned)beMv[1], (unsigned)beMv[2], (unsigned)beMv[3], beOk,
+             (unsigned)leMv[0], (unsigned)leMv[1], (unsigned)leMv[2], (unsigned)leMv[3], leOk);
 }
 
 void canGrowattOnFrame(canGrowattState_t *s, uint32_t canId, const uint8_t *d, int dlc)
@@ -316,9 +383,9 @@ void canGrowattOnFrame(canGrowattState_t *s, uint32_t canId, const uint8_t *d, i
         case 0x31A:
         case 0x31B:
         case 0x31C:
-            decodeCells4Frame(s, (uint8_t)(canId - 0x319u), d);
+            if (looksLike4CellsFrame(d)) decodeCells4Frame(s, (uint8_t)(canId - 0x319u), d);
+            else                        logUnknownCellLikeFrame(s, canId, d);
             break;
-
         /* Altă variantă observată în log-urile tale: 0x319,0x320,0x321,0x322 (4 frame-uri / 16 celule)
         Notă: 0x323 apare separat și NU pare să fie celule (îl ignorăm). */
         case 0x320:
@@ -328,9 +395,14 @@ void canGrowattOnFrame(canGrowattState_t *s, uint32_t canId, const uint8_t *d, i
             if      (canId == 0x320u) fi = 1u;
             else if (canId == 0x321u) fi = 2u;
             else                      fi = 3u;
-            decodeCells4Frame(s, fi, d);
+            if (looksLike4CellsFrame(d)) decodeCells4Frame(s, fi, d);
+            else                        logUnknownCellLikeFrame(s, canId, d);
             break;
         }
+
+        case 0x323:
+            logUnknownCellLikeFrame(s, canId, d);
+            break;
 
         default: {
             /* caută candidați “cells”: 4 cuvinte în 4100..4500mV */

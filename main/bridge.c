@@ -31,13 +31,21 @@ static void logCanMsg(const char *ifname, const twai_message_t *m)
     int pos = 0;
 
     for (int i = 0; i < m->data_length_code && i < 8; i++) {
-        pos += snprintf(&dataHex[pos], sizeof(dataHex) - pos, "%02X ", m->data[i]);
+        pos += snprintf(&dataHex[pos], sizeof(dataHex) - (size_t)pos, "%02X ", m->data[i]);
         if (pos >= (int)sizeof(dataHex)) break;
     }
 
+    const bool isExt = (m->flags & TWAI_MSG_FLAG_EXTD) != 0;
+    const bool isRtr = (m->flags & TWAI_MSG_FLAG_RTR)  != 0;
+
     ESP_LOGI(EXAMPLE_TAG,
-             "RX on %s: ID=0x%03" PRIX32 " DLC=%d DATA=[%s]",
-             ifname, (uint32_t)m->identifier, m->data_length_code, dataHex);
+             "RX on %s: %s ID=0x%08" PRIX32 " DLC=%d%s DATA=[%s]",
+             ifname,
+             isExt ? "EXT" : "STD",
+             (uint32_t)m->identifier,
+             m->data_length_code,
+             isRtr ? " RTR" : "",
+             dataHex);
 }
 
 /* ---------- CAN bridge task ---------- */
