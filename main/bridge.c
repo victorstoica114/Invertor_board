@@ -2,8 +2,7 @@
 #include "bridge.h"
 #include "config.h"
 #include "modbusDecoder.h"
-#include "canDecoder.h"
-// #include "canGrowattDecoder.h"   // opțional, doar dacă vrei și decoderul ăsta
+#include "canGrowattDecoder.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -15,11 +14,15 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 
-// 1 = vezi HEX raw pentru fiecare frame CAN; 0 = doar status compact
+// 1 = vezi HEX raw pentru fiecare frame CAN; 0 = doar decoding (print din decoder)
 #define CAN_RAW_FRAMES 0
 
-static bmsCanState_t can1State;
-static bmsCanState_t can2State;
+#ifndef EXAMPLE_TAG
+#define EXAMPLE_TAG "SNIFFER_BRIDGE"
+#endif
+
+static canGrowattState_t can1State;
+static canGrowattState_t can2State;
 
 /* ---------- Helpers: log CAN ---------- */
 static void logCanMsg(const char *ifname, const twai_message_t *m)
@@ -34,10 +37,7 @@ static void logCanMsg(const char *ifname, const twai_message_t *m)
 
     ESP_LOGI(EXAMPLE_TAG,
              "RX on %s: ID=0x%03" PRIX32 " DLC=%d DATA=[%s]",
-             ifname,
-             (uint32_t)m->identifier,
-             m->data_length_code,
-             dataHex);
+             ifname, (uint32_t)m->identifier, m->data_length_code, dataHex);
 }
 
 /* ---------- CAN bridge task ---------- */
@@ -57,25 +57,17 @@ static void canBridgeTask(void *pv)
         if (twai_receive_v2(ctx->rxBus, &rx, portMAX_DELAY) == ESP_OK) {
 
 #ifdef TWAI_MSG_FLAG_SELF
-            if (rx.flags & TWAI_MSG_FLAG_SELF) {
-                continue;
-            }
+            if (rx.flags & TWAI_MSG_FLAG_SELF) continue;
 #endif
 
 #if CAN_RAW_FRAMES
             logCanMsg(ctx->rxName, &rx);
 #endif
 
-            bmsCanState_t *st = (strcmp(ctx->rxName, "CAN1") == 0) ? &can1State : &can2State;
-            canDecoderFeed(st, (uint32_t)rx.identifier, rx.data, rx.data_length_code);
+            canGrowattState_t *st = (strcmp(ctx->rxName, "CAN1") == 0) ? &can1State : &can2State;
+            canGrowattOnFrame(st, (uint32_t)rx.identifier, rx.data, (int)rx.data_length_code);
 
-            // Trigger: 0x314 e "pack info", după el printăm o singură linie compactă
-            if (rx.identifier == 0x314 && canDecoderCanPrintState(st)) {
-                char line[240];
-                canDecoderFormatState(st, line, sizeof(line));
-                ESP_LOGI(EXAMPLE_TAG, "CAN-%s %s", ctx->rxName, line);
-            }
-
+            // forward
             esp_err_t e = twai_transmit_v2(ctx->txBus, &rx, pdMS_TO_TICKS(50));
             if (e != ESP_OK) {
                 ESP_LOGW(EXAMPLE_TAG, "CAN forward %s -> %s failed (err=0x%x)",
@@ -133,8 +125,8 @@ void canBridgeEnable(void)
     static canBridgeCtx_t can12;
     static canBridgeCtx_t can21;
 
-    canDecoderInit(&can1State);
-    canDecoderInit(&can2State);
+    canGrowattInit(&can1State, "CAN1");
+    canGrowattInit(&can2State, "CAN2");
 
     can12.rxName = "CAN1";
     can12.txName = "CAN2";
