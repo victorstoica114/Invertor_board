@@ -1,42 +1,38 @@
-// canDecoder.h
 #pragma once
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef struct {
-    /* decoded values */
-    float    packVoltageV;
-    float    packCurrentA;
-    uint8_t  socPct;
-    int8_t   tMaxC;
-    uint16_t gaugeRm_10mAh;
+    /* legacy fields used by canDecoder.c */
+    float packV;
+    float packI;
 
-    float    cellMinV;
-    float    cellMaxV;
-    float    cellDeltaV;
-    uint8_t  cellMinIndex;
-    uint8_t  cellMaxIndex;
+    float cellMinV;
+    float cellMaxV;
+    float cellDeltaV;
 
-    float    t1C;
-    float    t2C;
+    float t1C;
+    float t2C;
 
-    /* availability flags */
+    uint8_t soc;
+
+    bool have311;
+    bool have312;
     bool have313;
     bool have314;
     bool have322;
+    bool have323;
+
 } bmsCanState_t;
 
 void canDecoderInit(bmsCanState_t *s);
 void canDecoderFeed(bmsCanState_t *s, uint32_t canId, const uint8_t *d, int dlc);
-
-bool canDecoderCanPrintState(const bmsCanState_t *s);
-void canDecoderFormatState(const bmsCanState_t *s, char *out, size_t outLen);
+int  canDecoderFormatState(char *out, size_t outSize, const bmsCanState_t *s);
 
 #ifdef __cplusplus
 }

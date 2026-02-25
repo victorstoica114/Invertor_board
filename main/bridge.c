@@ -15,7 +15,7 @@
 #include "esp_timer.h"
 
 // 1 = vezi HEX raw pentru fiecare frame CAN; 0 = doar decoding (print din decoder)
-#define CAN_RAW_FRAMES 0
+#define CAN_RAW_FRAMES 1
 
 #ifndef EXAMPLE_TAG
 #define EXAMPLE_TAG "SNIFFER_BRIDGE"
