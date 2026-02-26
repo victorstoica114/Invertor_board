@@ -83,19 +83,19 @@ static void decodeGrowattCanFrame(const char *ifname, const twai_message_t *m)
 
     switch (id) {
     case 0x311: {
-        /* PDF Rev_05: 0..1 CV, 2..3 charge limit, 4..5 discharge limit, 6..7 status */
-        const int16_t cv_0p1  = can_be16s(&d[0]);
-        const int16_t chg_0p1 = can_be16s(&d[2]);
-        const int16_t dis_0p1 = can_be16s(&d[4]);
-        const uint16_t st     = can_be16(&d[6]);
+        /* Observed on JK/Growatt traffic: 0..1 status, 2..3 CV, 4..5 IchgLim, 6..7 IdisLim */
+        const uint16_t st     = can_be16(&d[0]);
+        const int16_t cv_0p1  = can_be16s(&d[2]);
+        const int16_t chg_0p1 = can_be16s(&d[4]);
+        const int16_t dis_0p1 = can_be16s(&d[6]);
 
         ESP_LOGI(EXAMPLE_TAG,
-                 "CAN-%s 0x311: CV=%.1fV IchgLim=%.1fA IdisLim=%.1fA status=0x%04X mode=%s errValid=%u bal=%u sleep=%u outDis=%u outChg=%u termOpen=%u opMode=%s",
+                 "CAN-%s 0x311: status=0x%04X CV=%.1fV IchgLim=%.1fA IdisLim=%.1fA mode=%s errValid=%u bal=%u sleep=%u outDis=%u outChg=%u termOpen=%u opMode=%s",
                  ifname,
+                 (unsigned)st,
                  (double)((float)cv_0p1 / 10.0f),
                  (double)((float)chg_0p1 / 10.0f),
                  (double)((float)dis_0p1 / 10.0f),
-                 (unsigned)st,
                  growattModeStr(st),
                  (unsigned)((st >> 2) & 1u),
                  (unsigned)((st >> 3) & 1u),
@@ -176,20 +176,20 @@ static void decodeGrowattCanFrame(const char *ifname, const twai_message_t *m)
     }
 
     case 0x319: {
-        /* PDF Rev_05 Table 6 + RS485 cross-check */
-        const uint16_t vmax = can_le16(&d[0]);
-        const uint16_t vmin = can_le16(&d[2]);
+        /* PDF says max/min-cell related; on JK traffic these behave more like thresholds + indices. */
+        const uint16_t vhi = can_le16(&d[0]);
+        const uint16_t vlo = can_le16(&d[2]);
         const uint8_t flags = d[4];
         const uint8_t cmaxNo = d[5];
         const uint8_t cminNo = d[6];
         const uint8_t addr = d[7];
 
         ESP_LOGI(EXAMPLE_TAG,
-                 "CAN-%s 0x319: Cmax=%umV(C%u) Cmin=%umV(C%u) dV=%umV | type=%s flags=0x%02X chgEn=%u disEn=%u force1=%u force2=%u addr=%u",
+                 "CAN-%s 0x319: VhiRef=%umV(idx=%u) VloRef=%umV(idx=%u) dRef=%umV | type?=%s flags=0x%02X chgEn=%u disEn=%u force1=%u force2=%u addr=%u",
                  ifname,
-                 (unsigned)vmax, (unsigned)cmaxNo,
-                 (unsigned)vmin, (unsigned)cminNo,
-                 (unsigned)(vmax >= vmin ? (vmax - vmin) : 0u),
+                 (unsigned)vhi, (unsigned)cmaxNo,
+                 (unsigned)vlo, (unsigned)cminNo,
+                 (unsigned)(vhi >= vlo ? (vhi - vlo) : 0u),
                  growattChemStr(flags),
                  (unsigned)flags,
                  (unsigned)((flags >> 2) & 1u),
