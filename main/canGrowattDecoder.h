@@ -20,7 +20,7 @@ typedef struct {
     /* 0x313 */
     float packVoltageV;
     float packCurrentA;
-    int8_t packTempC;     /* temperatura pachet (rotunjită) */
+    int8_t packTempC;     /* pack temperature (rounded) */
     uint8_t socPct;
     uint8_t sohPct;
     bool have313;
@@ -28,23 +28,27 @@ typedef struct {
     /* 0x314 */
     float remainAh;
     float capacityAh;
-    float cellDeltaV;     /* din 0x314: mV -> V */
+    float cellDeltaV;     /* mV -> V */
     bool have314;
 
-    /* fallback aproximativ */
+    /* fallback approx */
     float avgCellV;       /* packVoltage/16 */
 
     /* per-cell (16S) */
-    float cellV[16];          /* Volți */
-    uint32_t haveCellMask;    /* bit i = avem cellV[i] valid */
+    float cellV[16];
+    uint32_t haveCellMask;    /* bit i = cellV[i] valid */
     bool haveCells;
 
-    /* statistici reale din cellV[] când haveCells=true */
+    /* real stats from cellV[] when haveCells=true */
     float cellAvgV;
     float cellMinV;
     float cellMaxV;
     uint8_t cellMinIndex;     /* 0..15 */
     uint8_t cellMaxIndex;     /* 0..15 */
+
+    /* meta/config frames 0x319..0x323 (log dedupe) */
+    uint8_t metaFrame319_323[5][8];
+    uint8_t haveMetaFrameMask319_323;
 } canGrowattState_t;
 
 void canGrowattInit(canGrowattState_t *s, const char *ifName);

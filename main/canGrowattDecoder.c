@@ -266,7 +266,146 @@ static bool pickCellFrameEndian(const canGrowattState_t *s, const uint8_t *d, ui
     return true;
 }
 
-static void logUnknownCellLikeFrame(const canGrowattState_t *s, uint32_t canId, const uint8_t *d)
+static void logReverse319320(const canGrowattState_t *s, uint32_t canId, const uint8_t *d)
+{
+    /* Common 12-bit packed hypotheses (both byte orders) for reverse-engineering. */
+    uint16_t p12be0[4] = {0}, p12le0[4] = {0};
+    uint16_t p12be2[4] = {0}, p12le2[4] = {0};
+
+    /* offset 0: bytes 0..5 => 4x12-bit */
+    p12be0[0] = (uint16_t)(((uint16_t)d[0] << 4) | (uint16_t)(d[1] >> 4));
+    p12be0[1] = (uint16_t)((((uint16_t)d[1] & 0x0Fu) << 8) | (uint16_t)d[2]);
+    p12be0[2] = (uint16_t)(((uint16_t)d[3] << 4) | (uint16_t)(d[4] >> 4));
+    p12be0[3] = (uint16_t)((((uint16_t)d[4] & 0x0Fu) << 8) | (uint16_t)d[5]);
+
+    p12le0[0] = (uint16_t)((uint16_t)d[0] | (((uint16_t)d[1] & 0x0Fu) << 8));
+    p12le0[1] = (uint16_t)(((uint16_t)(d[1] >> 4)) | ((uint16_t)d[2] << 4));
+    p12le0[2] = (uint16_t)((uint16_t)d[3] | (((uint16_t)d[4] & 0x0Fu) << 8));
+    p12le0[3] = (uint16_t)(((uint16_t)(d[4] >> 4)) | ((uint16_t)d[5] << 4));
+
+    /* offset 2: bytes 2..7 => 4x12-bit */
+    p12be2[0] = (uint16_t)(((uint16_t)d[2] << 4) | (uint16_t)(d[3] >> 4));
+    p12be2[1] = (uint16_t)((((uint16_t)d[3] & 0x0Fu) << 8) | (uint16_t)d[4]);
+    p12be2[2] = (uint16_t)(((uint16_t)d[5] << 4) | (uint16_t)(d[6] >> 4));
+    p12be2[3] = (uint16_t)((((uint16_t)d[6] & 0x0Fu) << 8) | (uint16_t)d[7]);
+
+    p12le2[0] = (uint16_t)((uint16_t)d[2] | (((uint16_t)d[3] & 0x0Fu) << 8));
+    p12le2[1] = (uint16_t)(((uint16_t)(d[3] >> 4)) | ((uint16_t)d[4] << 4));
+    p12le2[2] = (uint16_t)((uint16_t)d[5] | (((uint16_t)d[6] & 0x0Fu) << 8));
+    p12le2[3] = (uint16_t)(((uint16_t)(d[6] >> 4)) | ((uint16_t)d[7] << 4));
+
+    ESP_LOGI(EXAMPLE_TAG,
+             "CAN-%s 0x%03X RE: b=[%02X %02X %02X %02X %02X %02X %02X %02X] nH=[%X %X %X %X %X %X %X %X] nL=[%X %X %X %X %X %X %X %X]",
+             s->ifName, (unsigned)canId,
+             d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7],
+             d[0] >> 4, d[1] >> 4, d[2] >> 4, d[3] >> 4, d[4] >> 4, d[5] >> 4, d[6] >> 4, d[7] >> 4,
+             d[0] & 0x0F, d[1] & 0x0F, d[2] & 0x0F, d[3] & 0x0F, d[4] & 0x0F, d[5] & 0x0F, d[6] & 0x0F, d[7] & 0x0F);
+
+    ESP_LOGI(EXAMPLE_TAG,
+             "CAN-%s 0x%03X RE12 o0 BE[%u %u %u %u] LE[%u %u %u %u] | o2 BE[%u %u %u %u] LE[%u %u %u %u]",
+             s->ifName, (unsigned)canId,
+             (unsigned)p12be0[0], (unsigned)p12be0[1], (unsigned)p12be0[2], (unsigned)p12be0[3],
+             (unsigned)p12le0[0], (unsigned)p12le0[1], (unsigned)p12le0[2], (unsigned)p12le0[3],
+             (unsigned)p12be2[0], (unsigned)p12be2[1], (unsigned)p12be2[2], (unsigned)p12be2[3],
+             (unsigned)p12le2[0], (unsigned)p12le2[1], (unsigned)p12le2[2], (unsigned)p12le2[3]);
+
+    if (canId == 0x319u) {
+        const uint16_t w0le = le16(&d[0]);
+        const uint16_t w1le = le16(&d[2]);
+        const uint16_t w2le = le16(&d[4]);
+        const uint16_t w3le = le16(&d[6]);
+        ESP_LOGI(EXAMPLE_TAG,
+                 "CAN-%s 0x319 RE fields: wLE=[%u %u %u %u] w2+3200=%u w2+3300=%u b4=%u b5=%u b6=%u b7=%u",
+                 s->ifName,
+                 (unsigned)w0le, (unsigned)w1le, (unsigned)w2le, (unsigned)w3le,
+                 (unsigned)(w2le + 3200u), (unsigned)(w2le + 3300u),
+                 (unsigned)d[4], (unsigned)d[5], (unsigned)d[6], (unsigned)d[7]);
+    } else if (canId == 0x320u) {
+        const uint16_t w1be = be16(&d[2]);
+        const uint16_t w2be = be16(&d[4]);
+        const uint16_t w3be = be16(&d[6]);
+        ESP_LOGI(EXAMPLE_TAG,
+                 "CAN-%s 0x320 RE tailBE=[%u %u %u] tailBE+320=[%u %u %u] tailBE+400=[%u %u %u]",
+                 s->ifName,
+                 (unsigned)w1be, (unsigned)w2be, (unsigned)w3be,
+                 (unsigned)(w1be + 320u), (unsigned)(w2be + 320u), (unsigned)(w3be + 320u),
+                 (unsigned)(w1be + 400u), (unsigned)(w2be + 400u), (unsigned)(w3be + 400u));
+    }
+}
+
+static bool metaFrameChanged319_323(canGrowattState_t *s, uint32_t canId, const uint8_t *d)
+{
+    if (canId < 0x319u || canId > 0x323u) return true;
+    const uint8_t slot = (uint8_t)(canId - 0x319u);
+    const uint8_t mask = (uint8_t)(1u << slot);
+    if ((s->haveMetaFrameMask319_323 & mask) != 0u && memcmp(s->metaFrame319_323[slot], d, 8) == 0) {
+        return false;
+    }
+    memcpy(s->metaFrame319_323[slot], d, 8);
+    s->haveMetaFrameMask319_323 |= mask;
+    return true;
+}
+
+static void logMeta319(canGrowattState_t *s, const uint8_t *d)
+{
+    const uint16_t w0 = le16(&d[0]);
+    const uint16_t w1 = le16(&d[2]);
+    const uint16_t w2 = le16(&d[4]);
+    const uint16_t w3 = le16(&d[6]);
+    ESP_LOGI(EXAMPLE_TAG,
+             "CAN-%s 0x319 META?: thHi=%umV thLo=%umV x=%u (x+3200=%u) idx/min?=%u",
+             s->ifName, (unsigned)w0, (unsigned)w1, (unsigned)w2, (unsigned)(w2 + 3200u), (unsigned)w3);
+}
+
+static void logMeta320(canGrowattState_t *s, const uint8_t *d)
+{
+    const uint16_t w0 = be16(&d[0]);
+    const uint16_t w1 = be16(&d[2]);
+    const uint16_t w2 = be16(&d[4]);
+    const uint16_t w3 = be16(&d[6]);
+    ESP_LOGI(EXAMPLE_TAG,
+             "CAN-%s 0x320 META?: BE=[%u %u %u %u] +320=[%u %u %u] +400=[%u %u %u]",
+             s->ifName,
+             (unsigned)w0, (unsigned)w1, (unsigned)w2, (unsigned)w3,
+             (unsigned)(w1 + 320u), (unsigned)(w2 + 320u), (unsigned)(w3 + 320u),
+             (unsigned)(w1 + 400u), (unsigned)(w2 + 400u), (unsigned)(w3 + 400u));
+}
+
+static void logMeta321(canGrowattState_t *s, const uint8_t *d)
+{
+    bool allZero = true;
+    for (int i = 0; i < 8; i++) { if (d[i] != 0) { allZero = false; break; } }
+    if (allZero) {
+        ESP_LOGI(EXAMPLE_TAG, "CAN-%s 0x321 META: all-zero/reserved", s->ifName);
+    } else {
+        ESP_LOGI(EXAMPLE_TAG,
+                 "CAN-%s 0x321 META: raw=[%02X %02X %02X %02X %02X %02X %02X %02X]",
+                 s->ifName, d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7]);
+    }
+}
+
+static void logMeta322(canGrowattState_t *s, const uint8_t *d)
+{
+    const int16_t t1_0p1 = be16s(&d[0]);
+    const uint16_t x0000 = be16(&d[2]);
+    const int16_t t2_0p1 = be16s(&d[4]);
+    ESP_LOGI(EXAMPLE_TAG,
+             "CAN-%s 0x322 META: T1=%.1fC X=0x%04X T2=%.1fC P1=%u P2=%u",
+             s->ifName,
+             (double)((float)t1_0p1 / 10.0f),
+             (unsigned)x0000,
+             (double)((float)t2_0p1 / 10.0f),
+             (unsigned)d[6], (unsigned)d[7]);
+}
+
+static void logMeta323(canGrowattState_t *s, const uint8_t *d)
+{
+    ESP_LOGI(EXAMPLE_TAG,
+             "CAN-%s 0x323 META: cellCount=%u rawTail=[%02X %02X %02X %02X %02X %02X %02X]",
+             s->ifName, (unsigned)d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7]);
+}
+
+static void logUnknownCellLikeFrame(canGrowattState_t *s, uint32_t canId, const uint8_t *d)
 {
     uint16_t beMv[4] = {0}, leMv[4] = {0};
     int beOk = 0, leOk = 0;
@@ -284,6 +423,10 @@ static void logUnknownCellLikeFrame(const canGrowattState_t *s, uint32_t canId, 
              (unsigned)canId,
              (unsigned)beMv[0], (unsigned)beMv[1], (unsigned)beMv[2], (unsigned)beMv[3], beOk,
              (unsigned)leMv[0], (unsigned)leMv[1], (unsigned)leMv[2], (unsigned)leMv[3], leOk);
+
+    if (canId == 0x319u || canId == 0x320u) {
+        logReverse319320(s, canId, d);
+    }
 }
 
 void canGrowattOnFrame(canGrowattState_t *s, uint32_t canId, const uint8_t *d, int dlc)
@@ -380,6 +523,13 @@ void canGrowattOnFrame(canGrowattState_t *s, uint32_t canId, const uint8_t *d, i
 
         /* Variant observat: 0x319..0x31C */
         case 0x319:
+            if (looksLike4CellsFrame(d)) {
+                decodeCells4Frame(s, 0u, d);
+            } else {
+                if (metaFrameChanged319_323(s, canId, d)) logMeta319(s, d);
+                logUnknownCellLikeFrame(s, canId, d);
+            }
+            break;
         case 0x31A:
         case 0x31B:
         case 0x31C:
@@ -388,19 +538,28 @@ void canGrowattOnFrame(canGrowattState_t *s, uint32_t canId, const uint8_t *d, i
             break;
         /* Altă variantă observată în log-urile tale: 0x319,0x320,0x321,0x322 (4 frame-uri / 16 celule)
         Notă: 0x323 apare separat și NU pare să fie celule (îl ignorăm). */
-        case 0x320:
-        case 0x321:
-        case 0x322: {
-            uint8_t fi = 0u;
-            if      (canId == 0x320u) fi = 1u;
-            else if (canId == 0x321u) fi = 2u;
-            else                      fi = 3u;
-            if (looksLike4CellsFrame(d)) decodeCells4Frame(s, fi, d);
-            else                        logUnknownCellLikeFrame(s, canId, d);
+        case 0x320: {
+            if (looksLike4CellsFrame(d)) {
+                decodeCells4Frame(s, 1u, d);
+            } else {
+                if (metaFrameChanged319_323(s, canId, d)) logMeta320(s, d);
+                logUnknownCellLikeFrame(s, canId, d);
+            }
             break;
         }
 
+        case 0x321:
+            if (metaFrameChanged319_323(s, canId, d)) logMeta321(s, d);
+            logUnknownCellLikeFrame(s, canId, d);
+            break;
+
+        case 0x322:
+            if (metaFrameChanged319_323(s, canId, d)) logMeta322(s, d);
+            logUnknownCellLikeFrame(s, canId, d);
+            break;
+
         case 0x323:
+            if (metaFrameChanged319_323(s, canId, d)) logMeta323(s, d);
             logUnknownCellLikeFrame(s, canId, d);
             break;
 
