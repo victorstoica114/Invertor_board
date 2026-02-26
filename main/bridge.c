@@ -11,6 +11,25 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 
+/* BMS (CAN1) -> inverter (CAN2) forwarding exclusion list for A/B testing.
+ * Remove IDs manually from this array to see the minimum set required by the inverter. */
+static const uint32_t kCan1ToCan2ExcludeIds[] = {
+    0x311u, 0x312u, 0x313u, 0x314u,
+    0x315u, 0x316u, 0x317u, 0x318u,
+    0x319u, 0x320u, 0x321u, 0x322u, 0x323u,
+    0x324u, 0x325u,
+};
+
+static bool canIdExcludedToInverter(uint32_t id)
+{
+    for (size_t i = 0; i < (sizeof(kCan1ToCan2ExcludeIds) / sizeof(kCan1ToCan2ExcludeIds[0])); i++) {
+        if (kCan1ToCan2ExcludeIds[i] == id) {
+            return true;
+        }
+    }
+    return false;
+}
+
 
 /* ---------- CAN bridge task ---------- */
 typedef struct {
@@ -18,6 +37,7 @@ typedef struct {
     const char   *txName;
     twai_handle_t rxBus;
     twai_handle_t txBus;
+    bool          applyExcludeList;
 } canBridgeCtx_t;
 
 static void canPeriodicSnapshotTask(void *pv)
@@ -46,6 +66,10 @@ static void canBridgeTask(void *pv)
             }
 #endif
             canDecoderOnFrame(ctx->rxName, &rx);
+
+            if (ctx->applyExcludeList && canIdExcludedToInverter((uint32_t)rx.identifier)) {
+                continue;
+            }
 
             esp_err_t e = twai_transmit_v2(ctx->txBus, &rx, pdMS_TO_TICKS(50));
             if (e != ESP_OK) {
@@ -151,11 +175,13 @@ void canBridgeEnable(void)
     can12.txName = "CAN2";
     can12.rxBus  = canGetBus0();
     can12.txBus  = canGetBus1();
+    can12.applyExcludeList = true; /* CAN1(BMS) -> CAN2(inverter) */
 
     can21.rxName = "CAN2";
     can21.txName = "CAN1";
     can21.rxBus  = canGetBus1();
     can21.txBus  = canGetBus0();
+    can21.applyExcludeList = false;
 
     xTaskCreate(canBridgeTask, "can1_to_can2", 4096, &can12, 10, NULL);
     xTaskCreate(canBridgeTask, "can2_to_can1", 4096, &can21, 10, NULL);
