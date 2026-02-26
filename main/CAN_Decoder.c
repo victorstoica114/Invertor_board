@@ -56,6 +56,133 @@ static const char *growattOpModeStr(uint16_t status)
     }
 }
 
+static const char *const k312Prot1Bits[8] = {
+    "soft_start_fail",      /* bit0 */
+    "module_uv_prot",       /* bit1 */
+    "module_ov_prot",       /* bit2 */
+    "cell_uv_prot",         /* bit3 */
+    "cell_ov_prot",         /* bit4 */
+    "scd_prot",             /* bit5 */
+    "chg_oc_prot",          /* bit6 */
+    "dis_oc_prot",          /* bit7 */
+};
+
+static const char *const k312Prot2Bits[8] = {
+    NULL,                    /* bit0 */
+    NULL,                    /* bit1 */
+    "delta_v_fail_prot",    /* bit2 */
+    "system_error_prot",    /* bit3 */
+    "utc_prot",             /* bit4 */
+    "utd_prot",             /* bit5 */
+    "otc_prot",             /* bit6 */
+    "otd_prot",             /* bit7 */
+};
+
+static const char *const k312Alm1Bits[8] = {
+    NULL,                    /* bit0 */
+    "module_uv_alarm",      /* bit1 */
+    "module_ov_alarm",      /* bit2 */
+    "cell_uv_alarm",        /* bit3 */
+    "cell_ov_alarm",        /* bit4 */
+    NULL,                    /* bit5 */
+    "chg_oc_alarm",         /* bit6 */
+    "dis_oc_alarm",         /* bit7 */
+};
+
+static const char *const k312Alm2Bits[8] = {
+    "int_comm_fail_alarm",  /* bit0 */
+    "pack_turnoff_alarm",   /* bit1 */
+    "delta_v_fail_alarm",   /* bit2 */
+    NULL,                    /* bit3 */
+    "utc_warn",             /* bit4 */
+    "utd_warn",             /* bit5 */
+    "otc_warn",             /* bit6 */
+    "otd_warn",             /* bit7 */
+};
+
+static const char *const k323Prot3Bits[8] = {
+    "olc_prot",             /* bit0 */
+    "old_prot",             /* bit1 */
+    "ext_com_fault",        /* bit2 */
+    "pre_chg_fail",         /* bit3 */
+    "hw_fault",             /* bit4 */
+    "afe_com_fault",        /* bit5 */
+    "cell_lost_fault",      /* bit6 */
+    "pack_i_sample_fault",  /* bit7 */
+};
+
+static const char *const k323Prot4Bits[8] = {
+    "flt_sp_umain",         /* bit0 */
+    "flt_sp_uload",         /* bit1 */
+    "flt_eep_param",        /* bit2 */
+    "flt_chbus_reverse",    /* bit3 */
+    "flt_ovp",              /* bit4 */
+    "flt_ocp",              /* bit5 */
+    "flt_parallel",         /* bit6 */
+    "flt_prll_udiff_over",  /* bit7 */
+};
+
+static const char *const k323Prot5Bits[8] = {
+    "flt_dis_ocp",          /* bit0 */
+    "flt_ch_ilimit_norsp",  /* bit1 */
+    "flt_di_ilimit_norsp",  /* bit2 */
+    "flt_bus_open",         /* bit3 */
+    NULL,                    /* bit4 */
+    NULL,                    /* bit5 */
+    NULL,                    /* bit6 */
+    NULL,                    /* bit7 */
+};
+
+static const char *const k323Warn3Bits[8] = {
+    "olc_warn",                     /* bit0 */
+    "old_warn",                     /* bit1 */
+    "prll_i_inch_h2_oc_warn",       /* bit2 */
+    "prll_i_indis_h2_oc_warn",      /* bit3 */
+    NULL,                            /* bit4 */
+    NULL,                            /* bit5 */
+    NULL,                            /* bit6 */
+    NULL,                            /* bit7 */
+};
+
+static void logActiveBitNames(const char *ifname,
+                              uint32_t id,
+                              const char *field,
+                              uint8_t value,
+                              const char *const names[8])
+{
+    if (value == 0u) {
+        return;
+    }
+
+    char buf[256] = {0};
+    int pos = 0;
+
+    for (int bit = 7; bit >= 0; --bit) {
+        if ((value & (uint8_t)(1u << bit)) == 0u) {
+            continue;
+        }
+
+        const char *name = names[bit];
+        if (name == NULL) {
+            continue;
+        }
+
+        pos += snprintf(&buf[pos], sizeof(buf) - (size_t)pos, "%s%s",
+                        (pos > 0) ? "|" : "",
+                        name);
+        if (pos >= (int)sizeof(buf)) {
+            break;
+        }
+    }
+
+    ESP_LOGI(EXAMPLE_TAG,
+             "CAN-%s 0x%03" PRIX32 " %s active: %s",
+             ifname,
+             id,
+             field,
+             (buf[0] != '\0') ? buf : "(only reserved bits)");
+}
+
 static void logRawCanMsg(const char *ifname, const twai_message_t *m)
 {
     char dataHex[3 * 8 + 1] = {0};
@@ -113,6 +240,10 @@ static void decodeGrowattCanFrame(const char *ifname, const twai_message_t *m)
                  ifname,
                  (unsigned)d[0], (unsigned)d[1], (unsigned)d[2], (unsigned)d[3],
                  (unsigned)d[4], (unsigned)d[5], (unsigned)d[6], (unsigned)d[7]);
+        logActiveBitNames(ifname, id, "Prot1", d[0], k312Prot1Bits);
+        logActiveBitNames(ifname, id, "Prot2", d[1], k312Prot2Bits);
+        logActiveBitNames(ifname, id, "Alm1", d[2], k312Alm1Bits);
+        logActiveBitNames(ifname, id, "Alm2", d[3], k312Alm2Bits);
         break;
 
     case 0x313: {
@@ -253,6 +384,10 @@ static void decodeGrowattCanFrame(const char *ifname, const twai_message_t *m)
                  "CAN-%s 0x323: cellCount=%u prot3=0x%02X prot4=0x%02X prot5=0x%02X warn3=0x%02X",
                  ifname,
                  (unsigned)d[0], (unsigned)d[4], (unsigned)d[5], (unsigned)d[6], (unsigned)d[7]);
+        logActiveBitNames(ifname, id, "Prot3", d[4], k323Prot3Bits);
+        logActiveBitNames(ifname, id, "Prot4", d[5], k323Prot4Bits);
+        logActiveBitNames(ifname, id, "Prot5", d[6], k323Prot5Bits);
+        logActiveBitNames(ifname, id, "Warn3", d[7], k323Warn3Bits);
         break;
 
     default:
