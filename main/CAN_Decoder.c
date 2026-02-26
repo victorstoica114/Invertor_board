@@ -10,6 +10,49 @@
 
 bool g_canDecoderShowRawFrames = 0;
 
+#define CAN_DECODER_IMMEDIATE_DECODE_LOG_ENABLE 0
+#define CAN_BMS_CACHE_ID_MIN 0x311u
+#define CAN_BMS_CACHE_ID_MAX 0x323u
+#define CAN_BMS_CACHE_COUNT (CAN_BMS_CACHE_ID_MAX - CAN_BMS_CACHE_ID_MIN + 1u)
+
+typedef struct {
+    bool valid;
+    uint32_t id;
+    uint8_t dlc;
+    uint8_t data[8];
+} canBmsCachedFrame_t;
+
+static portMUX_TYPE g_canBmsCacheMux = portMUX_INITIALIZER_UNLOCKED;
+static canBmsCachedFrame_t g_can1BmsCache[CAN_BMS_CACHE_COUNT];
+
+static int canBmsCacheIndex(uint32_t id)
+{
+    if (id < CAN_BMS_CACHE_ID_MIN || id > CAN_BMS_CACHE_ID_MAX) {
+        return -1;
+    }
+    return (int)(id - CAN_BMS_CACHE_ID_MIN);
+}
+
+static void canBmsCacheUpdate(const char *ifname, const twai_message_t *m)
+{
+    if (ifname == NULL || m == NULL) return;
+    if (strcmp(ifname, "CAN1") != 0) return;
+
+    int idx = canBmsCacheIndex((uint32_t)m->identifier);
+    if (idx < 0) return;
+
+    canBmsCachedFrame_t f = {0};
+    f.valid = true;
+    f.id = (uint32_t)m->identifier;
+    f.dlc = (uint8_t)m->data_length_code;
+    if (f.dlc > 8u) f.dlc = 8u;
+    memcpy(f.data, m->data, f.dlc);
+
+    portENTER_CRITICAL(&g_canBmsCacheMux);
+    g_can1BmsCache[idx] = f;
+    portEXIT_CRITICAL(&g_canBmsCacheMux);
+}
+
 static inline uint16_t can_be16(const uint8_t *p)
 {
     return (uint16_t)((((uint16_t)p[0]) << 8) | (uint16_t)p[1]);
@@ -419,13 +462,54 @@ static void decodeGrowattCanFrame(const char *ifname, const twai_message_t *m)
     }
 }
 
+void canDecoderPrintCachedSnapshot(const char *ifname)
+{
+    const char *name = (ifname != NULL) ? ifname : "CAN1";
+    canBmsCachedFrame_t local[CAN_BMS_CACHE_COUNT];
+    bool any = false;
+
+    portENTER_CRITICAL(&g_canBmsCacheMux);
+    memcpy(local, g_can1BmsCache, sizeof(local));
+    portEXIT_CRITICAL(&g_canBmsCacheMux);
+
+    for (size_t i = 0; i < CAN_BMS_CACHE_COUNT; i++) {
+        if (local[i].valid) {
+            any = true;
+            break;
+        }
+    }
+
+    if (!any) {
+        ESP_LOGI(EXAMPLE_TAG, "CAN-%s SNAPSHOT: no cached BMS frames yet", name);
+        return;
+    }
+
+    ESP_LOGI(EXAMPLE_TAG, "CAN-%s SNAPSHOT BEGIN", name);
+
+    for (size_t i = 0; i < CAN_BMS_CACHE_COUNT; i++) {
+        if (!local[i].valid) continue;
+
+        twai_message_t m = {0};
+        m.identifier = local[i].id;
+        m.data_length_code = local[i].dlc;
+        memcpy(m.data, local[i].data, local[i].dlc);
+        decodeGrowattCanFrame(name, &m);
+    }
+
+    ESP_LOGI(EXAMPLE_TAG, "CAN-%s SNAPSHOT END", name);
+}
+
 void canDecoderOnFrame(const char *ifname, const twai_message_t *m)
 {
     if (m == NULL) return;
+
+    canBmsCacheUpdate(ifname, m);
 
     if (g_canDecoderShowRawFrames) {
         logRawCanMsg(ifname, m);
     }
 
+#if CAN_DECODER_IMMEDIATE_DECODE_LOG_ENABLE
     decodeGrowattCanFrame(ifname, m);
+#endif
 }

@@ -20,6 +20,18 @@ typedef struct {
     twai_handle_t txBus;
 } canBridgeCtx_t;
 
+static void canPeriodicSnapshotTask(void *pv)
+{
+    const char *ifname = (const char *)pv;
+
+    vTaskDelay(pdMS_TO_TICKS(CAN_DECODER_SNAPSHOT_PRINT_PERIOD_MS));
+
+    while (1) {
+        canDecoderPrintCachedSnapshot(ifname);
+        vTaskDelay(pdMS_TO_TICKS(CAN_DECODER_SNAPSHOT_PRINT_PERIOD_MS));
+    }
+}
+
 static void canBridgeTask(void *pv)
 {
     canBridgeCtx_t *ctx = (canBridgeCtx_t*)pv;
@@ -147,7 +159,9 @@ void canBridgeEnable(void)
 
     xTaskCreate(canBridgeTask, "can1_to_can2", 4096, &can12, 10, NULL);
     xTaskCreate(canBridgeTask, "can2_to_can1", 4096, &can21, 10, NULL);
+    xTaskCreate(canPeriodicSnapshotTask, "can_snapshot", 4096, (void *)"CAN1", 7, NULL);
 
+    ESP_LOGI(EXAMPLE_TAG, "CAN periodic snapshot enabled (%d ms)", CAN_DECODER_SNAPSHOT_PRINT_PERIOD_MS);
     ESP_LOGI(EXAMPLE_TAG, "CAN bridge enabled (CAN1<->CAN2)");
 }
 
