@@ -100,6 +100,28 @@ static const char *const k312Alm2Bits[8] = {
     "otd_warn",             /* bit7 */
 };
 
+static const char *const k312PwrRedHBits[8] = {
+    "pwrred_h_bit0",
+    "pwrred_h_bit1",
+    "pwrred_h_bit2",
+    "pwrred_h_bit3",
+    "pwrred_h_bit4",
+    "pwrred_h_bit5",
+    "pwrred_h_bit6",
+    "pwrred_h_bit7",
+};
+
+static const char *const k312PwrRedLBits[8] = {
+    "pwrred_l_bit0",
+    "pwrred_l_bit1",
+    "pwrred_l_bit2",
+    "pwrred_l_bit3",
+    "pwrred_l_bit4",
+    "pwrred_l_bit5",
+    "pwrred_l_bit6",
+    "pwrred_l_bit7",
+};
+
 static const char *const k323Prot3Bits[8] = {
     "olc_prot",             /* bit0 */
     "old_prot",             /* bit1 */
@@ -244,6 +266,8 @@ static void decodeGrowattCanFrame(const char *ifname, const twai_message_t *m)
         logActiveBitNames(ifname, id, "Prot2", d[1], k312Prot2Bits);
         logActiveBitNames(ifname, id, "Alm1", d[2], k312Alm1Bits);
         logActiveBitNames(ifname, id, "Alm2", d[3], k312Alm2Bits);
+        logActiveBitNames(ifname, id, "PwrRedH", d[5], k312PwrRedHBits);
+        logActiveBitNames(ifname, id, "PwrRedL", d[6], k312PwrRedLBits);
         break;
 
     case 0x313: {
