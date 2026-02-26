@@ -8,7 +8,7 @@
 
 #include "esp_log.h"
 
-bool g_canDecoderShowRawFrames = true;
+bool g_canDecoderShowRawFrames = 0;
 
 static inline uint16_t can_be16(const uint8_t *p)
 {
