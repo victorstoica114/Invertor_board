@@ -85,73 +85,18 @@ static void canBridgeTask(void *pv)
 }
 
 /* ---------- RS485 bridge ---------- */
-typedef struct {
-    uint16_t start;
-    uint16_t end;
-} modbusRegRange_t;
-
 /* Exclusion list for forwarded Modbus register requests.
- * Initial setup excludes all registers; remove ranges manually as needed. */
-static const modbusRegRange_t kRs485ForwardExcludeRegs[] = {
-    {0x0001u, 0x0001u},
-    {0x0002u, 0x0002u},
-    {0x0003u, 0x0003u},
-    {0x0004u, 0x0004u},
-    {0x0005u, 0x0005u},
-    {0x0006u, 0x0006u},
-    {0x0007u, 0x0007u},
-    {0x0008u, 0x0008u},
-    {0x0009u, 0x0009u},
-    {0x000Au, 0x000Au},
-    {0x000Bu, 0x000Bu},
-    {0x000Cu, 0x000Cu},
-    {0x000Du, 0x000Du},
-    {0x000Eu, 0x000Eu},
-    {0x000Fu, 0x000Fu},
-    {0x0010u, 0x0010u},
-    {0x0011u, 0x0011u},
-    {0x0012u, 0x0012u},
-    {0x0013u, 0x0013u},
-    {0x0014u, 0x0014u},
-    {0x0015u, 0x0015u},
-    {0x0016u, 0x0016u},
-    {0x0017u, 0x0017u},
-    {0x0018u, 0x0018u},
-    {0x0019u, 0x0019u},
-    {0x001Au, 0x001Au},
-    {0x001Bu, 0x001Bu},
-    {0x001Cu, 0x001Cu},
-    {0x001Du, 0x001Du},
-    {0x001Eu, 0x001Eu},
-    {0x001Fu, 0x001Fu},
-    {0x0020u, 0x0020u},
-    {0x0021u, 0x0021u},
-    {0x0022u, 0x0022u},
-    {0x0023u, 0x0023u},
-    {0x0024u, 0x0024u},
-    {0x0025u, 0x0025u},
-    {0x0026u, 0x0026u},
-    {0x0027u, 0x0027u},
-    {0x0028u, 0x0028u},
-    {0x0029u, 0x0029u},
-    {0x002Au, 0x002Au},
-    {0x0070u, 0x0070u},
-    {0x0071u, 0x0071u},
-    {0x0072u, 0x0072u},
-    {0x0073u, 0x0073u},
-    {0x0074u, 0x0074u},
-    {0x0075u, 0x0075u},
-    {0x0076u, 0x0076u},
-    {0x0077u, 0x0077u},
-    {0x0078u, 0x0078u},
-    {0x0079u, 0x0079u},
-    {0x007Au, 0x007Au},
-    {0x007Bu, 0x007Bu},
-    {0x007Cu, 0x007Cu},
-    {0x007Du, 0x007Du},
-    {0x007Eu, 0x007Eu},
-    {0x007Fu, 0x007Fu},
-    {0x0080u, 0x0080u},
+ * Initial setup excludes all requested registers; remove entries manually as needed. */
+static const uint16_t kRs485ForwardExcludeRegs[] = {
+    0x0001u, 0x0002u, 0x0003u, 0x0004u, 0x0005u, 0x0006u, 0x0007u,
+    0x0008u, 0x0009u, 0x000Au, 0x000Bu, 0x000Cu, 0x000Du, 0x000Eu,
+    0x000Fu, 0x0010u, 0x0011u, 0x0012u, 0x0013u, 0x0014u, 0x0015u,
+    0x0016u, 0x0017u, 0x0018u, 0x0019u, 0x001Au, 0x001Bu, 0x001Cu,
+    0x001Du, 0x001Eu, 0x001Fu, 0x0020u, 0x0021u, 0x0022u, 0x0023u,
+    0x0024u, 0x0025u, 0x0026u, 0x0027u, 0x0028u, 0x0029u, 0x002Au,
+    0x0070u, 0x0071u, 0x0072u, 0x0073u, 0x0074u, 0x0075u, 0x0076u,
+    0x0077u, 0x0078u, 0x0079u, 0x007Au, 0x007Bu, 0x007Cu, 0x007Du,
+    0x007Eu, 0x007Fu, 0x0080u,
 };
 
 typedef struct {
@@ -274,9 +219,8 @@ static bool modbusIsExcludedRange(uint16_t start, uint16_t count)
     }
 
     for (size_t i = 0; i < (sizeof(kRs485ForwardExcludeRegs) / sizeof(kRs485ForwardExcludeRegs[0])); i++) {
-        uint32_t exStart = kRs485ForwardExcludeRegs[i].start;
-        uint32_t exEnd = kRs485ForwardExcludeRegs[i].end;
-        if (reqStart <= exEnd && reqEnd >= exStart) {
+        uint32_t reg = kRs485ForwardExcludeRegs[i];
+        if (reg >= reqStart && reg <= reqEnd) {
             return true;
         }
     }
@@ -517,7 +461,7 @@ void rs485BridgeEnable(void)
              "RS485 periodic snapshot enabled (%d ms)",
              MODBUS_DECODER_SNAPSHOT_PRINT_PERIOD_MS);
     ESP_LOGI(EXAMPLE_TAG,
-             "RS485 reg exclude ranges configured: %u",
+             "RS485 reg exclude entries configured: %u",
              (unsigned)(sizeof(kRs485ForwardExcludeRegs) / sizeof(kRs485ForwardExcludeRegs[0])));
     ESP_LOGI(EXAMPLE_TAG, "RS485 bridge enabled (RS485_1<->RS485_2)");
 }
