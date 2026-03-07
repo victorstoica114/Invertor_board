@@ -7,39 +7,36 @@
 extern "C" {
 #endif
 
-typedef struct {
-    const char *ifName;      // "RS485_1" / "RS485_2" etc.
-    uint32_t    gapUs;       // prag gap pentru delimitare cadru (ex: 5000 us)
+#define MODBUS_DECODER_SNAPSHOT_PRINT_PERIOD_MS 5000
+#define MODBUS_DECODER_CACHE_MAX_REGS 256
 
-    // buffer cadru curent
+typedef struct {
+    const char *ifName;
+    uint32_t    gapUs;
+
     uint8_t     buf[256];
     uint16_t    len;
 
-    // timing pentru gap
     int64_t     lastByteUs;
     bool        haveLastByte;
 
-    // ultima cerere (pt corelare cu raspuns)
     bool        lastReqValid;
     uint8_t     lastReqSlave;
     uint8_t     lastReqFunc;
     uint16_t    lastReqStart;
     uint16_t    lastReqCount;
     int64_t     lastReqUs;
+
+    uint16_t    cacheAddr[MODBUS_DECODER_CACHE_MAX_REGS];
+    uint16_t    cacheVal[MODBUS_DECODER_CACHE_MAX_REGS];
+    uint8_t     cacheValid[MODBUS_DECODER_CACHE_MAX_REGS];
+    int64_t     cacheTsUs[MODBUS_DECODER_CACHE_MAX_REGS];
 } modbusDecoder_t;
 
 void modbusDecoderInit(modbusDecoder_t *d, const char *ifName, uint32_t gapUs);
-
-/**
- * Feed bytes receptionați pe o interfață.
- * rxUs = timestamp în microsecunde (esp_timer_get_time()).
- */
 void modbusDecoderFeed(modbusDecoder_t *d, const uint8_t *data, int len, int64_t rxUs);
-
-/**
- * Forțează închiderea cadrului curent (dacă vrei, de ex. la stop).
- */
 void modbusDecoderFlush(modbusDecoder_t *d);
+void modbusDecoderPrintSnapshot(modbusDecoder_t *d);
 
 #ifdef __cplusplus
 }
