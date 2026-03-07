@@ -93,7 +93,8 @@ typedef struct {
 /* Exclusion list for forwarded Modbus register requests.
  * Initial setup excludes all registers; remove ranges manually as needed. */
 static const modbusRegRange_t kRs485ForwardExcludeRegs[] = {
-    {0x0000u, 0xFFFFu},
+    {0x0001u, 0x002Au},
+    {0x0070u, 0x0080u},
 };
 
 typedef struct {
