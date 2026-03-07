@@ -10,6 +10,8 @@
 #define EXAMPLE_TAG "SNIFFER_BRIDGE"
 #endif
 
+#define REG_RAW_VALUES   0   // 1 = afișează toate registrele brute, 0 = doar sumar compact
+
 // ---------- Helpers ----------
 static uint16_t be16(const uint8_t *p)
 {
@@ -99,7 +101,6 @@ static void printResp03(modbusDecoder_t *d,
     uint8_t byteCount = frame[2];
     int dataLen = (int)byteCount;
 
-    // Basic sanity:
     // total length should be: 3 + dataLen + 2(CRC)
     if (3 + dataLen + 2 > len) {
         ESP_LOGI(EXAMPLE_TAG, "RESP on %s: length mismatch (len=%d byteCount=%u)",
@@ -115,81 +116,167 @@ static void printResp03(modbusDecoder_t *d,
     if (d->lastReqValid && d->lastReqSlave == slave && d->lastReqFunc == func) {
         startBase = d->lastReqStart;
         ESP_LOGI(EXAMPLE_TAG,
-                 "RESP on %s: slave=%u func=0x%02X start=0x%04X regs[%d] crc=%s",
+                 "RESP on %s: slave=%u func=0x%02X start=0x%04X regs=%d crc=%s",
                  d->ifName, (unsigned)slave, (unsigned)func,
                  (unsigned)startBase, regCount, crcOk ? "OK" : "BAD");
     } else {
         ESP_LOGI(EXAMPLE_TAG,
-                 "RESP on %s: slave=%u func=0x%02X regs[%d] crc=%s",
+                 "RESP on %s: slave=%u func=0x%02X regs=%d crc=%s",
                  d->ifName, (unsigned)slave, (unsigned)func,
                  regCount, crcOk ? "OK" : "BAD");
     }
 
-    // If CRC bad, still print generic values (optional)
-    // Dacă vrei să nu mai vezi gunoi, poți pune "if (!crcOk) return;" aici.
+    // dacă vrei să ignori complet cadrele corupte:
     // if (!crcOk) return;
 
-    // Pretty decode for known ranges
     bool isCellBlock = (startBase != 0xFFFF && startBase == 0x0070);
     bool isMainBlock = (startBase != 0xFFFF && startBase == 0x0010);
+    bool isInfoBlock = (startBase != 0xFFFF && startBase == 0x0001);
 
-    // For cell block: compute stats
-    uint16_t minMv = 0xFFFF, maxMv = 0;
-    uint32_t sumMv = 0;
-    uint16_t minCell = 0, maxCell = 0;
+    // -------------------- CELL BLOCK (0x0070) --------------------
+    if (isCellBlock) {
+        // Așteptare tipică: 17 regs (primele 16 sunt celule, ultimul e 0 / rezervat)
+        // Noi considerăm celule doar pentru i=0..15
+        uint16_t minMv = 0xFFFF, maxMv = 0;
+        uint32_t sumMv = 0;
+        uint16_t minCell = 0, maxCell = 0;
 
+        int cellRegs = regCount;
+        if (cellRegs > 16) cellRegs = 16;
+
+        for (int i = 0; i < cellRegs; i++) {
+            uint16_t mv = be16(&data[i * 2]);
+            uint16_t addr = (uint16_t)(startBase + i);
+            uint16_t cellIndex = (uint16_t)(i + 1);
+
+            if (mv < minMv) { minMv = mv; minCell = cellIndex; }
+            if (mv > maxMv) { maxMv = mv; maxCell = cellIndex; }
+            sumMv += mv;
+
+            ESP_LOGI(EXAMPLE_TAG,
+                     "  Cell%02u @0x%04X = %.3f V (%u mV)",
+                     (unsigned)cellIndex, (unsigned)addr,
+                     (double)mv / 1000.0, (unsigned)mv);
+        }
+
+        if (cellRegs > 0) {
+            double avgV   = (double)sumMv / (double)cellRegs / 1000.0;
+            double minV   = (double)minMv / 1000.0;
+            double maxV   = (double)maxMv / 1000.0;
+            double deltaV = (double)(maxMv - minMv) / 1000.0;
+
+            ESP_LOGI(EXAMPLE_TAG,
+                     "  Cells summary: min=Cell%u %.3fV  max=Cell%u %.3fV  delta=%.3fV  avg=%.3fV",
+                     (unsigned)minCell, minV,
+                     (unsigned)maxCell, maxV,
+                     deltaV, avgV);
+        }
+
+        // dacă mai există regs peste 16, le arătăm generic (ex: reg rezervat)
+        for (int i = 16; i < regCount; i++) {
+            uint16_t v = be16(&data[i * 2]);
+            uint16_t addr = (uint16_t)(startBase + i);
+            ESP_LOGI(EXAMPLE_TAG,
+                     "  reg[0x%04X] = 0x%04X (%u)",
+                     (unsigned)addr, (unsigned)v, (unsigned)v);
+        }
+
+        return;
+    }
+
+    // -------------------- MAIN/STATUS BLOCK (0x0010) --------------------
+    if (isMainBlock) {
+
+    bool socValid = false, packValid = false, tempValid = false;
+    bool minCellValid = false, maxCellValid = false;
+    bool minIdxValid = false, maxIdxValid = false;
+
+    uint16_t socPct = 0;
+    uint16_t packCv = 0;
+    int16_t  tempC  = 0;
+
+    uint16_t minCellMv = 0;
+    uint16_t maxCellMv = 0;
+    uint16_t minCellIdx = 0;
+    uint16_t maxCellIdx = 0;
+
+    for (int i = 0; i < regCount; i++) {
+        uint16_t v = be16(&data[i * 2]);
+        uint16_t addr = (uint16_t)(startBase + i);
+
+        switch (addr) {
+
+            case 0x0020: socPct = v; socValid = true; break;
+            case 0x0021: packCv = v; packValid = true; break;
+            case 0x0018: tempC  = (int16_t)v; tempValid = true; break;
+
+            case 0x0025: maxCellMv = v; maxCellValid = true; break;
+            case 0x0026: minCellMv = v; minCellValid = true; break;
+            case 0x0027: maxCellIdx = v; maxIdxValid = true; break;
+            case 0x0028: minCellIdx = v; minIdxValid = true; break;
+
+#if REG_RAW_VALUES
+            default:
+                ESP_LOGI(EXAMPLE_TAG,
+                         "  reg[0x%04X] = 0x%04X (%u)",
+                         (unsigned)addr, (unsigned)v, (unsigned)v);
+                break;
+#endif
+        }
+    }
+
+    // ----- Linie compactă -----
+    if (packValid && socValid && tempValid &&
+        minCellValid && maxCellValid &&
+        minIdxValid && maxIdxValid)
+    {
+        double packV  = (double)packCv / 100.0;
+        double minV   = (double)minCellMv / 1000.0;
+        double maxV   = (double)maxCellMv / 1000.0;
+        double deltaV = (double)(maxCellMv - minCellMv) / 1000.0;
+
+        ESP_LOGI(EXAMPLE_TAG,
+                 "BMS: %.2fV | SOC %u%% | %dC | Cmin %.3fV(C%u) | Cmax %.3fV(C%u) | Δ %.3fV",
+                 packV,
+                 socPct,
+                 tempC,
+                 minV, minCellIdx,
+                 maxV, maxCellIdx,
+                 deltaV);
+    }
+
+    return;
+    }
+
+        if (isInfoBlock) {
+        // aici de obicei sunt flags / status words / placeholders (gen 0xF0FF, 0xFFFF)
+        // nu avem mapare confirmată încă, deci afișăm compact + opțional raw.
+        uint16_t f0 = be16(&data[0]);  // reg 0x0001
+        uint16_t f1 = be16(&data[2]);  // reg 0x0002
+        uint16_t f2 = be16(&data[4]);  // reg 0x0003
+        uint16_t f3 = be16(&data[6]);  // reg 0x0004
+
+        ESP_LOGI(EXAMPLE_TAG,
+                "BMS-INFO: r0001..0004 = %04X %04X %04X %04X",
+                (unsigned)f0, (unsigned)f1, (unsigned)f2, (unsigned)f3);
+
+    #if REG_RAW_VALUES
+        for (int i = 0; i < regCount; i++) {
+            uint16_t v = be16(&data[i * 2]);
+            uint16_t addr = (uint16_t)(startBase + i);
+            ESP_LOGI(EXAMPLE_TAG,
+                    "  reg[0x%04X] = 0x%04X (%u)",
+                    (unsigned)addr, (unsigned)v, (unsigned)v);
+        }
+    #endif
+        return;
+    }
+
+    // -------------------- FALLBACK: unknown block --------------------
     for (int i = 0; i < regCount; i++) {
         uint16_t v = be16(&data[i * 2]);
         uint16_t addr = (startBase != 0xFFFF) ? (uint16_t)(startBase + i) : 0xFFFF;
 
-        if (isCellBlock) {
-            // Treat as mV
-            uint16_t cellIndex = (uint16_t)(i + 1);
-
-            // stats
-            if (v < minMv) { minMv = v; minCell = cellIndex; }
-            if (v > maxMv) { maxMv = v; maxCell = cellIndex; }
-            sumMv += v;
-
-            ESP_LOGI(EXAMPLE_TAG,
-                     "  cell[%02u] @0x%04X = %u mV (%.3f V)",
-                     (unsigned)cellIndex, (unsigned)addr,
-                     (unsigned)v, (double)v / 1000.0);
-            continue;
-        }
-
-        if (isMainBlock) {
-            // Aici punem câteva corelări confirmate de capturi:
-            // addr 0x0015 = 100 -> SOC%
-            // addr 0x0016 = 6976 -> Pack Voltage in cV => 69.76V
-            // addr 0x0018 = 25 -> Temp °C
-            if (addr == 0x0015) {
-                ESP_LOGI(EXAMPLE_TAG,
-                         "  reg[0x%04X] SOC = %u %% (raw=0x%04X)",
-                         (unsigned)addr, (unsigned)v, (unsigned)v);
-                continue;
-            }
-            if (addr == 0x0016) {
-                ESP_LOGI(EXAMPLE_TAG,
-                         "  reg[0x%04X] PackVoltage = %.2f V (raw=%u cV)",
-                         (unsigned)addr, (double)v / 100.0, (unsigned)v);
-                continue;
-            }
-            if (addr == 0x0018) {
-                ESP_LOGI(EXAMPLE_TAG,
-                         "  reg[0x%04X] Temp = %d C (raw=0x%04X)",
-                         (unsigned)addr, (int16_t)v, (unsigned)v);
-                continue;
-            }
-
-            // generic with address
-            ESP_LOGI(EXAMPLE_TAG,
-                     "  reg[0x%04X] = 0x%04X (%u)",
-                     (unsigned)addr, (unsigned)v, (unsigned)v);
-            continue;
-        }
-
-        // Fallback generic if we don't know startBase
         if (addr != 0xFFFF) {
             ESP_LOGI(EXAMPLE_TAG,
                      "  reg[0x%04X] = 0x%04X (%u)",
@@ -199,19 +286,6 @@ static void printResp03(modbusDecoder_t *d,
                      "  reg[%02d] = 0x%04X (%u)",
                      i, (unsigned)v, (unsigned)v);
         }
-    }
-
-    if (isCellBlock && regCount > 0) {
-        double avgV = (double)sumMv / (double)regCount / 1000.0;
-        double minV = (double)minMv / 1000.0;
-        double maxV = (double)maxMv / 1000.0;
-        double deltaV = (double)(maxMv - minMv) / 1000.0;
-
-        ESP_LOGI(EXAMPLE_TAG,
-                 "  Cells: min=cell%u %.3fV  max=cell%u %.3fV  delta=%.3fV  avg=%.3fV",
-                 (unsigned)minCell, minV,
-                 (unsigned)maxCell, maxV,
-                 deltaV, avgV);
     }
 }
 
