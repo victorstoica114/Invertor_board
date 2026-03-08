@@ -51,7 +51,6 @@ const uint16_t g_rs485ForwardExcludeRegs[] = {
     0x000Du,
     0x000Eu,
     0x000Fu,
-
     GROWATT_MB_REG_MAIN_START,
     0x0011u,
     0x0012u,
@@ -79,7 +78,6 @@ const uint16_t g_rs485ForwardExcludeRegs[] = {
     GROWATT_MB_REG_CELL_MIN_IDX,
     0x0029u,
     GROWATT_MB_REG_MAIN_END,
-
     GROWATT_MB_REG_CELL01_MV,
     GROWATT_MB_REG_CELL02_MV,
     GROWATT_MB_REG_CELL03_MV,
