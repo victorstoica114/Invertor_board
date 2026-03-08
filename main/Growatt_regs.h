@@ -50,11 +50,15 @@
 #define GROWATT_MB_REG_STATUS_FLAGS            0x0013u /* raw status/flags (vendor specific) */
 #define GROWATT_MB_REG_SOC_PCT                 0x0015u /* SOC (%) */
 #define GROWATT_MB_REG_PACK_V_CV               0x0016u /* pack voltage (centivolts) */
+#define GROWATT_MB_REG_PACK_I_ABS_CA_TENTATIVE 0x0017u /* tentative: |pack current| (0.01A) */
 #define GROWATT_MB_REG_TEMP_C                  0x0018u /* pack temperature (C) */
+#define GROWATT_MB_REG_CYCLE_COUNT_TENTATIVE   0x0019u /* tentative: cycle count */
 #define GROWATT_MB_REG_REMAIN_CAP_CAH          0x001Au /* remaining capacity (0.01Ah) */
 #define GROWATT_MB_REG_FULL_CAP_CAH            0x001Bu /* full capacity / FCC (0.01Ah) */
 #define GROWATT_MB_REG_SOH_PCT                 0x0020u /* SOH (%) */
 #define GROWATT_MB_REG_CV_TARGET_CV            0x0021u /* charge-voltage target (centivolts) */
+#define GROWATT_MB_REG_ICHG_LIM_CA_TENTATIVE   0x0022u /* tentative: charge current limit (0.01A) */
+#define GROWATT_MB_REG_IDIS_LIM_CA_TENTATIVE   0x0023u /* tentative: discharge current limit (0.01A) */
 #define GROWATT_MB_REG_CELL_MAX_MV             0x0025u /* max cell voltage (mV) */
 #define GROWATT_MB_REG_CELL_MIN_MV             0x0026u /* min cell voltage (mV) */
 #define GROWATT_MB_REG_CELL_MAX_IDX            0x0027u /* cell index of max voltage */

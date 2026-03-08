@@ -228,6 +228,10 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
         bool cvTargetValid = false;
         bool remainCapValid = false;
         bool fullCapValid = false;
+        bool packAbsIValid = false;
+        bool cycleCountValid = false;
+        bool ichgLimValid = false;
+        bool idisLimValid = false;
         bool minCellValid = false;
         bool maxCellValid = false;
         bool minIdxValid = false;
@@ -240,6 +244,10 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
         uint16_t cvTargetCv = 0;
         uint16_t remainCapCah = 0;
         uint16_t fullCapCah = 0;
+        uint16_t packAbsICa = 0;
+        uint16_t cycleCount = 0;
+        uint16_t ichgLimCa = 0;
+        uint16_t idisLimCa = 0;
 
         uint16_t minCellMv = 0;
         uint16_t maxCellMv = 0;
@@ -279,6 +287,22 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
                 case GROWATT_MB_REG_FULL_CAP_CAH:
                     fullCapCah = v;
                     fullCapValid = true;
+                    break;
+                case GROWATT_MB_REG_PACK_I_ABS_CA_TENTATIVE:
+                    packAbsICa = v;
+                    packAbsIValid = true;
+                    break;
+                case GROWATT_MB_REG_CYCLE_COUNT_TENTATIVE:
+                    cycleCount = v;
+                    cycleCountValid = true;
+                    break;
+                case GROWATT_MB_REG_ICHG_LIM_CA_TENTATIVE:
+                    ichgLimCa = v;
+                    ichgLimValid = true;
+                    break;
+                case GROWATT_MB_REG_IDIS_LIM_CA_TENTATIVE:
+                    idisLimCa = v;
+                    idisLimValid = true;
                     break;
                 case GROWATT_MB_REG_CELL_MAX_MV:
                     maxCellMv = v;
@@ -344,6 +368,19 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
             } else {
                 MODBUS_RUNTIME_LOGI("BMS-EXT: SOH %u%%", (unsigned)sohPct);
             }
+        }
+
+        if (packAbsIValid) {
+            MODBUS_RUNTIME_LOGI("BMS-TENT: |Ipack| %.2fA", (double)packAbsICa / 100.0);
+        }
+        if (cycleCountValid) {
+            MODBUS_RUNTIME_LOGI("BMS-TENT: Cycles %u", (unsigned)cycleCount);
+        }
+        if (ichgLimValid || idisLimValid) {
+            MODBUS_RUNTIME_LOGI(
+                     "BMS-TENT: IchgLim %.2fA | IdisLim %.2fA",
+                     ichgLimValid ? ((double)ichgLimCa / 100.0) : -1.0,
+                     idisLimValid ? ((double)idisLimCa / 100.0) : -1.0);
         }
 
         return;
@@ -539,6 +576,10 @@ static void printSnapshotDecoded(modbusDecoder_t *d)
     uint16_t cvTargetCv = 0;
     uint16_t remainCapCah = 0;
     uint16_t fullCapCah = 0;
+    uint16_t packAbsICa = 0;
+    uint16_t cycleCount = 0;
+    uint16_t ichgLimCa = 0;
+    uint16_t idisLimCa = 0;
 
     if (cacheGetReg(d, GROWATT_MB_REG_SOC_PCT, &soc) &&
         cacheGetReg(d, GROWATT_MB_REG_PACK_V_CV, &packCv) &&
@@ -576,6 +617,28 @@ static void printSnapshotDecoded(modbusDecoder_t *d)
                  ifn,
                  (double)cvTargetCv / 100.0,
                  (unsigned)soh);
+    }
+
+    if (cacheGetReg(d, GROWATT_MB_REG_PACK_I_ABS_CA_TENTATIVE, &packAbsICa)) {
+        ESP_LOGI(EXAMPLE_TAG,
+                 "%s BMS-TENT: |Ipack| %.2fA",
+                 ifn,
+                 (double)packAbsICa / 100.0);
+    }
+    if (cacheGetReg(d, GROWATT_MB_REG_CYCLE_COUNT_TENTATIVE, &cycleCount)) {
+        ESP_LOGI(EXAMPLE_TAG,
+                 "%s BMS-TENT: Cycles %u",
+                 ifn,
+                 (unsigned)cycleCount);
+    }
+    bool hasIchgLim = cacheGetReg(d, GROWATT_MB_REG_ICHG_LIM_CA_TENTATIVE, &ichgLimCa);
+    bool hasIdisLim = cacheGetReg(d, GROWATT_MB_REG_IDIS_LIM_CA_TENTATIVE, &idisLimCa);
+    if (hasIchgLim || hasIdisLim) {
+        ESP_LOGI(EXAMPLE_TAG,
+                 "%s BMS-TENT: IchgLim %.2fA | IdisLim %.2fA",
+                 ifn,
+                 hasIchgLim ? ((double)ichgLimCa / 100.0) : -1.0,
+                 hasIdisLim ? ((double)idisLimCa / 100.0) : -1.0);
     }
 
     for (int i = 0; i < 16; i++) {
@@ -679,6 +742,5 @@ void modbusDecoderPrintSnapshot(modbusDecoder_t *d)
 
     ESP_LOGI(EXAMPLE_TAG, "%s SNAPSHOT END", ifn);
 }
-
 
 
