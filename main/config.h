@@ -52,10 +52,29 @@
 #define CAN_FORWARD_ENABLE 0
 #define RS485_FORWARD_ENABLE 0
 
-/* --- RS485 -> CAN translator (uses RS485 SOC/TEMP to synthesize CAN 0x322) --- */
+/* --- RS485 -> CAN translator (synthesizes Growatt CAN telemetry from RS485 cache) --- */
 #define RS485_CAN_322_TRANSLATOR_ENABLE 1
 #define RS485_CAN_322_TX_PERIOD_MS 200
+#define RS485_CAN_BRIDGE_TX_LOG_EVERY_N 10
 
+/* Fallback values used when RS485 cache is missing/partial. */
+#define RS485_CAN_BRIDGE_USE_FALLBACK 1
+#define RS485_CAN_BRIDGE_FALLBACK_SOC_PCT       99u
+#define RS485_CAN_BRIDGE_FALLBACK_TEMP_C        25
+#define RS485_CAN_BRIDGE_FALLBACK_PACK_V_CV     6909u
+#define RS485_CAN_BRIDGE_FALLBACK_PACK_I_0P1    0
+#define RS485_CAN_BRIDGE_FALLBACK_SOH_PCT       100u
+#define RS485_CAN_BRIDGE_FALLBACK_RM_10MAH      3950u
+#define RS485_CAN_BRIDGE_FALLBACK_FCC_10MAH     4000u
+#define RS485_CAN_BRIDGE_FALLBACK_CYCLE_COUNT   0u
+#define RS485_CAN_BRIDGE_FALLBACK_CELL_MAX_MV   4388u
+#define RS485_CAN_BRIDGE_FALLBACK_CELL_MIN_MV   4253u
+#define RS485_CAN_BRIDGE_FALLBACK_CELL_MAX_IDX  3u
+#define RS485_CAN_BRIDGE_FALLBACK_CELL_MIN_IDX  12u
+#define RS485_CAN_BRIDGE_FALLBACK_FLAGS_319     0x9Cu
+#define RS485_CAN_BRIDGE_FALLBACK_ADDR_319      0u
+#define RS485_CAN_BRIDGE_FALLBACK_TEMP_SENSOR_MAX 1u
+#define RS485_CAN_BRIDGE_FALLBACK_TEMP_SENSOR_MIN 1u
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -87,4 +106,5 @@ void led_blink_task(void *pvParameters);
 #ifdef __cplusplus
 }
 #endif
+
 
