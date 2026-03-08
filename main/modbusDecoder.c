@@ -224,6 +224,10 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
         bool socValid = false;
         bool packValid = false;
         bool tempValid = false;
+        bool sohValid = false;
+        bool cvTargetValid = false;
+        bool remainCapValid = false;
+        bool fullCapValid = false;
         bool minCellValid = false;
         bool maxCellValid = false;
         bool minIdxValid = false;
@@ -232,6 +236,10 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
         uint16_t socPct = 0;
         uint16_t packCv = 0;
         int16_t tempC = 0;
+        uint16_t sohPct = 0;
+        uint16_t cvTargetCv = 0;
+        uint16_t remainCapCah = 0;
+        uint16_t fullCapCah = 0;
 
         uint16_t minCellMv = 0;
         uint16_t maxCellMv = 0;
@@ -255,6 +263,22 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
                 case GROWATT_MB_REG_TEMP_C:
                     tempC = (int16_t)v;
                     tempValid = true;
+                    break;
+                case GROWATT_MB_REG_SOH_PCT:
+                    sohPct = v;
+                    sohValid = true;
+                    break;
+                case GROWATT_MB_REG_CV_TARGET_CV:
+                    cvTargetCv = v;
+                    cvTargetValid = true;
+                    break;
+                case GROWATT_MB_REG_REMAIN_CAP_CAH:
+                    remainCapCah = v;
+                    remainCapValid = true;
+                    break;
+                case GROWATT_MB_REG_FULL_CAP_CAH:
+                    fullCapCah = v;
+                    fullCapValid = true;
                     break;
                 case GROWATT_MB_REG_CELL_MAX_MV:
                     maxCellMv = v;
@@ -300,6 +324,26 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
                      maxV,
                      maxCellIdx,
                      deltaV);
+        }
+
+        if (remainCapValid && fullCapValid) {
+            MODBUS_RUNTIME_LOGI(
+                     "BMS-CAP: RM %.2fAh | FCC %.2fAh",
+                     (double)remainCapCah / 100.0,
+                     (double)fullCapCah / 100.0);
+        }
+
+        if (cvTargetValid || sohValid) {
+            if (cvTargetValid && sohValid) {
+                MODBUS_RUNTIME_LOGI(
+                         "BMS-EXT: CVtarget %.2fV | SOH %u%%",
+                         (double)cvTargetCv / 100.0,
+                         (unsigned)sohPct);
+            } else if (cvTargetValid) {
+                MODBUS_RUNTIME_LOGI("BMS-EXT: CVtarget %.2fV", (double)cvTargetCv / 100.0);
+            } else {
+                MODBUS_RUNTIME_LOGI("BMS-EXT: SOH %u%%", (unsigned)sohPct);
+            }
         }
 
         return;
@@ -491,6 +535,10 @@ static void printSnapshotDecoded(modbusDecoder_t *d)
     uint16_t cminMv = 0;
     uint16_t cmaxIdx = 0;
     uint16_t cminIdx = 0;
+    uint16_t soh = 0;
+    uint16_t cvTargetCv = 0;
+    uint16_t remainCapCah = 0;
+    uint16_t fullCapCah = 0;
 
     if (cacheGetReg(d, GROWATT_MB_REG_SOC_PCT, &soc) &&
         cacheGetReg(d, GROWATT_MB_REG_PACK_V_CV, &packCv) &&
@@ -510,6 +558,24 @@ static void printSnapshotDecoded(modbusDecoder_t *d)
                  (double)cmaxMv / 1000.0,
                  (unsigned)cmaxIdx,
                  (double)(cmaxMv - cminMv) / 1000.0);
+    }
+
+    if (cacheGetReg(d, GROWATT_MB_REG_REMAIN_CAP_CAH, &remainCapCah) &&
+        cacheGetReg(d, GROWATT_MB_REG_FULL_CAP_CAH, &fullCapCah)) {
+        ESP_LOGI(EXAMPLE_TAG,
+                 "%s BMS-CAP: RM %.2fAh | FCC %.2fAh",
+                 ifn,
+                 (double)remainCapCah / 100.0,
+                 (double)fullCapCah / 100.0);
+    }
+
+    if (cacheGetReg(d, GROWATT_MB_REG_CV_TARGET_CV, &cvTargetCv) &&
+        cacheGetReg(d, GROWATT_MB_REG_SOH_PCT, &soh)) {
+        ESP_LOGI(EXAMPLE_TAG,
+                 "%s BMS-EXT: CVtarget %.2fV | SOH %u%%",
+                 ifn,
+                 (double)cvTargetCv / 100.0,
+                 (unsigned)soh);
     }
 
     for (int i = 0; i < 16; i++) {
@@ -613,4 +679,6 @@ void modbusDecoderPrintSnapshot(modbusDecoder_t *d)
 
     ESP_LOGI(EXAMPLE_TAG, "%s SNAPSHOT END", ifn);
 }
+
+
 

@@ -47,14 +47,21 @@
 #define GROWATT_MB_REG_MAIN_START              0x0010u
 #define GROWATT_MB_REG_MAIN_END                0x002Au
 
-#define GROWATT_MB_REG_MAIN_RAW_0013           0x0013u /* raw status/flag word (observed) */
+#define GROWATT_MB_REG_STATUS_FLAGS            0x0013u /* raw status/flags (vendor specific) */
+#define GROWATT_MB_REG_SOC_PCT                 0x0015u /* SOC (%) */
+#define GROWATT_MB_REG_PACK_V_CV               0x0016u /* pack voltage (centivolts) */
 #define GROWATT_MB_REG_TEMP_C                  0x0018u /* pack temperature (C) */
-#define GROWATT_MB_REG_SOC_PCT                 0x0020u /* SOC (%) */
-#define GROWATT_MB_REG_PACK_V_CV               0x0021u /* pack voltage in centivolts */
+#define GROWATT_MB_REG_REMAIN_CAP_CAH          0x001Au /* remaining capacity (0.01Ah) */
+#define GROWATT_MB_REG_FULL_CAP_CAH            0x001Bu /* full capacity / FCC (0.01Ah) */
+#define GROWATT_MB_REG_SOH_PCT                 0x0020u /* SOH (%) */
+#define GROWATT_MB_REG_CV_TARGET_CV            0x0021u /* charge-voltage target (centivolts) */
 #define GROWATT_MB_REG_CELL_MAX_MV             0x0025u /* max cell voltage (mV) */
 #define GROWATT_MB_REG_CELL_MIN_MV             0x0026u /* min cell voltage (mV) */
 #define GROWATT_MB_REG_CELL_MAX_IDX            0x0027u /* cell index of max voltage */
 #define GROWATT_MB_REG_CELL_MIN_IDX            0x0028u /* cell index of min voltage */
+
+/* Backward compatibility name kept for existing code/config references. */
+#define GROWATT_MB_REG_MAIN_RAW_0013           GROWATT_MB_REG_STATUS_FLAGS
 
 /* Cell voltage block: start 0x0070, count 0x0011 (0x0070..0x0080) */
 #define GROWATT_MB_REG_CELL_BASE               0x0070u
@@ -81,3 +88,4 @@
 #define GROWATT_MB_REG_CELL14_MV               GROWATT_MB_REG_CELL_N(14u)
 #define GROWATT_MB_REG_CELL15_MV               GROWATT_MB_REG_CELL_N(15u)
 #define GROWATT_MB_REG_CELL16_MV               GROWATT_MB_REG_CELL_N(16u)
+
