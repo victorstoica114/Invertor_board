@@ -2,6 +2,7 @@
 #include "config.h"
 #include "modbusDecoder.h"
 #include "CAN_Decoder.h"
+#include "rs485_can_bridge.h"
 
 #include <inttypes.h>
 #include <stdbool.h>
@@ -34,6 +35,7 @@ typedef struct {
     twai_handle_t rxBus;
     twai_handle_t txBus;
     bool          applyExcludeList;
+    bool          forwardEnabled;
 } canBridgeCtx_t;
 
 static void canPeriodicSnapshotTask(void *pv)
@@ -62,6 +64,9 @@ static void canBridgeTask(void *pv)
 #endif
             canDecoderOnFrame(ctx->rxName, &rx);
 
+            if (!ctx->forwardEnabled) {
+                continue;
+            }
             if (ctx->applyExcludeList && canIdExcludedToInverter((uint32_t)rx.identifier)) {
                 continue;
             }
@@ -87,6 +92,7 @@ typedef struct {
     uart_port_t txUart;
     gpio_num_t  txDirPin;
     bool        applyRegExcludeList;
+    bool        forwardEnabled;
 } rs485BridgeCtx_t;
 
 static modbusDecoder_t gRsDec1;
@@ -373,6 +379,10 @@ static bool rs485SanitizeResponseToInverter(const rs485BridgeCtx_t *ctx,
 }
 static void rs485ForwardFrame(rs485BridgeCtx_t *ctx, const uint8_t *frame, int len)
 {
+    if (!ctx->forwardEnabled) {
+        return;
+    }
+
     uint8_t func = 0;
     uint16_t start = 0;
     uint16_t count = 0;
@@ -497,12 +507,14 @@ void canBridgeEnable(void)
     can12.rxBus = canGetBus0();
     can12.txBus = canGetBus1();
     can12.applyExcludeList = true;
+    can12.forwardEnabled = CAN_FORWARD_ENABLE;
 
     can21.rxName = "CAN2";
     can21.txName = "CAN1";
     can21.rxBus = canGetBus1();
     can21.txBus = canGetBus0();
     can21.applyExcludeList = false;
+    can21.forwardEnabled = CAN_FORWARD_ENABLE;
 
     xTaskCreate(canBridgeTask, "can1_to_can2", 4096, &can12, 10, NULL);
     xTaskCreate(canBridgeTask, "can2_to_can1", 4096, &can21, 10, NULL);
@@ -511,7 +523,9 @@ void canBridgeEnable(void)
     ESP_LOGI(EXAMPLE_TAG,
              "CAN periodic snapshot enabled (%d ms)",
              CAN_DECODER_SNAPSHOT_PRINT_PERIOD_MS);
-    ESP_LOGI(EXAMPLE_TAG, "CAN bridge enabled (CAN1<->CAN2)");
+    ESP_LOGI(EXAMPLE_TAG,
+             "CAN bridge enabled (CAN1<->CAN2), forward=%s",
+             CAN_FORWARD_ENABLE ? "ON" : "OFF");
 }
 
 void rs485BridgeEnable(void)
@@ -525,6 +539,7 @@ void rs485BridgeEnable(void)
     rs12.txUart = rs485GetUart2();
     rs12.txDirPin = rs485GetDir2();
     rs12.applyRegExcludeList = true;
+    rs12.forwardEnabled = RS485_FORWARD_ENABLE;
 
     rs21.rxName = "RS485_2";
     rs21.txName = "RS485_1";
@@ -532,6 +547,7 @@ void rs485BridgeEnable(void)
     rs21.txUart = rs485GetUart1();
     rs21.txDirPin = rs485GetDir1();
     rs21.applyRegExcludeList = true;
+    rs21.forwardEnabled = RS485_FORWARD_ENABLE;
 
     xTaskCreate(rs485BridgeTask, "rs485_1_to_2", 4096, &rs12, 9, NULL);
     xTaskCreate(rs485BridgeTask, "rs485_2_to_1", 4096, &rs21, 9, NULL);
@@ -543,5 +559,13 @@ void rs485BridgeEnable(void)
     ESP_LOGI(EXAMPLE_TAG,
              "RS485 reg exclude entries configured: %u",
              (unsigned)(g_rs485ForwardExcludeRegsCount));
-    ESP_LOGI(EXAMPLE_TAG, "RS485 bridge enabled (RS485_1<->RS485_2)");
+    ESP_LOGI(EXAMPLE_TAG,
+             "RS485 bridge enabled (RS485_1<->RS485_2), forward=%s",
+             RS485_FORWARD_ENABLE ? "ON" : "OFF");
+
+    rs485Can322BridgeEnable(&gRsDec1, canGetBus1(), "CAN2");
 }
+
+
+
+

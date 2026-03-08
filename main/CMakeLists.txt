@@ -5,6 +5,7 @@ idf_component_register(
         "bridge.c"
         "CAN_Decoder.c"
         "modbusDecoder.c"
+        "rs485_can_bridge.c"
         # "modbusResp.c"
     INCLUDE_DIRS
         "."

@@ -48,6 +48,14 @@
 #define MODBUS_DECODER_SNAPSHOT_ONLY 1
 #define RS485_FORWARD_VERBOSE_LOGS 0
 
+/* --- Bridge mode switches --- */
+#define CAN_FORWARD_ENABLE 0
+#define RS485_FORWARD_ENABLE 0
+
+/* --- RS485 -> CAN translator (uses RS485 SOC/TEMP to synthesize CAN 0x322) --- */
+#define RS485_CAN_322_TRANSLATOR_ENABLE 1
+#define RS485_CAN_322_TX_PERIOD_MS 200
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -79,3 +87,4 @@ void led_blink_task(void *pvParameters);
 #ifdef __cplusplus
 }
 #endif
+
