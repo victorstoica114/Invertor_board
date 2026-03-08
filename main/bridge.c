@@ -134,6 +134,78 @@ static bool modbusCheckCrc(const uint8_t *frame, int len)
     return got == calc;
 }
 
+typedef struct {
+    const char *txName;
+    uart_port_t txUart;
+    gpio_num_t  txDirPin;
+    uint8_t     slaveId;
+    uint32_t    periodMs;
+} rs485BmsPollerCtx_t;
+
+static void modbusBuildReadReq(uint8_t slave, uint16_t start, uint16_t count, uint8_t out[8])
+{
+    out[0] = slave;
+    out[1] = 0x03u;
+    out[2] = (uint8_t)((start >> 8) & 0xFFu);
+    out[3] = (uint8_t)(start & 0xFFu);
+    out[4] = (uint8_t)((count >> 8) & 0xFFu);
+    out[5] = (uint8_t)(count & 0xFFu);
+
+    uint16_t crc = modbusCrc16(out, 6);
+    out[6] = (uint8_t)(crc & 0xFFu);
+    out[7] = (uint8_t)((crc >> 8) & 0xFFu);
+}
+
+static void rs485SendRawFrame(uart_port_t txUart, gpio_num_t txDirPin, const uint8_t *frame, int len)
+{
+    rs485SetTx(txDirPin, true);
+    uart_write_bytes(txUart, (const char *)frame, len);
+    uart_wait_tx_done(txUart, pdMS_TO_TICKS(100));
+    rs485SetTx(txDirPin, false);
+}
+
+static void rs485BmsPollerTask(void *pv)
+{
+    rs485BmsPollerCtx_t *ctx = (rs485BmsPollerCtx_t *)pv;
+    static const struct {
+        uint16_t start;
+        uint16_t count;
+        const char *name;
+    } kPollReqs[] = {
+        { GROWATT_MB_REG_MAIN_START, 0x001Bu, "main" },
+        { GROWATT_MB_REG_CELL_BASE,  0x0011u, "cells" },
+        { GROWATT_MB_REG_INFO_0001,  0x000Fu, "info" },
+    };
+
+    size_t reqIdx = 0;
+    uint32_t sentCount = 0;
+
+    while (1) {
+        uint8_t req[8];
+        const uint16_t start = kPollReqs[reqIdx].start;
+        const uint16_t count = kPollReqs[reqIdx].count;
+
+        modbusBuildReadReq(ctx->slaveId, start, count, req);
+        rs485SendRawFrame(ctx->txUart, ctx->txDirPin, req, sizeof(req));
+
+        sentCount++;
+#if RS485_BMS_POLL_LOG_EVERY_N > 0
+        if ((sentCount % RS485_BMS_POLL_LOG_EVERY_N) == 0u) {
+            ESP_LOGI(EXAMPLE_TAG,
+                     "RS485 poller TX on %s: slave=%u req=%s start=0x%04X count=0x%04X cnt=%lu",
+                     ctx->txName,
+                     (unsigned)ctx->slaveId,
+                     kPollReqs[reqIdx].name,
+                     (unsigned)start,
+                     (unsigned)count,
+                     (unsigned long)sentCount);
+        }
+#endif
+
+        reqIdx = (reqIdx + 1u) % (sizeof(kPollReqs) / sizeof(kPollReqs[0]));
+        vTaskDelay(pdMS_TO_TICKS(ctx->periodMs));
+    }
+}
 static bool modbusParseRequestRange(const uint8_t *frame,
                                     int len,
                                     uint8_t *funcOut,
@@ -532,6 +604,7 @@ void rs485BridgeEnable(void)
 {
     static rs485BridgeCtx_t rs12;
     static rs485BridgeCtx_t rs21;
+    static rs485BmsPollerCtx_t poller;
 
     rs12.rxName = "RS485_1";
     rs12.txName = "RS485_2";
@@ -563,9 +636,25 @@ void rs485BridgeEnable(void)
              "RS485 bridge enabled (RS485_1<->RS485_2), forward=%s",
              RS485_FORWARD_ENABLE ? "ON" : "OFF");
 
+#if RS485_BMS_POLLER_ENABLE
+#if RS485_FORWARD_ENABLE
+    ESP_LOGW(EXAMPLE_TAG,
+             "RS485 BMS poller disabled because RS485 forward is ON (avoid collisions)");
+#else
+    poller.txName = "RS485_1";
+    poller.txUart = rs485GetUart1();
+    poller.txDirPin = rs485GetDir1();
+    poller.slaveId = (uint8_t)RS485_BMS_SLAVE_ID;
+    poller.periodMs = RS485_BMS_POLL_PERIOD_MS;
+
+    xTaskCreate(rs485BmsPollerTask, "rs485_bms_poller", 3072, &poller, 8, NULL);
+    ESP_LOGI(EXAMPLE_TAG,
+             "RS485 BMS poller enabled (tx=%s slave=%u period=%ums)",
+             poller.txName,
+             (unsigned)poller.slaveId,
+             (unsigned)poller.periodMs);
+#endif
+#endif
+
     rs485Can322BridgeEnable(&gRsDec1, canGetBus1(), "CAN2");
 }
-
-
-
-

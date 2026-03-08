@@ -57,8 +57,14 @@
 #define RS485_CAN_322_TX_PERIOD_MS 200
 #define RS485_CAN_BRIDGE_TX_LOG_EVERY_N 10
 
+/* Active RS485 BMS poller: requests Modbus blocks directly from BMS on RS485_1. */
+#define RS485_BMS_POLLER_ENABLE 1
+#define RS485_BMS_SLAVE_ID 1u
+#define RS485_BMS_POLL_PERIOD_MS 200
+#define RS485_BMS_POLL_LOG_EVERY_N 25
+
 /* Fallback values used when RS485 cache is missing/partial. */
-#define RS485_CAN_BRIDGE_USE_FALLBACK 1
+#define RS485_CAN_BRIDGE_USE_FALLBACK 0
 #define RS485_CAN_BRIDGE_FALLBACK_SOC_PCT       99u
 #define RS485_CAN_BRIDGE_FALLBACK_TEMP_C        25
 #define RS485_CAN_BRIDGE_FALLBACK_PACK_V_CV     6909u
@@ -106,5 +112,3 @@ void led_blink_task(void *pvParameters);
 #ifdef __cplusplus
 }
 #endif
-
-
