@@ -226,22 +226,6 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
                      (unsigned)mv);
         }
 
-        if (cellRegs > 0) {
-            double avgV = (double)sumMv / (double)cellRegs / 1000.0;
-            double minV = (double)minMv / 1000.0;
-            double maxV = (double)maxMv / 1000.0;
-            double deltaV = (double)(maxMv - minMv) / 1000.0;
-
-            MODBUS_RUNTIME_LOGI(
-                     "  Cells summary: min=Cell%u %.3fV  max=Cell%u %.3fV  delta=%.3fV  avg=%.3fV",
-                     (unsigned)minCell,
-                     minV,
-                     (unsigned)maxCell,
-                     maxV,
-                     deltaV,
-                     avgV);
-        }
-
         for (int i = 16; i < regCount; i++) {
             uint16_t v = be16(&data[i * 2]);
             uint16_t addr = (uint16_t)(startBase + i);
@@ -596,18 +580,6 @@ static void printSnapshotDecoded(modbusDecoder_t *d)
                  (double)mv / 1000.0,
                  (unsigned)mv);
 #endif
-    }
-
-    if (cellCount > 0) {
-        ESP_LOGI(EXAMPLE_TAG,
-                 "%s Cells summary: min=Cell%u %.3fV  max=Cell%u %.3fV  delta=%.3fV  avg=%.3fV",
-                 ifn,
-                 (unsigned)minCell,
-                 (double)minMv / 1000.0,
-                 (unsigned)maxCell,
-                 (double)maxMv / 1000.0,
-                 (double)(maxMv - minMv) / 1000.0,
-                 (double)sumMv / (double)cellCount / 1000.0);
     }
 
 #if REG_RAW_VALUES
