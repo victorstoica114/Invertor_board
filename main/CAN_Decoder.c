@@ -1,6 +1,7 @@
 #include "CAN_Decoder.h"
 
 #include "config.h"
+#include "Growatt_regs.h"
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -8,11 +9,9 @@
 
 #include "esp_log.h"
 
-bool g_canDecoderShowRawFrames = 0;
-
 #define CAN_DECODER_IMMEDIATE_DECODE_LOG_ENABLE 0
-#define CAN_BMS_CACHE_ID_MIN 0x311u
-#define CAN_BMS_CACHE_ID_MAX 0x323u
+#define CAN_BMS_CACHE_ID_MIN GROWATT_CAN_CACHE_ID_MIN
+#define CAN_BMS_CACHE_ID_MAX GROWATT_CAN_CACHE_ID_MAX
 #define CAN_BMS_CACHE_COUNT (CAN_BMS_CACHE_ID_MAX - CAN_BMS_CACHE_ID_MIN + 1u)
 
 typedef struct {
@@ -274,7 +273,7 @@ static void decodeGrowattCanFrame(const char *ifname, const twai_message_t *m)
     const uint32_t id = (uint32_t)m->identifier;
 
     switch (id) {
-    case 0x311: {
+    case GROWATT_CAN_ID_311_STATUS_LIMITS: {
         /* Observed on JK/Growatt traffic: 0..1 status, 2..3 CV, 4..5 IchgLim, 6..7 IdisLim */
         const uint16_t st     = can_be16(&d[0]);
         const int16_t cv_0p1  = can_be16s(&d[2]);
@@ -299,7 +298,7 @@ static void decodeGrowattCanFrame(const char *ifname, const twai_message_t *m)
         break;
     }
 
-    case 0x312:
+    case GROWATT_CAN_ID_312_PROT_ALM:
         ESP_LOGI(EXAMPLE_TAG,
                  "CAN-%s 0x312: Prot1=0x%02X Prot2=0x%02X Alm1=0x%02X Alm2=0x%02X PackNo=%u PwrRed(H/L)=0x%02X%02X Rsv=0x%02X",
                  ifname,
@@ -313,7 +312,7 @@ static void decodeGrowattCanFrame(const char *ifname, const twai_message_t *m)
         logActiveBitNames(ifname, id, "PwrRedL", d[6], k312PwrRedLBits);
         break;
 
-    case 0x313: {
+    case GROWATT_CAN_ID_313_V_I_SOC_SOH: {
         const int16_t v_0p01 = can_be16s(&d[0]);
         const int16_t i_0p1  = can_be16s(&d[2]);
         const int16_t t_0p1  = can_be16s(&d[4]);
@@ -330,7 +329,7 @@ static void decodeGrowattCanFrame(const char *ifname, const twai_message_t *m)
         break;
     }
 
-    case 0x314: {
+    case GROWATT_CAN_ID_314_RM_FCC_DV_CYCLES: {
         /* PDF Rev_05 confirms RM/FCC in 10mAh, dV in mV, cycle count in bytes 6..7 */
         const uint16_t rm_10mAh  = can_be16(&d[0]);
         const uint16_t fcc_10mAh = can_be16(&d[2]);
@@ -347,12 +346,12 @@ static void decodeGrowattCanFrame(const char *ifname, const twai_message_t *m)
         break;
     }
 
-    case 0x315:
-    case 0x316:
-    case 0x317:
-    case 0x318: {
+    case GROWATT_CAN_ID_315_CELL_GRP1:
+    case GROWATT_CAN_ID_316_CELL_GRP2:
+    case GROWATT_CAN_ID_317_CELL_GRP3:
+    case GROWATT_CAN_ID_318_CELL_GRP4: {
         /* Optional frame per PDF; some batteries do not send these. */
-        const unsigned base = (unsigned)((id - 0x315u) * 4u + 1u);
+        const unsigned base = (unsigned)((id - GROWATT_CAN_ID_315_CELL_GRP1) * 4u + 1u);
         uint16_t c[4];
 
         for (int i = 0; i < 4; i++) {
@@ -373,7 +372,7 @@ static void decodeGrowattCanFrame(const char *ifname, const twai_message_t *m)
         break;
     }
 
-    case 0x319: {
+    case GROWATT_CAN_ID_319_CELL_REF_FLAGS: {
         /* PDF says max/min-cell related; on JK traffic these behave more like thresholds + indices. */
         const uint16_t vhi = can_le16(&d[0]);
         const uint16_t vlo = can_le16(&d[2]);
@@ -398,7 +397,7 @@ static void decodeGrowattCanFrame(const char *ifname, const twai_message_t *m)
         break;
     }
 
-    case 0x320: {
+    case GROWATT_CAN_ID_320_MAKER_SW: {
         /* Manufacturer and version compatibility frame */
         const char a = (d[0] >= 32 && d[0] <= 126) ? (char)d[0] : '?';
         const char b = (d[1] >= 32 && d[1] <= 126) ? (char)d[1] : '?';
@@ -411,7 +410,7 @@ static void decodeGrowattCanFrame(const char *ifname, const twai_message_t *m)
         break;
     }
 
-    case 0x321: {
+    case GROWATT_CAN_ID_321_UPGRADE_INFO: {
         bool allZero = true;
         for (int i = 0; i < 8; i++) {
             if (d[i] != 0) {
@@ -432,7 +431,7 @@ static void decodeGrowattCanFrame(const char *ifname, const twai_message_t *m)
         break;
     }
 
-    case 0x322: {
+    case GROWATT_CAN_ID_322_TEMP_SOC_MIN_MAX: {
         /* PDF Rev_05: highest/min temp, sensor numbers, max/min SOC */
         const int16_t tMax_0p1 = can_be16s(&d[0]);
         const int16_t tMin_0p1 = can_be16s(&d[2]);
@@ -446,7 +445,7 @@ static void decodeGrowattCanFrame(const char *ifname, const twai_message_t *m)
         break;
     }
 
-    case 0x323:
+    case GROWATT_CAN_ID_323_CELLCOUNT_PROT_WARN:
         ESP_LOGI(EXAMPLE_TAG,
                  "CAN-%s 0x323: cellCount=%u prot3=0x%02X prot4=0x%02X prot5=0x%02X warn3=0x%02X",
                  ifname,
@@ -505,7 +504,7 @@ void canDecoderOnFrame(const char *ifname, const twai_message_t *m)
 
     canBmsCacheUpdate(ifname, m);
 
-    if (g_canDecoderShowRawFrames) {
+    if (CAN_DECODER_SHOW_RAW_FRAMES) {
         logRawCanMsg(ifname, m);
     }
 

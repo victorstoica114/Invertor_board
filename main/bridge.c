@@ -14,26 +14,13 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#ifndef RS485_FORWARD_VERBOSE_LOGS
-#define RS485_FORWARD_VERBOSE_LOGS 0
-#endif
-
 #define RS485_VERBOSE_LOGI(...) do { if (RS485_FORWARD_VERBOSE_LOGS) { ESP_LOGI(EXAMPLE_TAG, __VA_ARGS__); } } while (0)
 
 
-/* BMS (CAN1) -> inverter (CAN2) forwarding exclusion list for A/B testing.
- * Remove IDs manually from this array to see the minimum set required by the inverter. */
-static const uint32_t kCan1ToCan2ExcludeIds[] = {
-    0x311u, 0x312u, 0x313u, 0x314u,
-    0x315u, 0x316u, 0x317u, 0x318u,
-    0x319u, 0x320u, 0x321u, 0x322u, 0x323u,
-    0x324u, 0x325u,
-};
-
 static bool canIdExcludedToInverter(uint32_t id)
 {
-    for (size_t i = 0; i < (sizeof(kCan1ToCan2ExcludeIds) / sizeof(kCan1ToCan2ExcludeIds[0])); i++) {
-        if (kCan1ToCan2ExcludeIds[i] == id) {
+    for (size_t i = 0; i < (g_can1ToCan2ExcludeIdsCount); i++) {
+        if (g_can1ToCan2ExcludeIds[i] == id) {
             return true;
         }
     }
@@ -92,28 +79,6 @@ static void canBridgeTask(void *pv)
 }
 
 /* ---------- RS485 bridge ---------- */
-/* Exclusion list for forwarded Modbus register requests.
- * Initial setup excludes all requested registers; remove entries manually as needed. */
-static const uint16_t kRs485ForwardExcludeRegs[] = {
-    0x0001u, 0x0002u, 0x0003u, 0x0004u, 0x0005u, 0x0006u, 0x0007u,
-    0x0008u, 0x0009u, 0x000Au, 0x000Bu, 0x000Cu, 0x000Du, 0x000Eu,
-    0x000Fu,
-    0x0077u, 0x0078u, 0x0079u, 0x007Au, 0x007Bu, 0x007Cu, 0x007Du,
-    0x007Eu, 0x007Fu, 0x0080u,
-   
-};
-
-/*static const uint16_t kRs485ForwardExcludeRegs[] = {
-    0x0001u, 0x0002u, 0x0003u, 0x0004u, 0x0005u, 0x0006u, 0x0007u,
-    0x0008u, 0x0009u, 0x000Au, 0x000Bu, 0x000Cu, 0x000Du, 0x000Eu,
-    0x000Fu, 0x0010u, 0x0011u, 0x0012u, 0x0013u, 0x0014u, 0x0015u, // trebuie
-    0x0016u, 0x0017u, 0x0018u, 0x0019u, 0x001Au, 0x001Bu, 0x001Cu, // trebuie
-    0x001Du, 0x001Eu, 0x001Fu, 0x0020u, 0x0021u, 0x0022u, 0x0023u, // trebuie
-    0x0024u, 0x0025u, 0x0026u, 0x0027u, 0x0028u, 0x0029u, 0x002Au, // trebuie
-    0x0070u, 0x0071u, 0x0072u, 0x0073u, 0x0074u, 0x0075u, 0x0076u,
-    0x0077u, 0x0078u, 0x0079u, 0x007Au, 0x007Bu, 0x007Cu, 0x007Du,
-    0x007Eu, 0x007Fu, 0x0080u,
-};*/
 
 typedef struct {
     const char *rxName;
@@ -228,8 +193,8 @@ static bool modbusParseRequestRange(const uint8_t *frame,
 
 static bool modbusIsExcludedRegister(uint16_t reg)
 {
-    for (size_t i = 0; i < (sizeof(kRs485ForwardExcludeRegs) / sizeof(kRs485ForwardExcludeRegs[0])); i++) {
-        if (kRs485ForwardExcludeRegs[i] == reg) {
+    for (size_t i = 0; i < (g_rs485ForwardExcludeRegsCount); i++) {
+        if (g_rs485ForwardExcludeRegs[i] == reg) {
             return true;
         }
     }
@@ -244,8 +209,8 @@ static bool modbusHasExcludedRegisterInRange(uint16_t start, uint16_t count)
         reqEnd = 0xFFFFu;
     }
 
-    for (size_t i = 0; i < (sizeof(kRs485ForwardExcludeRegs) / sizeof(kRs485ForwardExcludeRegs[0])); i++) {
-        uint32_t reg = kRs485ForwardExcludeRegs[i];
+    for (size_t i = 0; i < (g_rs485ForwardExcludeRegsCount); i++) {
+        uint32_t reg = g_rs485ForwardExcludeRegs[i];
         if (reg >= reqStart && reg <= reqEnd) {
             return true;
         }
@@ -577,6 +542,6 @@ void rs485BridgeEnable(void)
              MODBUS_DECODER_SNAPSHOT_PRINT_PERIOD_MS);
     ESP_LOGI(EXAMPLE_TAG,
              "RS485 reg exclude entries configured: %u",
-             (unsigned)(sizeof(kRs485ForwardExcludeRegs) / sizeof(kRs485ForwardExcludeRegs[0])));
+             (unsigned)(g_rs485ForwardExcludeRegsCount));
     ESP_LOGI(EXAMPLE_TAG, "RS485 bridge enabled (RS485_1<->RS485_2)");
 }

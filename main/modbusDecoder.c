@@ -1,4 +1,6 @@
 #include "modbusDecoder.h"
+#include "config.h"
+#include "Growatt_regs.h"
 
 #include <inttypes.h>
 #include <stdbool.h>
@@ -10,12 +12,6 @@
 
 #ifndef EXAMPLE_TAG
 #define EXAMPLE_TAG "SNIFFER_BRIDGE"
-#endif
-
-#define REG_RAW_VALUES 0
-
-#ifndef MODBUS_DECODER_SNAPSHOT_ONLY
-#define MODBUS_DECODER_SNAPSHOT_ONLY 1
 #endif
 
 #if MODBUS_DECODER_SNAPSHOT_ONLY
@@ -185,9 +181,9 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
                  crcOk ? "OK" : "BAD");
     }
 
-    bool isCellBlock = (startBase != 0xFFFF && startBase == 0x0070);
-    bool isMainBlock = (startBase != 0xFFFF && startBase == 0x0010);
-    bool isInfoBlock = (startBase != 0xFFFF && startBase == 0x0001);
+    bool isCellBlock = (startBase != 0xFFFF && startBase == GROWATT_MB_REG_CELL_BASE);
+    bool isMainBlock = (startBase != 0xFFFF && startBase == GROWATT_MB_REG_MAIN_START);
+    bool isInfoBlock = (startBase != 0xFFFF && startBase == GROWATT_MB_REG_INFO_0001);
 
     if (isCellBlock) {
         int cellRegs = regCount;
@@ -248,31 +244,31 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
             cacheStoreReg(d, addr, v, d->lastByteUs);
 
             switch (addr) {
-                case 0x0020:
+                case GROWATT_MB_REG_SOC_PCT:
                     socPct = v;
                     socValid = true;
                     break;
-                case 0x0021:
+                case GROWATT_MB_REG_PACK_V_CV:
                     packCv = v;
                     packValid = true;
                     break;
-                case 0x0018:
+                case GROWATT_MB_REG_TEMP_C:
                     tempC = (int16_t)v;
                     tempValid = true;
                     break;
-                case 0x0025:
+                case GROWATT_MB_REG_CELL_MAX_MV:
                     maxCellMv = v;
                     maxCellValid = true;
                     break;
-                case 0x0026:
+                case GROWATT_MB_REG_CELL_MIN_MV:
                     minCellMv = v;
                     minCellValid = true;
                     break;
-                case 0x0027:
+                case GROWATT_MB_REG_CELL_MAX_IDX:
                     maxCellIdx = v;
                     maxIdxValid = true;
                     break;
-                case 0x0028:
+                case GROWATT_MB_REG_CELL_MIN_IDX:
                     minCellIdx = v;
                     minIdxValid = true;
                     break;
@@ -475,10 +471,10 @@ static void printSnapshotDecoded(modbusDecoder_t *d)
     uint16_t r0002 = 0;
     uint16_t r0003 = 0;
     uint16_t r0004 = 0;
-    if (cacheGetReg(d, 0x0001u, &r0001) &&
-        cacheGetReg(d, 0x0002u, &r0002) &&
-        cacheGetReg(d, 0x0003u, &r0003) &&
-        cacheGetReg(d, 0x0004u, &r0004)) {
+    if (cacheGetReg(d, GROWATT_MB_REG_INFO_0001, &r0001) &&
+        cacheGetReg(d, GROWATT_MB_REG_INFO_0002, &r0002) &&
+        cacheGetReg(d, GROWATT_MB_REG_INFO_0003, &r0003) &&
+        cacheGetReg(d, GROWATT_MB_REG_INFO_0004, &r0004)) {
         ESP_LOGI(EXAMPLE_TAG,
                  "%s BMS-INFO: r0001..0004 = %04X %04X %04X %04X",
                  ifn,
@@ -496,13 +492,13 @@ static void printSnapshotDecoded(modbusDecoder_t *d)
     uint16_t cmaxIdx = 0;
     uint16_t cminIdx = 0;
 
-    if (cacheGetReg(d, 0x0020u, &soc) &&
-        cacheGetReg(d, 0x0021u, &packCv) &&
-        cacheGetReg(d, 0x0018u, &temp) &&
-        cacheGetReg(d, 0x0025u, &cmaxMv) &&
-        cacheGetReg(d, 0x0026u, &cminMv) &&
-        cacheGetReg(d, 0x0027u, &cmaxIdx) &&
-        cacheGetReg(d, 0x0028u, &cminIdx)) {
+    if (cacheGetReg(d, GROWATT_MB_REG_SOC_PCT, &soc) &&
+        cacheGetReg(d, GROWATT_MB_REG_PACK_V_CV, &packCv) &&
+        cacheGetReg(d, GROWATT_MB_REG_TEMP_C, &temp) &&
+        cacheGetReg(d, GROWATT_MB_REG_CELL_MAX_MV, &cmaxMv) &&
+        cacheGetReg(d, GROWATT_MB_REG_CELL_MIN_MV, &cminMv) &&
+        cacheGetReg(d, GROWATT_MB_REG_CELL_MAX_IDX, &cmaxIdx) &&
+        cacheGetReg(d, GROWATT_MB_REG_CELL_MIN_IDX, &cminIdx)) {
         ESP_LOGI(EXAMPLE_TAG,
                  "%s BMS: %.2fV | SOC %u%% | %dC | Cmin %.3fV(C%u) | Cmax %.3fV(C%u) | dV %.3fV",
                  ifn,
@@ -517,7 +513,7 @@ static void printSnapshotDecoded(modbusDecoder_t *d)
     }
 
     for (int i = 0; i < 16; i++) {
-        uint16_t addr = (uint16_t)(0x0070u + i);
+        uint16_t addr = (uint16_t)(GROWATT_MB_REG_CELL_BASE + i);
         uint16_t mv = 0;
         if (!cacheGetReg(d, addr, &mv)) {
             continue;
@@ -551,7 +547,7 @@ static void printSnapshotDecoded(modbusDecoder_t *d)
     {
         uint16_t r0013 = 0;
         uint16_t cell13 = 0;
-        if (cacheGetReg(d, 0x0013u, &r0013) && cacheGetReg(d, 0x007Cu, &cell13)) {
+        if (cacheGetReg(d, GROWATT_MB_REG_MAIN_RAW_0013, &r0013) && cacheGetReg(d, GROWATT_MB_REG_CELL_N(13), &cell13)) {
             ESP_LOGI(EXAMPLE_TAG,
                      "%s reg[0x0013] = 0x%04X (%u)  |  Cell13 @0x007C = %.3f V (%u mV)",
                      ifn,
@@ -617,3 +613,4 @@ void modbusDecoderPrintSnapshot(modbusDecoder_t *d)
 
     ESP_LOGI(EXAMPLE_TAG, "%s SNAPSHOT END", ifn);
 }
+

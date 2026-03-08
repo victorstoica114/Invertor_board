@@ -2,9 +2,51 @@
 
 #include "esp_log.h"
 
-/* Handle-uri CAN păstrate aici (config/init) */
-static twai_handle_t twaiBus0; // CAN1
-static twai_handle_t twaiBus1; // CAN2
+/* CAN handles kept here (init/config module) */
+static twai_handle_t twaiBus0; /* CAN1 */
+static twai_handle_t twaiBus1; /* CAN2 */
+
+/*
+ * CAN forward exclusion list (CAN1 -> CAN2).
+ * Remove entries to discover the minimal frame set needed by the inverter.
+ */
+const uint32_t g_can1ToCan2ExcludeIds[] = {
+    GROWATT_CAN_ID_311_STATUS_LIMITS,
+    GROWATT_CAN_ID_312_PROT_ALM,
+    GROWATT_CAN_ID_313_V_I_SOC_SOH,
+    GROWATT_CAN_ID_314_RM_FCC_DV_CYCLES,
+    GROWATT_CAN_ID_315_CELL_GRP1,
+    GROWATT_CAN_ID_316_CELL_GRP2,
+    GROWATT_CAN_ID_317_CELL_GRP3,
+    GROWATT_CAN_ID_318_CELL_GRP4,
+    GROWATT_CAN_ID_319_CELL_REF_FLAGS,
+    GROWATT_CAN_ID_320_MAKER_SW,
+    GROWATT_CAN_ID_321_UPGRADE_INFO,
+    GROWATT_CAN_ID_322_TEMP_SOC_MIN_MAX,
+    GROWATT_CAN_ID_323_CELLCOUNT_PROT_WARN,
+    GROWATT_CAN_ID_324_EXT1,
+    GROWATT_CAN_ID_325_EXT2,
+};
+
+const size_t g_can1ToCan2ExcludeIdsCount =
+    sizeof(g_can1ToCan2ExcludeIds) / sizeof(g_can1ToCan2ExcludeIds[0]);
+
+/*
+ * RS485 Modbus register exclusion list (forward path to inverter).
+ * Requests that include these registers are filtered/sanitized per bridge logic.
+ */
+const uint16_t g_rs485ForwardExcludeRegs[] = {
+    0x0001u, 0x0002u, 0x0003u, 0x0004u, 0x0005u, 0x0006u, 0x0007u,
+    0x0008u, 0x0009u, 0x000Au, 0x000Bu, 0x000Cu, 0x000Du, 0x000Eu,
+    0x000Fu,
+    GROWATT_MB_REG_CELL08_MV, GROWATT_MB_REG_CELL09_MV, GROWATT_MB_REG_CELL10_MV,
+    GROWATT_MB_REG_CELL11_MV, GROWATT_MB_REG_CELL12_MV, GROWATT_MB_REG_CELL13_MV,
+    GROWATT_MB_REG_CELL14_MV, GROWATT_MB_REG_CELL15_MV, GROWATT_MB_REG_CELL16_MV,
+    GROWATT_MB_REG_CELL_EXTRA,
+};
+
+const size_t g_rs485ForwardExcludeRegsCount =
+    sizeof(g_rs485ForwardExcludeRegs) / sizeof(g_rs485ForwardExcludeRegs[0]);
 
 twai_handle_t canGetBus0(void) { return twaiBus0; }
 twai_handle_t canGetBus1(void) { return twaiBus1; }
@@ -51,7 +93,7 @@ void rs485Init(void)
                                         0, NULL, 0));
     gpio_reset_pin(RS485_1_DIR);
     gpio_set_direction(RS485_1_DIR, GPIO_MODE_OUTPUT);
-    gpio_set_level(RS485_1_DIR, 0); // RX default
+    gpio_set_level(RS485_1_DIR, 0); /* RX default */
 
     /* RS485_2 */
     ESP_ERROR_CHECK(uart_param_config(RS485_2_UART, &uartConfig));
@@ -62,7 +104,7 @@ void rs485Init(void)
                                         0, NULL, 0));
     gpio_reset_pin(RS485_2_DIR);
     gpio_set_direction(RS485_2_DIR, GPIO_MODE_OUTPUT);
-    gpio_set_level(RS485_2_DIR, 0); // RX default
+    gpio_set_level(RS485_2_DIR, 0); /* RX default */
 
     ESP_LOGI(EXAMPLE_TAG, "RS485_1 & RS485_2 initialized (%d 8N1)", RS485_BAUDRATE);
 }
