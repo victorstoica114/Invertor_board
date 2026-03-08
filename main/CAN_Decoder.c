@@ -23,6 +23,21 @@ typedef struct {
 
 static portMUX_TYPE g_canBmsCacheMux = portMUX_INITIALIZER_UNLOCKED;
 static canBmsCachedFrame_t g_can1BmsCache[CAN_BMS_CACHE_COUNT];
+static canBmsCachedFrame_t g_can2BmsCache[CAN_BMS_CACHE_COUNT];
+
+static canBmsCachedFrame_t *canBmsCacheForIf(const char *ifname)
+{
+    if (ifname == NULL) {
+        return g_can1BmsCache;
+    }
+    if (strcmp(ifname, "CAN1") == 0) {
+        return g_can1BmsCache;
+    }
+    if (strcmp(ifname, "CAN2") == 0) {
+        return g_can2BmsCache;
+    }
+    return NULL;
+}
 
 static int canBmsCacheIndex(uint32_t id)
 {
@@ -35,7 +50,9 @@ static int canBmsCacheIndex(uint32_t id)
 static void canBmsCacheUpdate(const char *ifname, const twai_message_t *m)
 {
     if (ifname == NULL || m == NULL) return;
-    if (strcmp(ifname, "CAN1") != 0) return;
+
+    canBmsCachedFrame_t *cache = canBmsCacheForIf(ifname);
+    if (cache == NULL) return;
 
     int idx = canBmsCacheIndex((uint32_t)m->identifier);
     if (idx < 0) return;
@@ -48,7 +65,7 @@ static void canBmsCacheUpdate(const char *ifname, const twai_message_t *m)
     memcpy(f.data, m->data, f.dlc);
 
     portENTER_CRITICAL(&g_canBmsCacheMux);
-    g_can1BmsCache[idx] = f;
+    cache[idx] = f;
     portEXIT_CRITICAL(&g_canBmsCacheMux);
 }
 
@@ -467,8 +484,14 @@ void canDecoderPrintCachedSnapshot(const char *ifname)
     canBmsCachedFrame_t local[CAN_BMS_CACHE_COUNT];
     bool any = false;
 
+    canBmsCachedFrame_t *src = canBmsCacheForIf(name);
+    if (src == NULL) {
+        ESP_LOGI(EXAMPLE_TAG, "CAN-%s SNAPSHOT: unsupported BMS cache interface", name);
+        return;
+    }
+
     portENTER_CRITICAL(&g_canBmsCacheMux);
-    memcpy(local, g_can1BmsCache, sizeof(local));
+    memcpy(local, src, sizeof(local));
     portEXIT_CRITICAL(&g_canBmsCacheMux);
 
     for (size_t i = 0; i < CAN_BMS_CACHE_COUNT; i++) {
@@ -498,6 +521,46 @@ void canDecoderPrintCachedSnapshot(const char *ifname)
     ESP_LOGI(EXAMPLE_TAG, "CAN-%s SNAPSHOT END", name);
 }
 
+
+bool canDecoderTryGetSocPct(const char *ifname, uint8_t *socOut)
+{
+    if (socOut == NULL) {
+        return false;
+    }
+
+    const char *name = (ifname != NULL) ? ifname : "CAN1";
+    canBmsCachedFrame_t local[CAN_BMS_CACHE_COUNT];
+    canBmsCachedFrame_t *src = canBmsCacheForIf(name);
+    if (src == NULL) {
+        return false;
+    }
+
+    portENTER_CRITICAL(&g_canBmsCacheMux);
+    memcpy(local, src, sizeof(local));
+    portEXIT_CRITICAL(&g_canBmsCacheMux);
+
+    int idx313 = canBmsCacheIndex(GROWATT_CAN_ID_313_V_I_SOC_SOH);
+    if (idx313 >= 0 && local[idx313].valid && local[idx313].dlc >= 7u) {
+        uint8_t soc = local[idx313].data[6];
+        if (soc <= 100u) {
+            *socOut = soc;
+            return true;
+        }
+    }
+
+    int idx322 = canBmsCacheIndex(GROWATT_CAN_ID_322_TEMP_SOC_MIN_MAX);
+    if (idx322 >= 0 && local[idx322].valid && local[idx322].dlc >= 8u) {
+        uint8_t socMax = local[idx322].data[6];
+        uint8_t socMin = local[idx322].data[7];
+        uint8_t soc = (socMax <= 100u) ? socMax : socMin;
+        if (soc <= 100u) {
+            *socOut = soc;
+            return true;
+        }
+    }
+
+    return false;
+}
 void canDecoderOnFrame(const char *ifname, const twai_message_t *m)
 {
     if (m == NULL) return;
@@ -512,3 +575,4 @@ void canDecoderOnFrame(const char *ifname, const twai_message_t *m)
     decodeGrowattCanFrame(ifname, m);
 #endif
 }
+

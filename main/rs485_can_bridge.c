@@ -2,6 +2,7 @@
 
 #include "config.h"
 #include "Growatt_regs.h"
+#include "CAN_Decoder.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -324,6 +325,7 @@ static bool canRsSendSocResponse(canRs485SocCtx_t *ctx,
                                  uint8_t func,
                                  uint16_t start,
                                  uint16_t count,
+                                 uint8_t socPct,
                                  bool *socInjected)
 {
     if (ctx == NULL) {
@@ -345,7 +347,7 @@ static bool canRsSendSocResponse(canRs485SocCtx_t *ctx,
     const uint32_t reqEnd = reqStart + (uint32_t)count - 1u;
     if (((uint32_t)GROWATT_MB_REG_SOC_PCT >= reqStart) && ((uint32_t)GROWATT_MB_REG_SOC_PCT <= reqEnd)) {
         const uint16_t offset = (uint16_t)((uint32_t)GROWATT_MB_REG_SOC_PCT - reqStart);
-        putBe16(&resp[3 + (offset * 2u)], (uint16_t)ctx->fakeSocPct);
+        putBe16(&resp[3 + (offset * 2u)], (uint16_t)socPct);
         injected = true;
     }
 
@@ -403,19 +405,24 @@ static void canRs485SocTask(void *pv)
             bool injected = false;
 
             if (canRsParseReadReq(frameBuf, frameLen, ctx->slaveId, &func, &start, &count)) {
+                const char *bmsCanIf = (BMS_PORT == 1) ? "CAN1" : "CAN2";
+                uint8_t socPct = ctx->fakeSocPct;
+                bool socFromCan = canDecoderTryGetSocPct(bmsCanIf, &socPct);
+
                 ctx->reqCount++;
-                sent = canRsSendSocResponse(ctx, func, start, count, &injected);
+                sent = canRsSendSocResponse(ctx, func, start, count, socPct, &injected);
 
 #if CAN_RS485_SOC_LOG_EVERY_N > 0
                 if ((ctx->reqCount % CAN_RS485_SOC_LOG_EVERY_N) == 0u) {
                     ESP_LOGI(EXAMPLE_TAG,
-                             "CAN->RS485 SOC slave on %s: req start=0x%04X count=0x%04X sent=%s soc=%s pct=%u",
+                             "CAN->RS485 SOC slave on %s: req start=0x%04X count=0x%04X sent=%s soc=%s src=%s pct=%u",
                              ctx->ifName,
                              (unsigned)start,
                              (unsigned)count,
                              sent ? "Y" : "N",
                              injected ? "Y" : "N",
-                             (unsigned)ctx->fakeSocPct);
+                             socFromCan ? "CAN" : "FAKE",
+                             (unsigned)socPct);
                 }
 #endif
             }
@@ -496,5 +503,6 @@ void rs485Can322BridgeEnable(modbusDecoder_t *srcDecoder, twai_handle_t txBus, c
              RS485_CAN_BRIDGE_USE_FALLBACK ? "ON" : "OFF");
 #endif
 }
+
 
 
