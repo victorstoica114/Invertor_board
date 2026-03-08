@@ -14,6 +14,13 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#ifndef RS485_FORWARD_VERBOSE_LOGS
+#define RS485_FORWARD_VERBOSE_LOGS 0
+#endif
+
+#define RS485_VERBOSE_LOGI(...) do { if (RS485_FORWARD_VERBOSE_LOGS) { ESP_LOGI(EXAMPLE_TAG, __VA_ARGS__); } } while (0)
+
+
 /* BMS (CAN1) -> inverter (CAN2) forwarding exclusion list for A/B testing.
  * Remove IDs manually from this array to see the minimum set required by the inverter. */
 static const uint32_t kCan1ToCan2ExcludeIds[] = {
@@ -88,7 +95,12 @@ static void canBridgeTask(void *pv)
 /* Exclusion list for forwarded Modbus register requests.
  * Initial setup excludes all requested registers; remove entries manually as needed. */
 static const uint16_t kRs485ForwardExcludeRegs[] = {
-   0x0015u
+    0x0001u, 0x0002u, 0x0003u, 0x0004u, 0x0005u, 0x0006u, 0x0007u,
+    0x0008u, 0x0009u, 0x000Au, 0x000Bu, 0x000Cu, 0x000Du, 0x000Eu,
+    0x000Fu,
+    0x0077u, 0x0078u, 0x0079u, 0x007Au, 0x007Bu, 0x007Cu, 0x007Du,
+    0x007Eu, 0x007Fu, 0x0080u,
+   
 };
 
 /*static const uint16_t kRs485ForwardExcludeRegs[] = {
@@ -386,8 +398,7 @@ static bool rs485SanitizeResponseToInverter(const rs485BridgeCtx_t *ctx,
     frame[len - 2] = (uint8_t)(crc & 0xFFu);
     frame[len - 1] = (uint8_t)((crc >> 8) & 0xFFu);
 
-    ESP_LOGI(EXAMPLE_TAG,
-             "RS485 sanitized RESP %s -> %s: masked %u regs from start=0x%04X",
+    RS485_VERBOSE_LOGI("RS485 sanitized RESP %s -> %s: masked %u regs from start=0x%04X",
              ctx->rxName,
              ctx->txName,
              (unsigned)maskedCount,
@@ -404,8 +415,7 @@ static void rs485ForwardFrame(rs485BridgeCtx_t *ctx, const uint8_t *frame, int l
     const uint8_t *txPtr = frame;
 
     if (ctx->applyRegExcludeList && modbusFrameExcluded(frame, len, &func, &start, &count)) {
-        ESP_LOGI(EXAMPLE_TAG,
-                 "RS485 forward %s -> %s dropped req func=0x%02X start=0x%04X count=0x%04X (excluded)",
+        RS485_VERBOSE_LOGI("RS485 forward %s -> %s dropped req func=0x%02X start=0x%04X count=0x%04X (excluded)",
                  ctx->rxName,
                  ctx->txName,
                  (unsigned)func,

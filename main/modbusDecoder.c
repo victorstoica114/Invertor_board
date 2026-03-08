@@ -14,6 +14,16 @@
 
 #define REG_RAW_VALUES 0
 
+#ifndef MODBUS_DECODER_SNAPSHOT_ONLY
+#define MODBUS_DECODER_SNAPSHOT_ONLY 1
+#endif
+
+#if MODBUS_DECODER_SNAPSHOT_ONLY
+#define MODBUS_RUNTIME_LOGI(...) do { } while (0)
+#else
+#define MODBUS_RUNTIME_LOGI(...) ESP_LOGI(EXAMPLE_TAG, __VA_ARGS__)
+#endif
+
 static uint16_t be16(const uint8_t *p)
 {
     return (uint16_t)((p[0] << 8) | p[1]);
@@ -107,7 +117,7 @@ static void printReq03(modbusDecoder_t *d, const uint8_t *f, int len, bool crcOk
     uint16_t start = be16(&f[2]);
     uint16_t count = be16(&f[4]);
 
-    ESP_LOGI(EXAMPLE_TAG,
+    MODBUS_RUNTIME_LOGI(
              "REQ on %s: slave=%u func=0x%02X start=0x%04X count=0x%04X crc=%s",
              d->ifName,
              (unsigned)slave,
@@ -127,7 +137,7 @@ static void printReq03(modbusDecoder_t *d, const uint8_t *f, int len, bool crcOk
 static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool crcOk)
 {
     if (len < 5) {
-        ESP_LOGI(EXAMPLE_TAG, "RESP on %s: too short (len=%d)", d->ifName, len);
+        MODBUS_RUNTIME_LOGI( "RESP on %s: too short (len=%d)", d->ifName, len);
         return;
     }
 
@@ -135,7 +145,7 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
     uint8_t func = frame[1];
 
     if (func != 0x03) {
-        ESP_LOGI(EXAMPLE_TAG, "RESP on %s: func=0x%02X (not 0x03)", d->ifName, func);
+        MODBUS_RUNTIME_LOGI( "RESP on %s: func=0x%02X (not 0x03)", d->ifName, func);
         return;
     }
 
@@ -143,7 +153,7 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
     int dataLen = (int)byteCount;
 
     if (3 + dataLen + 2 > len) {
-        ESP_LOGI(EXAMPLE_TAG,
+        MODBUS_RUNTIME_LOGI(
                  "RESP on %s: length mismatch (len=%d byteCount=%u)",
                  d->ifName,
                  len,
@@ -157,7 +167,7 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
     uint16_t startBase = 0xFFFF;
     if (d->lastReqValid && d->lastReqSlave == slave && d->lastReqFunc == func) {
         startBase = d->lastReqStart;
-        ESP_LOGI(EXAMPLE_TAG,
+        MODBUS_RUNTIME_LOGI(
                  "RESP on %s: slave=%u func=0x%02X start=0x%04X regs=%d crc=%s",
                  d->ifName,
                  (unsigned)slave,
@@ -166,7 +176,7 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
                  regCount,
                  crcOk ? "OK" : "BAD");
     } else {
-        ESP_LOGI(EXAMPLE_TAG,
+        MODBUS_RUNTIME_LOGI(
                  "RESP on %s: slave=%u func=0x%02X regs=%d crc=%s",
                  d->ifName,
                  (unsigned)slave,
@@ -208,7 +218,7 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
             }
             sumMv += mv;
 
-            ESP_LOGI(EXAMPLE_TAG,
+            MODBUS_RUNTIME_LOGI(
                      "  Cell%02u @0x%04X = %.3f V (%u mV)",
                      (unsigned)cellIndex,
                      (unsigned)addr,
@@ -222,7 +232,7 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
             double maxV = (double)maxMv / 1000.0;
             double deltaV = (double)(maxMv - minMv) / 1000.0;
 
-            ESP_LOGI(EXAMPLE_TAG,
+            MODBUS_RUNTIME_LOGI(
                      "  Cells summary: min=Cell%u %.3fV  max=Cell%u %.3fV  delta=%.3fV  avg=%.3fV",
                      (unsigned)minCell,
                      minV,
@@ -236,7 +246,7 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
             uint16_t v = be16(&data[i * 2]);
             uint16_t addr = (uint16_t)(startBase + i);
             cacheStoreReg(d, addr, v, d->lastByteUs);
-            ESP_LOGI(EXAMPLE_TAG,
+            MODBUS_RUNTIME_LOGI(
                      "  reg[0x%04X] = 0x%04X (%u)",
                      (unsigned)addr,
                      (unsigned)v,
@@ -300,7 +310,7 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
                     break;
                 default:
 #if REG_RAW_VALUES
-                    ESP_LOGI(EXAMPLE_TAG,
+                    MODBUS_RUNTIME_LOGI(
                              "  reg[0x%04X] = 0x%04X (%u)",
                              (unsigned)addr,
                              (unsigned)v,
@@ -316,7 +326,7 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
             double maxV = (double)maxCellMv / 1000.0;
             double deltaV = (double)(maxCellMv - minCellMv) / 1000.0;
 
-            ESP_LOGI(EXAMPLE_TAG,
+            MODBUS_RUNTIME_LOGI(
                      "BMS: %.2fV | SOC %u%% | %dC | Cmin %.3fV(C%u) | Cmax %.3fV(C%u) | dV %.3fV",
                      packV,
                      socPct,
@@ -337,7 +347,7 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
         uint16_t f2 = be16(&data[4]);
         uint16_t f3 = be16(&data[6]);
 
-        ESP_LOGI(EXAMPLE_TAG,
+        MODBUS_RUNTIME_LOGI(
                  "BMS-INFO: r0001..0004 = %04X %04X %04X %04X",
                  (unsigned)f0,
                  (unsigned)f1,
@@ -349,7 +359,7 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
             uint16_t addr = (uint16_t)(startBase + i);
             cacheStoreReg(d, addr, v, d->lastByteUs);
 #if REG_RAW_VALUES
-            ESP_LOGI(EXAMPLE_TAG,
+            MODBUS_RUNTIME_LOGI(
                      "  reg[0x%04X] = 0x%04X (%u)",
                      (unsigned)addr,
                      (unsigned)v,
@@ -365,13 +375,13 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
 
         if (addr != 0xFFFF) {
             cacheStoreReg(d, addr, v, d->lastByteUs);
-            ESP_LOGI(EXAMPLE_TAG,
+            MODBUS_RUNTIME_LOGI(
                      "  reg[0x%04X] = 0x%04X (%u)",
                      (unsigned)addr,
                      (unsigned)v,
                      (unsigned)v);
         } else {
-            ESP_LOGI(EXAMPLE_TAG,
+            MODBUS_RUNTIME_LOGI(
                      "  reg[%02d] = 0x%04X (%u)",
                      i,
                      (unsigned)v,
@@ -384,7 +394,7 @@ static void printFrameGeneric(modbusDecoder_t *d, const uint8_t *f, int len, boo
 {
     char hex[3 * 64 + 1];
     dumpHexBrief(f, len, hex, sizeof(hex));
-    ESP_LOGI(EXAMPLE_TAG,
+    MODBUS_RUNTIME_LOGI(
              "FRAME on %s: len=%d crc=%s HEX(first64)=[%s]%s",
              d->ifName,
              len,
