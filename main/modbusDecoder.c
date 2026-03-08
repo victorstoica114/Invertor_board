@@ -462,27 +462,190 @@ void modbusDecoderFlush(modbusDecoder_t *d)
     d->haveLastByte = false;
 }
 
-void modbusDecoderPrintSnapshot(modbusDecoder_t *d)
+static const char *snapshotIfName(const modbusDecoder_t *d)
 {
-    int idx[MODBUS_DECODER_CACHE_MAX_REGS];
-    int n = 0;
+    return (d != NULL && d->ifName != NULL) ? d->ifName : "RS485";
+}
 
-    for (int i = 0; i < MODBUS_DECODER_CACHE_MAX_REGS; i++) {
-        if (d->cacheValid[i]) {
-            idx[n++] = i;
-        }
+static bool cacheGetReg(const modbusDecoder_t *d, uint16_t addr, uint16_t *valOut)
+{
+    if (d == NULL) {
+        return false;
     }
 
-    ESP_LOGI(EXAMPLE_TAG, "%s SNAPSHOT BEGIN", d->ifName ? d->ifName : "RS485");
+    for (int i = 0; i < MODBUS_DECODER_CACHE_MAX_REGS; i++) {
+        if (!d->cacheValid[i]) {
+            continue;
+        }
+        if (d->cacheAddr[i] != addr) {
+            continue;
+        }
+        if (valOut) {
+            *valOut = d->cacheVal[i];
+        }
+        return true;
+    }
+
+    return false;
+}
+
+static void printSnapshotDecoded(modbusDecoder_t *d)
+{
+    const char *ifn = snapshotIfName(d);
+
+    uint16_t r0001 = 0;
+    uint16_t r0002 = 0;
+    uint16_t r0003 = 0;
+    uint16_t r0004 = 0;
+    if (cacheGetReg(d, 0x0001u, &r0001) &&
+        cacheGetReg(d, 0x0002u, &r0002) &&
+        cacheGetReg(d, 0x0003u, &r0003) &&
+        cacheGetReg(d, 0x0004u, &r0004)) {
+        ESP_LOGI(EXAMPLE_TAG,
+                 "%s BMS-INFO: r0001..0004 = %04X %04X %04X %04X",
+                 ifn,
+                 (unsigned)r0001,
+                 (unsigned)r0002,
+                 (unsigned)r0003,
+                 (unsigned)r0004);
+    }
+
+    uint16_t soc = 0;
+    uint16_t packCv = 0;
+    uint16_t temp = 0;
+    uint16_t cmaxMv = 0;
+    uint16_t cminMv = 0;
+    uint16_t cmaxIdx = 0;
+    uint16_t cminIdx = 0;
+
+    if (cacheGetReg(d, 0x0020u, &soc) &&
+        cacheGetReg(d, 0x0021u, &packCv) &&
+        cacheGetReg(d, 0x0018u, &temp) &&
+        cacheGetReg(d, 0x0025u, &cmaxMv) &&
+        cacheGetReg(d, 0x0026u, &cminMv) &&
+        cacheGetReg(d, 0x0027u, &cmaxIdx) &&
+        cacheGetReg(d, 0x0028u, &cminIdx)) {
+        ESP_LOGI(EXAMPLE_TAG,
+                 "%s BMS: %.2fV | SOC %u%% | %dC | Cmin %.3fV(C%u) | Cmax %.3fV(C%u) | dV %.3fV",
+                 ifn,
+                 (double)packCv / 100.0,
+                 (unsigned)soc,
+                 (int16_t)temp,
+                 (double)cminMv / 1000.0,
+                 (unsigned)cminIdx,
+                 (double)cmaxMv / 1000.0,
+                 (unsigned)cmaxIdx,
+                 (double)(cmaxMv - cminMv) / 1000.0);
+    }
+
+    uint16_t minMv = 0xFFFFu;
+    uint16_t maxMv = 0;
+    uint16_t minCell = 0;
+    uint16_t maxCell = 0;
+    uint32_t sumMv = 0;
+    int cellCount = 0;
+
+    for (int i = 0; i < 16; i++) {
+        uint16_t addr = (uint16_t)(0x0070u + i);
+        uint16_t mv = 0;
+        if (!cacheGetReg(d, addr, &mv)) {
+            continue;
+        }
+
+        uint16_t cell = (uint16_t)(i + 1);
+
+        if (mv < minMv) {
+            minMv = mv;
+            minCell = cell;
+        }
+        if (mv > maxMv) {
+            maxMv = mv;
+            maxCell = cell;
+        }
+
+        sumMv += mv;
+        cellCount++;
+
+#if REG_RAW_VALUES
+        ESP_LOGI(EXAMPLE_TAG,
+                 "%s reg[0x%04X] = 0x%04X (%u)  |  Cell%02u @0x%04X = %.3f V (%u mV)",
+                 ifn,
+                 (unsigned)addr,
+                 (unsigned)mv,
+                 (unsigned)mv,
+                 (unsigned)cell,
+                 (unsigned)addr,
+                 (double)mv / 1000.0,
+                 (unsigned)mv);
+#else
+        ESP_LOGI(EXAMPLE_TAG,
+                 "%s Cell%02u @0x%04X = %.3f V (%u mV)",
+                 ifn,
+                 (unsigned)cell,
+                 (unsigned)addr,
+                 (double)mv / 1000.0,
+                 (unsigned)mv);
+#endif
+    }
+
+    if (cellCount > 0) {
+        ESP_LOGI(EXAMPLE_TAG,
+                 "%s Cells summary: min=Cell%u %.3fV  max=Cell%u %.3fV  delta=%.3fV  avg=%.3fV",
+                 ifn,
+                 (unsigned)minCell,
+                 (double)minMv / 1000.0,
+                 (unsigned)maxCell,
+                 (double)maxMv / 1000.0,
+                 (double)(maxMv - minMv) / 1000.0,
+                 (double)sumMv / (double)cellCount / 1000.0);
+    }
+
+#if REG_RAW_VALUES
+    {
+        uint16_t r0013 = 0;
+        uint16_t cell13 = 0;
+        if (cacheGetReg(d, 0x0013u, &r0013) && cacheGetReg(d, 0x007Cu, &cell13)) {
+            ESP_LOGI(EXAMPLE_TAG,
+                     "%s reg[0x0013] = 0x%04X (%u)  |  Cell13 @0x007C = %.3f V (%u mV)",
+                     ifn,
+                     (unsigned)r0013,
+                     (unsigned)r0013,
+                     (double)cell13 / 1000.0,
+                     (unsigned)cell13);
+        }
+    }
+#endif
+}
+
+void modbusDecoderPrintSnapshot(modbusDecoder_t *d)
+{
+    int n = 0;
+    const char *ifn = snapshotIfName(d);
+#if REG_RAW_VALUES
+    int idx[MODBUS_DECODER_CACHE_MAX_REGS];
+#endif
+
+    for (int i = 0; i < MODBUS_DECODER_CACHE_MAX_REGS; i++) {
+        if (!d->cacheValid[i]) {
+            continue;
+        }
+#if REG_RAW_VALUES
+        idx[n] = i;
+#endif
+        n++;
+    }
+
+    ESP_LOGI(EXAMPLE_TAG, "%s SNAPSHOT BEGIN", ifn);
 
     if (n == 0) {
-        ESP_LOGI(EXAMPLE_TAG,
-                 "%s SNAPSHOT: no cached registers",
-                 d->ifName ? d->ifName : "RS485");
-        ESP_LOGI(EXAMPLE_TAG, "%s SNAPSHOT END", d->ifName ? d->ifName : "RS485");
+        ESP_LOGI(EXAMPLE_TAG, "%s SNAPSHOT: no cached registers", ifn);
+        ESP_LOGI(EXAMPLE_TAG, "%s SNAPSHOT END", ifn);
         return;
     }
 
+    printSnapshotDecoded(d);
+
+#if REG_RAW_VALUES
     for (int i = 0; i < n - 1; i++) {
         for (int j = i + 1; j < n; j++) {
             if (d->cacheAddr[idx[j]] < d->cacheAddr[idx[i]]) {
@@ -493,15 +656,17 @@ void modbusDecoderPrintSnapshot(modbusDecoder_t *d)
         }
     }
 
+    ESP_LOGI(EXAMPLE_TAG, "%s RAW REGISTER DUMP:", ifn);
     for (int i = 0; i < n; i++) {
         int k = idx[i];
         ESP_LOGI(EXAMPLE_TAG,
                  "%s reg[0x%04X] = 0x%04X (%u)",
-                 d->ifName ? d->ifName : "RS485",
+                 ifn,
                  (unsigned)d->cacheAddr[k],
                  (unsigned)d->cacheVal[k],
                  (unsigned)d->cacheVal[k]);
     }
+#endif
 
-    ESP_LOGI(EXAMPLE_TAG, "%s SNAPSHOT END", d->ifName ? d->ifName : "RS485");
+    ESP_LOGI(EXAMPLE_TAG, "%s SNAPSHOT END", ifn);
 }
