@@ -19,7 +19,7 @@
 #endif
 
 #if MODBUS_DECODER_SNAPSHOT_ONLY
-#define MODBUS_RUNTIME_LOGI(...) do { } while (0)
+#define MODBUS_RUNTIME_LOGI(...) do { if (0) { ESP_LOGI(EXAMPLE_TAG, __VA_ARGS__); } } while (0)
 #else
 #define MODBUS_RUNTIME_LOGI(...) ESP_LOGI(EXAMPLE_TAG, __VA_ARGS__)
 #endif
@@ -190,12 +190,6 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
     bool isInfoBlock = (startBase != 0xFFFF && startBase == 0x0001);
 
     if (isCellBlock) {
-        uint16_t minMv = 0xFFFF;
-        uint16_t maxMv = 0;
-        uint32_t sumMv = 0;
-        uint16_t minCell = 0;
-        uint16_t maxCell = 0;
-
         int cellRegs = regCount;
         if (cellRegs > 16) {
             cellRegs = 16;
@@ -207,16 +201,6 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
             uint16_t cellIndex = (uint16_t)(i + 1);
 
             cacheStoreReg(d, addr, mv, d->lastByteUs);
-
-            if (mv < minMv) {
-                minMv = mv;
-                minCell = cellIndex;
-            }
-            if (mv > maxMv) {
-                maxMv = mv;
-                maxCell = cellIndex;
-            }
-            sumMv += mv;
 
             MODBUS_RUNTIME_LOGI(
                      "  Cell%02u @0x%04X = %.3f V (%u mV)",
@@ -532,13 +516,6 @@ static void printSnapshotDecoded(modbusDecoder_t *d)
                  (double)(cmaxMv - cminMv) / 1000.0);
     }
 
-    uint16_t minMv = 0xFFFFu;
-    uint16_t maxMv = 0;
-    uint16_t minCell = 0;
-    uint16_t maxCell = 0;
-    uint32_t sumMv = 0;
-    int cellCount = 0;
-
     for (int i = 0; i < 16; i++) {
         uint16_t addr = (uint16_t)(0x0070u + i);
         uint16_t mv = 0;
@@ -547,18 +524,6 @@ static void printSnapshotDecoded(modbusDecoder_t *d)
         }
 
         uint16_t cell = (uint16_t)(i + 1);
-
-        if (mv < minMv) {
-            minMv = mv;
-            minCell = cell;
-        }
-        if (mv > maxMv) {
-            maxMv = mv;
-            maxCell = cell;
-        }
-
-        sumMv += mv;
-        cellCount++;
 
 #if REG_RAW_VALUES
         ESP_LOGI(EXAMPLE_TAG,
