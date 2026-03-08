@@ -103,6 +103,12 @@
 #define RS485_CAN_322_TRANSLATOR_ENABLE 1
 #define RS485_CAN_322_TX_PERIOD_MS 200
 #define RS485_CAN_BRIDGE_TX_LOG_EVERY_N 10
+/* --- CAN -> RS485 translator (minimal Modbus slave on inverter RS485) --- */
+#define CAN_RS485_SOC_TRANSLATOR_ENABLE 1
+#define CAN_RS485_SOC_SLAVE_ID 1u
+#define CAN_RS485_SOC_FAKE_PCT 99u
+#define CAN_RS485_SOC_RX_GAP_US 5000u
+#define CAN_RS485_SOC_LOG_EVERY_N 20u
 
 /* Active RS485 BMS poller: requests Modbus blocks directly from BMS on RS485_1. */
 #define RS485_BMS_POLLER_ENABLE 1
@@ -159,3 +165,4 @@ void led_blink_task(void *pvParameters);
 #ifdef __cplusplus
 }
 #endif
+
