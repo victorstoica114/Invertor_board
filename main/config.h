@@ -52,6 +52,53 @@
 #define CAN_FORWARD_ENABLE 0
 #define RS485_FORWARD_ENABLE 0
 
+/* --- Runtime context selection (BMS / Inverter wiring and protocol) --- */
+#define LINE_CAN 1
+#define LINE_RS485 2
+
+#define PROTOCOL_CAN_GROWATT 1
+#define PROTOCOL_RS485_GROWATT 2
+
+/* Requested user-facing config macros */
+#define BMS_line LINE_CAN
+#define Inverter_line LINE_RS485
+#define BMS_protocol PROTOCOL_CAN_GROWATT
+#define Inverter_protocol PROTOCOL_RS485_GROWATT
+#define BMS_PORT 1
+#define Inverter_PORT 2
+
+/* Compile-time validation */
+#if ((BMS_line != LINE_CAN) && (BMS_line != LINE_RS485))
+#error "BMS_line must be LINE_CAN or LINE_RS485"
+#endif
+#if ((Inverter_line != LINE_CAN) && (Inverter_line != LINE_RS485))
+#error "Inverter_line must be LINE_CAN or LINE_RS485"
+#endif
+#if ((BMS_protocol != PROTOCOL_CAN_GROWATT) && (BMS_protocol != PROTOCOL_RS485_GROWATT))
+#error "BMS_protocol must be PROTOCOL_CAN_GROWATT or PROTOCOL_RS485_GROWATT"
+#endif
+#if ((Inverter_protocol != PROTOCOL_CAN_GROWATT) && (Inverter_protocol != PROTOCOL_RS485_GROWATT))
+#error "Inverter_protocol must be PROTOCOL_CAN_GROWATT or PROTOCOL_RS485_GROWATT"
+#endif
+#if ((BMS_PORT < 1) || (BMS_PORT > 2))
+#error "BMS_PORT must be 1 or 2"
+#endif
+#if ((Inverter_PORT < 1) || (Inverter_PORT > 2))
+#error "Inverter_PORT must be 1 or 2"
+#endif
+#if ((BMS_line == LINE_CAN) && (BMS_protocol != PROTOCOL_CAN_GROWATT))
+#error "If BMS_line is LINE_CAN, BMS_protocol must be PROTOCOL_CAN_GROWATT"
+#endif
+#if ((BMS_line == LINE_RS485) && (BMS_protocol != PROTOCOL_RS485_GROWATT))
+#error "If BMS_line is LINE_RS485, BMS_protocol must be PROTOCOL_RS485_GROWATT"
+#endif
+#if ((Inverter_line == LINE_CAN) && (Inverter_protocol != PROTOCOL_CAN_GROWATT))
+#error "If Inverter_line is LINE_CAN, Inverter_protocol must be PROTOCOL_CAN_GROWATT"
+#endif
+#if ((Inverter_line == LINE_RS485) && (Inverter_protocol != PROTOCOL_RS485_GROWATT))
+#error "If Inverter_line is LINE_RS485, Inverter_protocol must be PROTOCOL_RS485_GROWATT"
+#endif
+
 /* --- RS485 -> CAN translator (synthesizes Growatt CAN telemetry from RS485 cache) --- */
 #define RS485_CAN_322_TRANSLATOR_ENABLE 1
 #define RS485_CAN_322_TX_PERIOD_MS 200
