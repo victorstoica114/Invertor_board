@@ -185,6 +185,15 @@ static void rs485BmsPollerTask(void *pv)
         const uint16_t start = kPollReqs[reqIdx].start;
         const uint16_t count = kPollReqs[reqIdx].count;
 
+        int64_t nowUs = esp_timer_get_time();
+
+        /* TX requests are not always visible on RX path; prime decoder context for upcoming response. */
+        gRsDec1.lastReqValid = true;
+        gRsDec1.lastReqSlave = ctx->slaveId;
+        gRsDec1.lastReqFunc = 0x03u;
+        gRsDec1.lastReqStart = start;
+        gRsDec1.lastReqCount = count;
+        gRsDec1.lastReqUs = nowUs;
         modbusBuildReadReq(ctx->slaveId, start, count, req);
         rs485SendRawFrame(ctx->txUart, ctx->txDirPin, req, sizeof(req));
 
@@ -625,6 +634,13 @@ void rs485BridgeEnable(void)
     xTaskCreate(rs485BridgeTask, "rs485_1_to_2", 4096, &rs12, 9, NULL);
     xTaskCreate(rs485BridgeTask, "rs485_2_to_1", 4096, &rs21, 9, NULL);
     xTaskCreate(rs485PeriodicSnapshotTask, "rs485_snapshot", 4096, NULL, 7, NULL);
+
+    if (gRsDec1.ifName == NULL) {
+        modbusDecoderInit(&gRsDec1, "RS485_1", 5000);
+    }
+    if (gRsDec2.ifName == NULL) {
+        modbusDecoderInit(&gRsDec2, "RS485_2", 5000);
+    }
 
     ESP_LOGI(EXAMPLE_TAG,
              "RS485 periodic snapshot enabled (%d ms)",
