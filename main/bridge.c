@@ -88,16 +88,20 @@ static void canBridgeTask(void *pv)
 /* Exclusion list for forwarded Modbus register requests.
  * Initial setup excludes all requested registers; remove entries manually as needed. */
 static const uint16_t kRs485ForwardExcludeRegs[] = {
+   0x0015u
+};
+
+/*static const uint16_t kRs485ForwardExcludeRegs[] = {
     0x0001u, 0x0002u, 0x0003u, 0x0004u, 0x0005u, 0x0006u, 0x0007u,
     0x0008u, 0x0009u, 0x000Au, 0x000Bu, 0x000Cu, 0x000Du, 0x000Eu,
-    0x000Fu, 0x0010u, 0x0011u, 0x0012u, 0x0013u, 0x0014u, 0x0015u,
-    0x0016u, 0x0017u, 0x0018u, 0x0019u, 0x001Au, 0x001Bu, 0x001Cu,
-    0x001Du, 0x001Eu, 0x001Fu, 0x0020u, 0x0021u, 0x0022u, 0x0023u,
-    0x0024u, 0x0025u, 0x0026u, 0x0027u, 0x0028u, 0x0029u, 0x002Au,
+    0x000Fu, 0x0010u, 0x0011u, 0x0012u, 0x0013u, 0x0014u, 0x0015u, // trebuie
+    0x0016u, 0x0017u, 0x0018u, 0x0019u, 0x001Au, 0x001Bu, 0x001Cu, // trebuie
+    0x001Du, 0x001Eu, 0x001Fu, 0x0020u, 0x0021u, 0x0022u, 0x0023u, // trebuie
+    0x0024u, 0x0025u, 0x0026u, 0x0027u, 0x0028u, 0x0029u, 0x002Au, // trebuie
     0x0070u, 0x0071u, 0x0072u, 0x0073u, 0x0074u, 0x0075u, 0x0076u,
     0x0077u, 0x0078u, 0x0079u, 0x007Au, 0x007Bu, 0x007Cu, 0x007Du,
     0x007Eu, 0x007Fu, 0x0080u,
-};
+};*/
 
 typedef struct {
     const char *rxName;
@@ -210,7 +214,17 @@ static bool modbusParseRequestRange(const uint8_t *frame,
     return true;
 }
 
-static bool modbusIsExcludedRange(uint16_t start, uint16_t count)
+static bool modbusIsExcludedRegister(uint16_t reg)
+{
+    for (size_t i = 0; i < (sizeof(kRs485ForwardExcludeRegs) / sizeof(kRs485ForwardExcludeRegs[0])); i++) {
+        if (kRs485ForwardExcludeRegs[i] == reg) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool modbusHasExcludedRegisterInRange(uint16_t start, uint16_t count)
 {
     uint32_t reqStart = start;
     uint32_t reqEnd = reqStart + (uint32_t)count - 1u;
@@ -242,7 +256,12 @@ static bool modbusFrameExcluded(const uint8_t *frame,
         return false;
     }
 
-    if (!modbusIsExcludedRange(start, count)) {
+    /* For read requests we sanitize response payload instead of dropping whole ranges. */
+    if (func == 0x03 || func == 0x04) {
+        return false;
+    }
+
+    if (!modbusHasExcludedRegisterInRange(start, count)) {
         return false;
     }
 
@@ -298,11 +317,91 @@ static void rs485MirrorRequestToPeerDecoder(const rs485BridgeCtx_t *ctx,
     peer->lastReqUs = esp_timer_get_time();
 }
 
+static bool rs485SanitizeResponseToInverter(const rs485BridgeCtx_t *ctx,
+                                            uint8_t *frame,
+                                            int len)
+{
+    if (ctx == NULL || frame == NULL || len < 5) {
+        return false;
+    }
+
+    if (!ctx->applyRegExcludeList) {
+        return false;
+    }
+
+    if (strcmp(ctx->rxName, "RS485_1") != 0 || strcmp(ctx->txName, "RS485_2") != 0) {
+        return false;
+    }
+
+    if (!modbusCheckCrc(frame, len)) {
+        return false;
+    }
+
+    const uint8_t slave = frame[0];
+    const uint8_t func = frame[1];
+    if (func != 0x03 && func != 0x04) {
+        return false;
+    }
+
+    const uint8_t byteCount = frame[2];
+    if ((byteCount & 0x01u) != 0u || len != (int)(byteCount + 5u)) {
+        return false;
+    }
+
+    modbusDecoder_t *peer = rs485PeerDecoderForRx(ctx);
+    if (peer == NULL || !peer->lastReqValid) {
+        return false;
+    }
+    if (peer->lastReqSlave != slave || peer->lastReqFunc != func) {
+        return false;
+    }
+
+    const uint16_t regCount = (uint16_t)(byteCount / 2u);
+    uint16_t startReg = peer->lastReqStart;
+
+    /* Guard against mismatched reply size; still sanitize the overlapping part. */
+    uint16_t maxCount = regCount;
+    if (peer->lastReqCount > 0 && peer->lastReqCount < maxCount) {
+        maxCount = peer->lastReqCount;
+    }
+
+    uint16_t maskedCount = 0;
+    for (uint16_t i = 0; i < maxCount; i++) {
+        uint16_t reg = (uint16_t)(startReg + i);
+        if (!modbusIsExcludedRegister(reg)) {
+            continue;
+        }
+
+        int dataPos = 3 + (int)(i * 2u);
+        frame[dataPos] = 0x00u;
+        frame[dataPos + 1] = 0x00u;
+        maskedCount++;
+    }
+
+    if (maskedCount == 0) {
+        return false;
+    }
+
+    uint16_t crc = modbusCrc16(frame, len - 2);
+    frame[len - 2] = (uint8_t)(crc & 0xFFu);
+    frame[len - 1] = (uint8_t)((crc >> 8) & 0xFFu);
+
+    ESP_LOGI(EXAMPLE_TAG,
+             "RS485 sanitized RESP %s -> %s: masked %u regs from start=0x%04X",
+             ctx->rxName,
+             ctx->txName,
+             (unsigned)maskedCount,
+             (unsigned)startReg);
+
+    return true;
+}
 static void rs485ForwardFrame(rs485BridgeCtx_t *ctx, const uint8_t *frame, int len)
 {
     uint8_t func = 0;
     uint16_t start = 0;
     uint16_t count = 0;
+    uint8_t txFrame[256];
+    const uint8_t *txPtr = frame;
 
     if (ctx->applyRegExcludeList && modbusFrameExcluded(frame, len, &func, &start, &count)) {
         ESP_LOGI(EXAMPLE_TAG,
@@ -317,8 +416,14 @@ static void rs485ForwardFrame(rs485BridgeCtx_t *ctx, const uint8_t *frame, int l
 
     rs485MirrorRequestToPeerDecoder(ctx, frame, len);
 
+    if (len > 0 && (size_t)len <= sizeof(txFrame)) {
+        memcpy(txFrame, frame, (size_t)len);
+        rs485SanitizeResponseToInverter(ctx, txFrame, len);
+        txPtr = txFrame;
+    }
+
     rs485SetTx(ctx->txDirPin, true);
-    uart_write_bytes(ctx->txUart, (const char *)frame, len);
+    uart_write_bytes(ctx->txUart, (const char *)txPtr, len);
     uart_wait_tx_done(ctx->txUart, pdMS_TO_TICKS(100));
     rs485SetTx(ctx->txDirPin, false);
 }
