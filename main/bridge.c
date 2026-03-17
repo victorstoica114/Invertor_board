@@ -635,7 +635,7 @@ void canBridgeEnable(void)
         bmsToInv.txName = canNameByPort(Inverter_PORT);
         bmsToInv.rxBus = canBusByPort(BMS_PORT);
         bmsToInv.txBus = canBusByPort(Inverter_PORT);
-        bmsToInv.applyExcludeList = true;
+        bmsToInv.applyExcludeList = CAN_EXCLUDE_LIST_ENABLE;
         bmsToInv.forwardEnabled = CAN_FORWARD_ENABLE;
 
         invToBms.rxName = canNameByPort(Inverter_PORT);
@@ -649,12 +649,13 @@ void canBridgeEnable(void)
         xTaskCreate(canBridgeTask, "can_inv_to_bms", 4096, &invToBms, 10, NULL);
 
         ESP_LOGI(EXAMPLE_TAG,
-                 "CAN bridge enabled (%s[P%d] <-> %s[P%d]), forward=%s",
+                 "CAN bridge enabled (%s[P%d] <-> %s[P%d]), forward=%s, exclude=%s",
                  bmsToInv.rxName,
                  BMS_PORT,
                  bmsToInv.txName,
                  Inverter_PORT,
-                 CAN_FORWARD_ENABLE ? "ON" : "OFF");
+                 CAN_FORWARD_ENABLE ? "ON" : "OFF",
+                 CAN_EXCLUDE_LIST_ENABLE ? "ON" : "OFF");
         return;
     }
 
@@ -713,7 +714,8 @@ void rs485BridgeEnable(void)
              "RS485 periodic snapshot enabled (%d ms)",
              MODBUS_DECODER_SNAPSHOT_PRINT_PERIOD_MS);
     ESP_LOGI(EXAMPLE_TAG,
-             "RS485 reg exclude entries configured: %u",
+             "RS485 reg exclude list: %s (%u entries configured)",
+             RS485_REG_EXCLUDE_LIST_ENABLE ? "ON" : "OFF",
              (unsigned)(g_rs485ForwardExcludeRegsCount));
 
     if (bmsOnRs && invOnRs) {
@@ -722,7 +724,7 @@ void rs485BridgeEnable(void)
         bmsToInv.rxUart = rsUartByPort(BMS_PORT);
         bmsToInv.txUart = rsUartByPort(Inverter_PORT);
         bmsToInv.txDirPin = rsDirByPort(Inverter_PORT);
-        bmsToInv.applyRegExcludeList = true;
+        bmsToInv.applyRegExcludeList = RS485_REG_EXCLUDE_LIST_ENABLE;
         bmsToInv.forwardEnabled = RS485_FORWARD_ENABLE;
         bmsToInv.bmsToInverterDir = true;
 
@@ -731,7 +733,7 @@ void rs485BridgeEnable(void)
         invToBms.rxUart = rsUartByPort(Inverter_PORT);
         invToBms.txUart = rsUartByPort(BMS_PORT);
         invToBms.txDirPin = rsDirByPort(BMS_PORT);
-        invToBms.applyRegExcludeList = true;
+        invToBms.applyRegExcludeList = RS485_REG_EXCLUDE_LIST_ENABLE;
         invToBms.forwardEnabled = RS485_FORWARD_ENABLE;
         invToBms.bmsToInverterDir = false;
 
@@ -739,12 +741,13 @@ void rs485BridgeEnable(void)
         xTaskCreate(rs485BridgeTask, "rs485_inv_to_bms", 4096, &invToBms, 9, NULL);
 
         ESP_LOGI(EXAMPLE_TAG,
-                 "RS485 bridge enabled (%s[P%d] <-> %s[P%d]), forward=%s",
+                 "RS485 bridge enabled (%s[P%d] <-> %s[P%d]), forward=%s, exclude=%s",
                  bmsToInv.rxName,
                  BMS_PORT,
                  bmsToInv.txName,
                  Inverter_PORT,
-                 RS485_FORWARD_ENABLE ? "ON" : "OFF");
+                 RS485_FORWARD_ENABLE ? "ON" : "OFF",
+                 RS485_REG_EXCLUDE_LIST_ENABLE ? "ON" : "OFF");
     } else {
         if (bmsOnRs) {
             bmsSniff.rxName = rsNameByPort(BMS_PORT);
@@ -752,7 +755,7 @@ void rs485BridgeEnable(void)
             bmsSniff.rxUart = rsUartByPort(BMS_PORT);
             bmsSniff.txUart = rsUartByPort(BMS_PORT);
             bmsSniff.txDirPin = rsDirByPort(BMS_PORT);
-            bmsSniff.applyRegExcludeList = true;
+            bmsSniff.applyRegExcludeList = RS485_REG_EXCLUDE_LIST_ENABLE;
             bmsSniff.forwardEnabled = false;
             bmsSniff.bmsToInverterDir = false;
             xTaskCreate(rs485BridgeTask, "rs485_bms_sniff", 4096, &bmsSniff, 9, NULL);
@@ -765,7 +768,7 @@ void rs485BridgeEnable(void)
             invSniff.rxUart = rsUartByPort(Inverter_PORT);
             invSniff.txUart = rsUartByPort(Inverter_PORT);
             invSniff.txDirPin = rsDirByPort(Inverter_PORT);
-            invSniff.applyRegExcludeList = true;
+            invSniff.applyRegExcludeList = RS485_REG_EXCLUDE_LIST_ENABLE;
             invSniff.forwardEnabled = false;
             invSniff.bmsToInverterDir = false;
             xTaskCreate(rs485BridgeTask, "rs485_inv_sniff", 4096, &invSniff, 9, NULL);

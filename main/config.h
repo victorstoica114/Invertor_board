@@ -49,8 +49,10 @@
 #define RS485_FORWARD_VERBOSE_LOGS 0
 
 /* --- Bridge mode switches --- */
-#define CAN_FORWARD_ENABLE 0
+#define CAN_FORWARD_ENABLE 1
 #define RS485_FORWARD_ENABLE 0
+#define CAN_EXCLUDE_LIST_ENABLE 0
+#define RS485_REG_EXCLUDE_LIST_ENABLE 0
 
 /* --- Runtime context selection (BMS / Inverter wiring and protocol) --- */
 #define LINE_CAN 1
@@ -61,9 +63,9 @@
 
 /* Requested user-facing config macros */
 #define BMS_line LINE_CAN
-#define Inverter_line LINE_RS485
+#define Inverter_line LINE_CAN
 #define BMS_protocol PROTOCOL_CAN_GROWATT
-#define Inverter_protocol PROTOCOL_RS485_GROWATT
+#define Inverter_protocol PROTOCOL_CAN_GROWATT
 #define BMS_PORT 1
 #define Inverter_PORT 2
 
