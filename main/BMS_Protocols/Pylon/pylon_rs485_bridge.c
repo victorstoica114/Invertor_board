@@ -37,6 +37,13 @@ typedef struct {
 } pylonProbePending_t;
 
 typedef struct {
+    bool valid;
+    uint8_t cid2;
+    uint8_t reqAdr;
+    int64_t seenUs;
+} pylonForwardPending_t;
+
+typedef struct {
     const char *probeName;
     uart_port_t probeUart;
     gpio_num_t probeDirPin;
@@ -53,6 +60,7 @@ static pylon_rs485_cache_t s_pylonCache = {
 
 static pylon_rs485_summary_t s_pylonSummary = {0};
 static pylonProbePending_t s_probePending = {0};
+static pylonForwardPending_t s_forwardPending = {0};
 static TaskHandle_t s_pylonBmsTask = NULL;
 static TaskHandle_t s_pylonInvTask = NULL;
 static TaskHandle_t s_pylonProbeTaskHandle = NULL;
@@ -601,6 +609,34 @@ static void maybeCheckProbeTimeout(const pylonRs485BridgeCtx_t *ctx, int64_t now
     s_probePending.active = false;
 }
 
+static void maybeHandleForwardDecode(const pylonRs485BridgeCtx_t *ctx,
+                                     const uint8_t *frame,
+                                     int len,
+                                     int64_t nowUs)
+{
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+    uint8_t ver = 0, adr = 0, cid1 = 0, code = 0;
+
+    if (settings.mode != MODE_FORWARD) return;
+    if (!parsePylonHeader(frame, len, &ver, &adr, &cid1, &code)) return;
+    if (cid1 != 0x46) return;
+
+    if (ctx->isInverterSide && (code == 0x61 || code == 0x62 || code == 0x63)) {
+        s_forwardPending.valid = true;
+        s_forwardPending.cid2 = code;
+        s_forwardPending.reqAdr = adr;
+        s_forwardPending.seenUs = nowUs;
+        return;
+    }
+
+    if (ctx->isBmsSide && code == 0x00 && s_forwardPending.valid) {
+        if ((nowUs - s_forwardPending.seenUs) <= 1000000LL) {
+            cacheResponse(s_forwardPending.cid2, frame, len);
+        }
+        s_forwardPending.valid = false;
+    }
+}
+
 static void pylonBridgeTask(void *pv)
 {
     pylonRs485BridgeCtx_t *ctx = (pylonRs485BridgeCtx_t *)pv;
@@ -638,6 +674,7 @@ static void pylonBridgeTask(void *pv)
             if (haveFrame && frameLen > 0 && frameBuf[frameLen - 1] == '\r') {
                 bridge_runtime_settings_t settings = runtimeSettingsGet();
                 logDecodedPylon(frameBuf, frameLen);
+                maybeHandleForwardDecode(ctx, frameBuf, frameLen, nowUs);
 
                 if (settings.mode == MODE_FORWARD) {
                     forwardFrame(ctx->rxName, ctx->txName, ctx->txUart, ctx->txDirPin, frameBuf, frameLen);
@@ -718,6 +755,7 @@ void pylonRs485BridgeEnable(void)
     memset(&s_pylonCache, 0, sizeof(s_pylonCache));
     memset(&s_pylonSummary, 0, sizeof(s_pylonSummary));
     memset(&s_probePending, 0, sizeof(s_probePending));
+    memset(&s_forwardPending, 0, sizeof(s_forwardPending));
     snprintf(s_pylonCache.info62, sizeof(s_pylonCache.info62), "00000000");
     s_pylonCache.valid62 = true;
     bridgeSetTelemetrySnapshot(NULL);
@@ -769,6 +807,7 @@ void pylonRs485BridgeStop(void)
     deleteTaskIfRunning(&s_pylonBmsTask);
     deleteTaskIfRunning(&s_pylonInvTask);
     deleteTaskIfRunning(&s_pylonProbeTaskHandle);
+    memset(&s_forwardPending, 0, sizeof(s_forwardPending));
     bridgeSetTelemetrySnapshot(NULL);
     bridgeSetDecodedLogSnapshot("");
 }
