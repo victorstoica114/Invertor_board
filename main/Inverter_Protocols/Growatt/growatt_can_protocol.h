@@ -1,3 +1,3 @@
 #pragma once
 
-#include "../../Growatt_regs.h"
+#include "../../BMS_Protocols/Growatt/growatt_modbus_map.h"
