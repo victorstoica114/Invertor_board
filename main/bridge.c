@@ -1,8 +1,10 @@
 #include "bridge.h"
 #include "config.h"
+#include "runtime_settings.h"
 #include "modbusDecoder.h"
 #include "CAN_Decoder.h"
 #include "rs485_can_bridge.h"
+#include "BMS_Protocols/Pylon/pylon_rs485_bridge.h"
 
 #include <inttypes.h>
 #include <stdbool.h>
@@ -16,6 +18,57 @@
 #include "freertos/task.h"
 
 #define RS485_VERBOSE_LOGI(...) do { if (RS485_FORWARD_VERBOSE_LOGS) { ESP_LOGI(EXAMPLE_TAG, __VA_ARGS__); } } while (0)
+
+static bridgeTelemetrySnapshot_t gBridgeTelemetry;
+static TaskHandle_t s_canTaskA = NULL;
+static TaskHandle_t s_canTaskB = NULL;
+static TaskHandle_t s_canSnapshotTask = NULL;
+static TaskHandle_t s_rs485TaskA = NULL;
+static TaskHandle_t s_rs485TaskB = NULL;
+static TaskHandle_t s_rs485SnapshotTask = NULL;
+static TaskHandle_t s_rs485PollerTask = NULL;
+
+static void deleteTaskIfRunning(TaskHandle_t *handle)
+{
+    if (handle != NULL && *handle != NULL) {
+        vTaskDelete(*handle);
+        *handle = NULL;
+    }
+}
+
+void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
+{
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+
+    if (out == NULL) {
+        return;
+    }
+
+    *out = gBridgeTelemetry;
+
+    if (out->source[0] == '\0') {
+        snprintf(out->source, sizeof(out->source), "runtime");
+    }
+    if (out->protocol[0] == '\0') {
+        if (settings.bms_protocol == PROTOCOL_RS485_PYLON || settings.inverter_protocol == PROTOCOL_RS485_PYLON) {
+            snprintf(out->protocol, sizeof(out->protocol), "RS485_PYLON");
+        } else if (settings.bms_protocol == PROTOCOL_RS485_GROWATT || settings.inverter_protocol == PROTOCOL_RS485_GROWATT) {
+            snprintf(out->protocol, sizeof(out->protocol), "RS485_GROWATT");
+        } else {
+            snprintf(out->protocol, sizeof(out->protocol), "CAN_GROWATT");
+        }
+    }
+}
+
+void bridgeSetTelemetrySnapshot(const bridgeTelemetrySnapshot_t *in)
+{
+    if (in == NULL) {
+        memset(&gBridgeTelemetry, 0, sizeof(gBridgeTelemetry));
+        return;
+    }
+
+    gBridgeTelemetry = *in;
+}
 
 
 static bool canIdExcludedToInverter(uint32_t id)
@@ -614,71 +667,77 @@ static void rs485BridgeTask(void *pv)
 /* ---------- Enable functions (create tasks) ---------- */
 void canBridgeEnable(void)
 {
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+    const bool canForwardEnabled = (settings.mode == MODE_FORWARD);
     static canBridgeCtx_t bmsToInv;
     static canBridgeCtx_t invToBms;
     static canBridgeCtx_t bmsSniff;
     static canBridgeCtx_t invSniff;
 
-    const bool bmsOnCan = (BMS_line == LINE_CAN);
-    const bool invOnCan = (Inverter_line == LINE_CAN);
+    const bool bmsOnCan = (settings.bms_line == LINE_CAN);
+    const bool invOnCan = (settings.inverter_line == LINE_CAN);
+
+    deleteTaskIfRunning(&s_canTaskA);
+    deleteTaskIfRunning(&s_canTaskB);
+    deleteTaskIfRunning(&s_canSnapshotTask);
 
     if (bmsOnCan || invOnCan) {
-        const char *snapIf = bmsOnCan ? canNameByPort(BMS_PORT) : canNameByPort(Inverter_PORT);
-        xTaskCreate(canPeriodicSnapshotTask, "can_snapshot", 4096, (void *)snapIf, 7, NULL);
+        const char *snapIf = bmsOnCan ? canNameByPort(settings.bms_port) : canNameByPort(settings.inverter_port);
+        xTaskCreate(canPeriodicSnapshotTask, "can_snapshot", 4096, (void *)snapIf, 7, &s_canSnapshotTask);
         ESP_LOGI(EXAMPLE_TAG,
                  "CAN periodic snapshot enabled (%d ms)",
                  CAN_DECODER_SNAPSHOT_PRINT_PERIOD_MS);
     }
 
     if (bmsOnCan && invOnCan) {
-        bmsToInv.rxName = canNameByPort(BMS_PORT);
-        bmsToInv.txName = canNameByPort(Inverter_PORT);
-        bmsToInv.rxBus = canBusByPort(BMS_PORT);
-        bmsToInv.txBus = canBusByPort(Inverter_PORT);
+        bmsToInv.rxName = canNameByPort(settings.bms_port);
+        bmsToInv.txName = canNameByPort(settings.inverter_port);
+        bmsToInv.rxBus = canBusByPort(settings.bms_port);
+        bmsToInv.txBus = canBusByPort(settings.inverter_port);
         bmsToInv.applyExcludeList = CAN_EXCLUDE_LIST_ENABLE;
-        bmsToInv.forwardEnabled = CAN_FORWARD_ENABLE;
+        bmsToInv.forwardEnabled = canForwardEnabled;
 
-        invToBms.rxName = canNameByPort(Inverter_PORT);
-        invToBms.txName = canNameByPort(BMS_PORT);
-        invToBms.rxBus = canBusByPort(Inverter_PORT);
-        invToBms.txBus = canBusByPort(BMS_PORT);
+        invToBms.rxName = canNameByPort(settings.inverter_port);
+        invToBms.txName = canNameByPort(settings.bms_port);
+        invToBms.rxBus = canBusByPort(settings.inverter_port);
+        invToBms.txBus = canBusByPort(settings.bms_port);
         invToBms.applyExcludeList = false;
-        invToBms.forwardEnabled = CAN_FORWARD_ENABLE;
+        invToBms.forwardEnabled = canForwardEnabled;
 
-        xTaskCreate(canBridgeTask, "can_bms_to_inv", 4096, &bmsToInv, 10, NULL);
-        xTaskCreate(canBridgeTask, "can_inv_to_bms", 4096, &invToBms, 10, NULL);
+        xTaskCreate(canBridgeTask, "can_bms_to_inv", 4096, &bmsToInv, 10, &s_canTaskA);
+        xTaskCreate(canBridgeTask, "can_inv_to_bms", 4096, &invToBms, 10, &s_canTaskB);
 
         ESP_LOGI(EXAMPLE_TAG,
                  "CAN bridge enabled (%s[P%d] <-> %s[P%d]), forward=%s, exclude=%s",
                  bmsToInv.rxName,
-                 BMS_PORT,
+                 settings.bms_port,
                  bmsToInv.txName,
-                 Inverter_PORT,
-                 CAN_FORWARD_ENABLE ? "ON" : "OFF",
+                 settings.inverter_port,
+                 canForwardEnabled ? "ON" : "OFF",
                  CAN_EXCLUDE_LIST_ENABLE ? "ON" : "OFF");
         return;
     }
 
     if (bmsOnCan) {
-        bmsSniff.rxName = canNameByPort(BMS_PORT);
-        bmsSniff.txName = canNameByPort(BMS_PORT);
-        bmsSniff.rxBus = canBusByPort(BMS_PORT);
-        bmsSniff.txBus = canBusByPort(BMS_PORT);
+        bmsSniff.rxName = canNameByPort(settings.bms_port);
+        bmsSniff.txName = canNameByPort(settings.bms_port);
+        bmsSniff.rxBus = canBusByPort(settings.bms_port);
+        bmsSniff.txBus = canBusByPort(settings.bms_port);
         bmsSniff.applyExcludeList = false;
         bmsSniff.forwardEnabled = false;
-        xTaskCreate(canBridgeTask, "can_bms_sniff", 4096, &bmsSniff, 10, NULL);
-        ESP_LOGI(EXAMPLE_TAG, "CAN sniffer enabled on BMS side (%s[P%d])", bmsSniff.rxName, BMS_PORT);
+        xTaskCreate(canBridgeTask, "can_bms_sniff", 4096, &bmsSniff, 10, &s_canTaskA);
+        ESP_LOGI(EXAMPLE_TAG, "CAN sniffer enabled on BMS side (%s[P%d])", bmsSniff.rxName, settings.bms_port);
     }
 
     if (invOnCan) {
-        invSniff.rxName = canNameByPort(Inverter_PORT);
-        invSniff.txName = canNameByPort(Inverter_PORT);
-        invSniff.rxBus = canBusByPort(Inverter_PORT);
-        invSniff.txBus = canBusByPort(Inverter_PORT);
+        invSniff.rxName = canNameByPort(settings.inverter_port);
+        invSniff.txName = canNameByPort(settings.inverter_port);
+        invSniff.rxBus = canBusByPort(settings.inverter_port);
+        invSniff.txBus = canBusByPort(settings.inverter_port);
         invSniff.applyExcludeList = false;
         invSniff.forwardEnabled = false;
-        xTaskCreate(canBridgeTask, "can_inv_sniff", 4096, &invSniff, 10, NULL);
-        ESP_LOGI(EXAMPLE_TAG, "CAN sniffer enabled on inverter side (%s[P%d])", invSniff.rxName, Inverter_PORT);
+        xTaskCreate(canBridgeTask, "can_inv_sniff", 4096, &invSniff, 10, &s_canTaskB);
+        ESP_LOGI(EXAMPLE_TAG, "CAN sniffer enabled on inverter side (%s[P%d])", invSniff.rxName, settings.inverter_port);
     }
 
     if (!bmsOnCan && !invOnCan) {
@@ -688,20 +747,36 @@ void canBridgeEnable(void)
 
 void rs485BridgeEnable(void)
 {
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+    const bool rs485ForwardEnabled = (settings.mode == MODE_FORWARD);
+
+    pylonRs485BridgeStop();
+    rs485Can322BridgeStop();
+    canRs485SocBridgeStop();
+    deleteTaskIfRunning(&s_rs485TaskA);
+    deleteTaskIfRunning(&s_rs485TaskB);
+    deleteTaskIfRunning(&s_rs485SnapshotTask);
+    deleteTaskIfRunning(&s_rs485PollerTask);
+
+    if (pylonRs485BridgeHandlesCurrentConfig()) {
+        pylonRs485BridgeEnable();
+        return;
+    }
+
     static rs485BridgeCtx_t bmsToInv;
     static rs485BridgeCtx_t invToBms;
     static rs485BridgeCtx_t bmsSniff;
     static rs485BridgeCtx_t invSniff;
     static rs485BmsPollerCtx_t poller;
 
-    const bool bmsOnRs = (BMS_line == LINE_RS485);
-    const bool invOnRs = (Inverter_line == LINE_RS485);
-    const bool inverseCanToRs = (BMS_line == LINE_CAN) &&
-                              (Inverter_line == LINE_RS485) &&
-                              (BMS_protocol == PROTOCOL_CAN_GROWATT) &&
-                              (Inverter_protocol == PROTOCOL_RS485_GROWATT);
+    const bool bmsOnRs = (settings.bms_line == LINE_RS485);
+    const bool invOnRs = (settings.inverter_line == LINE_RS485);
+    const bool inverseCanToRs = (settings.bms_line == LINE_CAN) &&
+                              (settings.inverter_line == LINE_RS485) &&
+                              (settings.bms_protocol == PROTOCOL_CAN_GROWATT) &&
+                              (settings.inverter_protocol == PROTOCOL_RS485_GROWATT);
 
-    xTaskCreate(rs485PeriodicSnapshotTask, "rs485_snapshot", 4096, NULL, 7, NULL);
+    xTaskCreate(rs485PeriodicSnapshotTask, "rs485_snapshot", 4096, NULL, 7, &s_rs485SnapshotTask);
 
     if (gRsDec1.ifName == NULL) {
         modbusDecoderInit(&gRsDec1, "RS485_1", 5000);
@@ -719,103 +794,109 @@ void rs485BridgeEnable(void)
              (unsigned)(g_rs485ForwardExcludeRegsCount));
 
     if (bmsOnRs && invOnRs) {
-        bmsToInv.rxName = rsNameByPort(BMS_PORT);
-        bmsToInv.txName = rsNameByPort(Inverter_PORT);
-        bmsToInv.rxUart = rsUartByPort(BMS_PORT);
-        bmsToInv.txUart = rsUartByPort(Inverter_PORT);
-        bmsToInv.txDirPin = rsDirByPort(Inverter_PORT);
+        bmsToInv.rxName = rsNameByPort(settings.bms_port);
+        bmsToInv.txName = rsNameByPort(settings.inverter_port);
+        bmsToInv.rxUart = rsUartByPort(settings.bms_port);
+        bmsToInv.txUart = rsUartByPort(settings.inverter_port);
+        bmsToInv.txDirPin = rsDirByPort(settings.inverter_port);
         bmsToInv.applyRegExcludeList = RS485_REG_EXCLUDE_LIST_ENABLE;
-        bmsToInv.forwardEnabled = RS485_FORWARD_ENABLE;
+        bmsToInv.forwardEnabled = rs485ForwardEnabled;
         bmsToInv.bmsToInverterDir = true;
 
-        invToBms.rxName = rsNameByPort(Inverter_PORT);
-        invToBms.txName = rsNameByPort(BMS_PORT);
-        invToBms.rxUart = rsUartByPort(Inverter_PORT);
-        invToBms.txUart = rsUartByPort(BMS_PORT);
-        invToBms.txDirPin = rsDirByPort(BMS_PORT);
+        invToBms.rxName = rsNameByPort(settings.inverter_port);
+        invToBms.txName = rsNameByPort(settings.bms_port);
+        invToBms.rxUart = rsUartByPort(settings.inverter_port);
+        invToBms.txUart = rsUartByPort(settings.bms_port);
+        invToBms.txDirPin = rsDirByPort(settings.bms_port);
         invToBms.applyRegExcludeList = RS485_REG_EXCLUDE_LIST_ENABLE;
-        invToBms.forwardEnabled = RS485_FORWARD_ENABLE;
+        invToBms.forwardEnabled = rs485ForwardEnabled;
         invToBms.bmsToInverterDir = false;
 
-        xTaskCreate(rs485BridgeTask, "rs485_bms_to_inv", 4096, &bmsToInv, 9, NULL);
-        xTaskCreate(rs485BridgeTask, "rs485_inv_to_bms", 4096, &invToBms, 9, NULL);
+        xTaskCreate(rs485BridgeTask, "rs485_bms_to_inv", 4096, &bmsToInv, 9, &s_rs485TaskA);
+        xTaskCreate(rs485BridgeTask, "rs485_inv_to_bms", 4096, &invToBms, 9, &s_rs485TaskB);
 
         ESP_LOGI(EXAMPLE_TAG,
                  "RS485 bridge enabled (%s[P%d] <-> %s[P%d]), forward=%s, exclude=%s",
                  bmsToInv.rxName,
-                 BMS_PORT,
+                 settings.bms_port,
                  bmsToInv.txName,
-                 Inverter_PORT,
-                 RS485_FORWARD_ENABLE ? "ON" : "OFF",
+                 settings.inverter_port,
+                 rs485ForwardEnabled ? "ON" : "OFF",
                  RS485_REG_EXCLUDE_LIST_ENABLE ? "ON" : "OFF");
     } else {
         if (bmsOnRs) {
-            bmsSniff.rxName = rsNameByPort(BMS_PORT);
-            bmsSniff.txName = rsNameByPort(BMS_PORT);
-            bmsSniff.rxUart = rsUartByPort(BMS_PORT);
-            bmsSniff.txUart = rsUartByPort(BMS_PORT);
-            bmsSniff.txDirPin = rsDirByPort(BMS_PORT);
+            bmsSniff.rxName = rsNameByPort(settings.bms_port);
+            bmsSniff.txName = rsNameByPort(settings.bms_port);
+            bmsSniff.rxUart = rsUartByPort(settings.bms_port);
+            bmsSniff.txUart = rsUartByPort(settings.bms_port);
+            bmsSniff.txDirPin = rsDirByPort(settings.bms_port);
             bmsSniff.applyRegExcludeList = RS485_REG_EXCLUDE_LIST_ENABLE;
             bmsSniff.forwardEnabled = false;
             bmsSniff.bmsToInverterDir = false;
-            xTaskCreate(rs485BridgeTask, "rs485_bms_sniff", 4096, &bmsSniff, 9, NULL);
-            ESP_LOGI(EXAMPLE_TAG, "RS485 sniffer enabled on BMS side (%s[P%d])", bmsSniff.rxName, BMS_PORT);
+            xTaskCreate(rs485BridgeTask, "rs485_bms_sniff", 4096, &bmsSniff, 9, &s_rs485TaskA);
+            ESP_LOGI(EXAMPLE_TAG, "RS485 sniffer enabled on BMS side (%s[P%d])", bmsSniff.rxName, settings.bms_port);
         }
 
         if (invOnRs && !inverseCanToRs) {
-            invSniff.rxName = rsNameByPort(Inverter_PORT);
-            invSniff.txName = rsNameByPort(Inverter_PORT);
-            invSniff.rxUart = rsUartByPort(Inverter_PORT);
-            invSniff.txUart = rsUartByPort(Inverter_PORT);
-            invSniff.txDirPin = rsDirByPort(Inverter_PORT);
+            invSniff.rxName = rsNameByPort(settings.inverter_port);
+            invSniff.txName = rsNameByPort(settings.inverter_port);
+            invSniff.rxUart = rsUartByPort(settings.inverter_port);
+            invSniff.txUart = rsUartByPort(settings.inverter_port);
+            invSniff.txDirPin = rsDirByPort(settings.inverter_port);
             invSniff.applyRegExcludeList = RS485_REG_EXCLUDE_LIST_ENABLE;
             invSniff.forwardEnabled = false;
             invSniff.bmsToInverterDir = false;
-            xTaskCreate(rs485BridgeTask, "rs485_inv_sniff", 4096, &invSniff, 9, NULL);
-            ESP_LOGI(EXAMPLE_TAG, "RS485 sniffer enabled on inverter side (%s[P%d])", invSniff.rxName, Inverter_PORT);
+            xTaskCreate(rs485BridgeTask, "rs485_inv_sniff", 4096, &invSniff, 9, &s_rs485TaskB);
+            ESP_LOGI(EXAMPLE_TAG, "RS485 sniffer enabled on inverter side (%s[P%d])", invSniff.rxName, settings.inverter_port);
         } else if (inverseCanToRs) {
             ESP_LOGI(EXAMPLE_TAG, "RS485 inverter side reserved for CAN->RS485 translator (%s[P%d])",
-                     rsNameByPort(Inverter_PORT),
-                     Inverter_PORT);
+                     rsNameByPort(settings.inverter_port),
+                     settings.inverter_port);
         }
     }
 
+    if ((settings.bms_line == LINE_RS485) && (settings.inverter_line == LINE_CAN)) {
 #if RS485_BMS_POLLER_ENABLE
-    if ((BMS_line == LINE_RS485) && (Inverter_line == LINE_CAN)) {
-#if RS485_FORWARD_ENABLE
-        ESP_LOGW(EXAMPLE_TAG,
-                 "RS485 BMS poller disabled because RS485 forward is ON (avoid collisions)");
-#else
-        poller.txName = rsNameByPort(BMS_PORT);
-        poller.txUart = rsUartByPort(BMS_PORT);
-        poller.txDirPin = rsDirByPort(BMS_PORT);
-        poller.slaveId = (uint8_t)RS485_BMS_SLAVE_ID;
-        poller.periodMs = RS485_BMS_POLL_PERIOD_MS;
-        poller.targetDec = rsDecoderByPort(BMS_PORT);
+        if (rs485ForwardEnabled) {
+            ESP_LOGW(EXAMPLE_TAG,
+                     "RS485 BMS poller disabled because RS485 forward is ON (avoid collisions)");
+        } else {
+            poller.txName = rsNameByPort(settings.bms_port);
+            poller.txUart = rsUartByPort(settings.bms_port);
+            poller.txDirPin = rsDirByPort(settings.bms_port);
+            poller.slaveId = (uint8_t)RS485_BMS_SLAVE_ID;
+            poller.periodMs = RS485_BMS_POLL_PERIOD_MS;
+            poller.targetDec = rsDecoderByPort(settings.bms_port);
 
-        xTaskCreate(rs485BmsPollerTask, "rs485_bms_poller", 3072, &poller, 8, NULL);
-        ESP_LOGI(EXAMPLE_TAG,
-                 "RS485 BMS poller enabled (tx=%s slave=%u period=%ums)",
-                 poller.txName,
-                 (unsigned)poller.slaveId,
-                 (unsigned)poller.periodMs);
+            xTaskCreate(rs485BmsPollerTask, "rs485_bms_poller", 3072, &poller, 8, &s_rs485PollerTask);
+            ESP_LOGI(EXAMPLE_TAG,
+                     "RS485 BMS poller enabled (tx=%s slave=%u period=%ums)",
+                     poller.txName,
+                     (unsigned)poller.slaveId,
+                     (unsigned)poller.periodMs);
+        }
 #endif
     }
-#endif
 
-    if ((BMS_line == LINE_RS485) &&
-        (Inverter_line == LINE_CAN) &&
-        (BMS_protocol == PROTOCOL_RS485_GROWATT) &&
-        (Inverter_protocol == PROTOCOL_CAN_GROWATT)) {
-        rs485Can322BridgeEnable(rsDecoderByPort(BMS_PORT),
-                                canBusByPort(Inverter_PORT),
-                                canNameByPort(Inverter_PORT));
-    } else if ((BMS_line == LINE_CAN) &&
-               (Inverter_line == LINE_RS485) &&
-               (BMS_protocol == PROTOCOL_CAN_GROWATT) &&
-               (Inverter_protocol == PROTOCOL_RS485_GROWATT)) {
-        canRs485SocBridgeEnable(rsUartByPort(Inverter_PORT),
-                                rsDirByPort(Inverter_PORT),
-                                rsNameByPort(Inverter_PORT));
+    if ((settings.bms_line == LINE_RS485) &&
+        (settings.inverter_line == LINE_CAN) &&
+        (settings.bms_protocol == PROTOCOL_RS485_GROWATT) &&
+        (settings.inverter_protocol == PROTOCOL_CAN_GROWATT)) {
+        rs485Can322BridgeEnable(rsDecoderByPort(settings.bms_port),
+                                canBusByPort(settings.inverter_port),
+                                canNameByPort(settings.inverter_port));
+    } else if ((settings.bms_line == LINE_CAN) &&
+               (settings.inverter_line == LINE_RS485) &&
+               (settings.bms_protocol == PROTOCOL_CAN_GROWATT) &&
+               (settings.inverter_protocol == PROTOCOL_RS485_GROWATT)) {
+        canRs485SocBridgeEnable(rsUartByPort(settings.inverter_port),
+                                rsDirByPort(settings.inverter_port),
+                                rsNameByPort(settings.inverter_port));
     }
+}
+
+void bridgeReloadFromRuntimeSettings(void)
+{
+    rs485BridgeEnable();
+    canBridgeEnable();
 }

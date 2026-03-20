@@ -1,0 +1,154 @@
+#include "runtime_settings.h"
+
+#include "config.h"
+
+#include <string.h>
+
+#include "esp_log.h"
+#include "nvs.h"
+#include "nvs_flash.h"
+
+#define SETTINGS_TAG "RUNTIME_SETTINGS"
+#define SETTINGS_NS  "bridge_cfg"
+
+static bridge_runtime_settings_t s_runtimeSettings;
+static bool s_runtimeSettingsInit = false;
+
+static bridge_runtime_settings_t defaultSettings(void)
+{
+    bridge_runtime_settings_t s = {
+        .mode = SYSTEM_MODE,
+        .bms_line = BMS_line,
+        .inverter_line = Inverter_line,
+        .bms_protocol = BMS_protocol,
+        .inverter_protocol = Inverter_protocol,
+        .bms_port = BMS_PORT,
+        .inverter_port = Inverter_PORT,
+        .web_port = WEB_INTERFACE_PORT,
+        .wifi_ssid = WIFI_STA_SSID,
+        .wifi_password = WIFI_STA_PASSWORD,
+    };
+    return s;
+}
+
+static bool validateSettings(const bridge_runtime_settings_t *s)
+{
+    if (s == NULL) return false;
+    if (s->mode < MODE_SNIFFER || s->mode > MODE_BRIDGE) return false;
+    if (s->bms_line < LINE_CAN || s->bms_line > LINE_RS485) return false;
+    if (s->inverter_line < LINE_CAN || s->inverter_line > LINE_RS485) return false;
+    if (s->bms_protocol < PROTOCOL_CAN_GROWATT || s->bms_protocol > PROTOCOL_RS485_PYLON) return false;
+    if (s->inverter_protocol < PROTOCOL_CAN_GROWATT || s->inverter_protocol > PROTOCOL_RS485_PYLON) return false;
+    if (s->bms_port < 1 || s->bms_port > 2) return false;
+    if (s->inverter_port < 1 || s->inverter_port > 2) return false;
+    if (s->web_port == 0) return false;
+    if (s->wifi_ssid[0] == '\0') return false;
+    if ((s->bms_line == LINE_CAN) && (s->bms_protocol != PROTOCOL_CAN_GROWATT)) return false;
+    if ((s->inverter_line == LINE_CAN) && (s->inverter_protocol != PROTOCOL_CAN_GROWATT)) return false;
+    if ((s->bms_line == LINE_RS485) &&
+        (s->bms_protocol != PROTOCOL_RS485_GROWATT) &&
+        (s->bms_protocol != PROTOCOL_RS485_PYLON)) return false;
+    if ((s->inverter_line == LINE_RS485) &&
+        (s->inverter_protocol != PROTOCOL_RS485_GROWATT) &&
+        (s->inverter_protocol != PROTOCOL_RS485_PYLON)) return false;
+    return true;
+}
+
+void runtimeSettingsInit(void)
+{
+    if (s_runtimeSettingsInit) {
+        return;
+    }
+
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(err);
+
+    s_runtimeSettings = defaultSettings();
+
+    nvs_handle_t nvs = 0;
+    err = nvs_open(SETTINGS_NS, NVS_READONLY, &nvs);
+    if (err == ESP_OK) {
+        bridge_runtime_settings_t loaded = s_runtimeSettings;
+        uint8_t v = 0;
+        size_t len = 0;
+
+        if (nvs_get_u8(nvs, "mode", &v) == ESP_OK) loaded.mode = v;
+        if (nvs_get_u8(nvs, "bline", &v) == ESP_OK) loaded.bms_line = v;
+        if (nvs_get_u8(nvs, "iline", &v) == ESP_OK) loaded.inverter_line = v;
+        if (nvs_get_u8(nvs, "bprot", &v) == ESP_OK) loaded.bms_protocol = v;
+        if (nvs_get_u8(nvs, "iprot", &v) == ESP_OK) loaded.inverter_protocol = v;
+        if (nvs_get_u8(nvs, "bport", &v) == ESP_OK) loaded.bms_port = v;
+        if (nvs_get_u8(nvs, "iport", &v) == ESP_OK) loaded.inverter_port = v;
+        (void)nvs_get_u16(nvs, "wport", &loaded.web_port);
+        len = sizeof(loaded.wifi_ssid);
+        (void)nvs_get_str(nvs, "ssid", loaded.wifi_ssid, &len);
+        len = sizeof(loaded.wifi_password);
+        (void)nvs_get_str(nvs, "pass", loaded.wifi_password, &len);
+
+        if (validateSettings(&loaded)) {
+            s_runtimeSettings = loaded;
+        } else {
+            ESP_LOGW(SETTINGS_TAG, "Stored runtime settings invalid, using config defaults");
+        }
+        nvs_close(nvs);
+    }
+
+    s_runtimeSettingsInit = true;
+
+    ESP_LOGI(SETTINGS_TAG,
+             "Loaded settings: mode=%u bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u)",
+             (unsigned)s_runtimeSettings.mode,
+             (unsigned)s_runtimeSettings.bms_line,
+             (unsigned)s_runtimeSettings.bms_protocol,
+             (unsigned)s_runtimeSettings.bms_port,
+             (unsigned)s_runtimeSettings.inverter_line,
+             (unsigned)s_runtimeSettings.inverter_protocol,
+             (unsigned)s_runtimeSettings.inverter_port);
+}
+
+bridge_runtime_settings_t runtimeSettingsGet(void)
+{
+    if (!s_runtimeSettingsInit) {
+        runtimeSettingsInit();
+    }
+    return s_runtimeSettings;
+}
+
+bool runtimeSettingsSave(const bridge_runtime_settings_t *settings)
+{
+    if (!validateSettings(settings)) {
+        return false;
+    }
+    if (!s_runtimeSettingsInit) {
+        runtimeSettingsInit();
+    }
+
+    nvs_handle_t nvs = 0;
+    if (nvs_open(SETTINGS_NS, NVS_READWRITE, &nvs) != ESP_OK) {
+        return false;
+    }
+
+    bool ok = true;
+    ok &= (nvs_set_u8(nvs, "mode", settings->mode) == ESP_OK);
+    ok &= (nvs_set_u8(nvs, "bline", settings->bms_line) == ESP_OK);
+    ok &= (nvs_set_u8(nvs, "iline", settings->inverter_line) == ESP_OK);
+    ok &= (nvs_set_u8(nvs, "bprot", settings->bms_protocol) == ESP_OK);
+    ok &= (nvs_set_u8(nvs, "iprot", settings->inverter_protocol) == ESP_OK);
+    ok &= (nvs_set_u8(nvs, "bport", settings->bms_port) == ESP_OK);
+    ok &= (nvs_set_u8(nvs, "iport", settings->inverter_port) == ESP_OK);
+    ok &= (nvs_set_u16(nvs, "wport", settings->web_port) == ESP_OK);
+    ok &= (nvs_set_str(nvs, "ssid", settings->wifi_ssid) == ESP_OK);
+    ok &= (nvs_set_str(nvs, "pass", settings->wifi_password) == ESP_OK);
+    ok &= (nvs_commit(nvs) == ESP_OK);
+    nvs_close(nvs);
+
+    if (ok) {
+        s_runtimeSettings = *settings;
+    }
+
+    return ok;
+}

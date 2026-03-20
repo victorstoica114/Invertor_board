@@ -5,6 +5,8 @@
 
 #include "config.h"
 #include "bridge.h"
+#include "runtime_settings.h"
+#include "Web_interface/web_interface.h"
 
 void app_main(void)
 {
@@ -12,11 +14,13 @@ void app_main(void)
 
     xTaskCreate(led_blink_task, "led_blink", 2048, NULL, 1, NULL);
 
+    runtimeSettingsInit();
     rs485Init();
     canInit();
 
     rs485BridgeEnable();
     canBridgeEnable();
+    webInterfaceStartTask();
 
     ESP_LOGI(EXAMPLE_TAG, "Sniffer/bridge running.");
 
