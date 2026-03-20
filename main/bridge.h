@@ -1,11 +1,38 @@
 #pragma once
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+typedef struct {
+    bool valid;
+    char source[24];
+    char protocol[24];
+    float currentA;
+    uint16_t cycles;
+    uint8_t socPct;
+    uint8_t sohPct;
+    float cellMaxV;
+    float cellMinV;
+    uint8_t cellMaxIdx;
+    uint8_t cellMinIdx;
+    float deltaV;
+    float tempMosC;
+    float tempT1C;
+    float tempT2C;
+    float tempT4C;
+    float tempT5C;
+    uint8_t pylonStatus63;
+} bridgeTelemetrySnapshot_t;
+
 void rs485BridgeEnable(void);
 void canBridgeEnable(void);
+void bridgeReloadFromRuntimeSettings(void);
+void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out);
+void bridgeSetTelemetrySnapshot(const bridgeTelemetrySnapshot_t *in);
 
 #ifdef __cplusplus
 }

@@ -468,6 +468,16 @@ void canRs485SocBridgeEnable(uart_port_t inverterUart, gpio_num_t inverterDir, c
              (unsigned)g_canRsSocCtx.fakeSocPct);
 #endif
 }
+
+void canRs485SocBridgeStop(void)
+{
+    if (g_canRsSocTaskHandle != NULL) {
+        vTaskDelete(g_canRsSocTaskHandle);
+        g_canRsSocTaskHandle = NULL;
+    }
+    memset(&g_canRsSocCtx, 0, sizeof(g_canRsSocCtx));
+}
+
 void rs485Can322BridgeEnable(modbusDecoder_t *srcDecoder, twai_handle_t txBus, const char *txName)
 {
 #if !RS485_CAN_322_TRANSLATOR_ENABLE
@@ -502,6 +512,15 @@ void rs485Can322BridgeEnable(modbusDecoder_t *srcDecoder, twai_handle_t txBus, c
              RS485_CAN_322_TX_PERIOD_MS,
              RS485_CAN_BRIDGE_USE_FALLBACK ? "ON" : "OFF");
 #endif
+}
+
+void rs485Can322BridgeStop(void)
+{
+    if (g_rsCanTaskHandle != NULL) {
+        vTaskDelete(g_rsCanTaskHandle);
+        g_rsCanTaskHandle = NULL;
+    }
+    memset(&g_rsCanCtx, 0, sizeof(g_rsCanCtx));
 }
 
 

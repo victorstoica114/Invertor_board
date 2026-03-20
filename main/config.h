@@ -41,6 +41,15 @@
 /* --- UART settings --- */
 #define RS485_BAUDRATE     9600
 #define RS485_BUF_SIZE     512
+#define RS485_USE_HALF_DUPLEX 1
+#define RS485_1_USE_HALF_DUPLEX 1
+#define RS485_2_USE_HALF_DUPLEX 1
+#define RS485_1_DIR_TX_LEVEL 1
+#define RS485_2_DIR_TX_LEVEL 1
+#define RS485_1_TX_PRE_DELAY_MS 0
+#define RS485_1_TX_POST_DELAY_MS 0
+#define RS485_2_TX_PRE_DELAY_MS 0
+#define RS485_2_TX_POST_DELAY_MS 0
 
 /* --- Decoder / logging compile-time switches --- */
 #define CAN_DECODER_SHOW_RAW_FRAMES 0
@@ -48,9 +57,16 @@
 #define MODBUS_DECODER_SNAPSHOT_ONLY 1
 #define RS485_FORWARD_VERBOSE_LOGS 0
 
-/* --- Bridge mode switches --- */
-#define CAN_FORWARD_ENABLE 1
-#define RS485_FORWARD_ENABLE 0
+/* --- Bridge / runtime modes --- */
+#define MODE_SNIFFER 1
+#define MODE_FORWARD 2
+#define MODE_BRIDGE 3
+
+#define SYSTEM_MODE MODE_FORWARD
+
+/* --- Bridge mode switches (derived from SYSTEM_MODE) --- */
+#define CAN_FORWARD_ENABLE   ((SYSTEM_MODE) == MODE_FORWARD)
+#define RS485_FORWARD_ENABLE ((SYSTEM_MODE) == MODE_FORWARD)
 #define CAN_EXCLUDE_LIST_ENABLE 0
 #define RS485_REG_EXCLUDE_LIST_ENABLE 0
 
@@ -60,6 +76,7 @@
 
 #define PROTOCOL_CAN_GROWATT 1
 #define PROTOCOL_RS485_GROWATT 2
+#define PROTOCOL_RS485_PYLON 3
 
 /* Requested user-facing config macros */
 #define BMS_line LINE_CAN
@@ -69,6 +86,16 @@
 #define BMS_PORT 1
 #define Inverter_PORT 2
 
+/* --- Wi-Fi / web interface --- */
+#define WIFI_STA_SSID "ED423"
+#define WIFI_STA_PASSWORD "electr0n!ca"
+#define WIFI_STA_MAX_RETRY 10
+#define WIFI_STA_HOSTNAME "esp32-bridge"
+#define WEB_INTERFACE_ENABLE 1
+#define WEB_INTERFACE_PORT 80
+#define WEB_INTERFACE_TASK_STACK 6144
+#define WEB_INTERFACE_TASK_PRIO 5
+
 /* Compile-time validation */
 #if ((BMS_line != LINE_CAN) && (BMS_line != LINE_RS485))
 #error "BMS_line must be LINE_CAN or LINE_RS485"
@@ -76,11 +103,11 @@
 #if ((Inverter_line != LINE_CAN) && (Inverter_line != LINE_RS485))
 #error "Inverter_line must be LINE_CAN or LINE_RS485"
 #endif
-#if ((BMS_protocol != PROTOCOL_CAN_GROWATT) && (BMS_protocol != PROTOCOL_RS485_GROWATT))
-#error "BMS_protocol must be PROTOCOL_CAN_GROWATT or PROTOCOL_RS485_GROWATT"
+#if ((BMS_protocol != PROTOCOL_CAN_GROWATT) && (BMS_protocol != PROTOCOL_RS485_GROWATT) && (BMS_protocol != PROTOCOL_RS485_PYLON))
+#error "BMS_protocol must be PROTOCOL_CAN_GROWATT, PROTOCOL_RS485_GROWATT or PROTOCOL_RS485_PYLON"
 #endif
-#if ((Inverter_protocol != PROTOCOL_CAN_GROWATT) && (Inverter_protocol != PROTOCOL_RS485_GROWATT))
-#error "Inverter_protocol must be PROTOCOL_CAN_GROWATT or PROTOCOL_RS485_GROWATT"
+#if ((Inverter_protocol != PROTOCOL_CAN_GROWATT) && (Inverter_protocol != PROTOCOL_RS485_GROWATT) && (Inverter_protocol != PROTOCOL_RS485_PYLON))
+#error "Inverter_protocol must be PROTOCOL_CAN_GROWATT, PROTOCOL_RS485_GROWATT or PROTOCOL_RS485_PYLON"
 #endif
 #if ((BMS_PORT < 1) || (BMS_PORT > 2))
 #error "BMS_PORT must be 1 or 2"
@@ -91,14 +118,14 @@
 #if ((BMS_line == LINE_CAN) && (BMS_protocol != PROTOCOL_CAN_GROWATT))
 #error "If BMS_line is LINE_CAN, BMS_protocol must be PROTOCOL_CAN_GROWATT"
 #endif
-#if ((BMS_line == LINE_RS485) && (BMS_protocol != PROTOCOL_RS485_GROWATT))
-#error "If BMS_line is LINE_RS485, BMS_protocol must be PROTOCOL_RS485_GROWATT"
+#if ((BMS_line == LINE_RS485) && (BMS_protocol != PROTOCOL_RS485_GROWATT) && (BMS_protocol != PROTOCOL_RS485_PYLON))
+#error "If BMS_line is LINE_RS485, BMS_protocol must be PROTOCOL_RS485_GROWATT or PROTOCOL_RS485_PYLON"
 #endif
 #if ((Inverter_line == LINE_CAN) && (Inverter_protocol != PROTOCOL_CAN_GROWATT))
 #error "If Inverter_line is LINE_CAN, Inverter_protocol must be PROTOCOL_CAN_GROWATT"
 #endif
-#if ((Inverter_line == LINE_RS485) && (Inverter_protocol != PROTOCOL_RS485_GROWATT))
-#error "If Inverter_line is LINE_RS485, Inverter_protocol must be PROTOCOL_RS485_GROWATT"
+#if ((Inverter_line == LINE_RS485) && (Inverter_protocol != PROTOCOL_RS485_GROWATT) && (Inverter_protocol != PROTOCOL_RS485_PYLON))
+#error "If Inverter_line is LINE_RS485, Inverter_protocol must be PROTOCOL_RS485_GROWATT or PROTOCOL_RS485_PYLON"
 #endif
 
 /* --- RS485 -> CAN translator (synthesizes Growatt CAN telemetry from RS485 cache) --- */

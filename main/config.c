@@ -139,27 +139,49 @@ void rs485Init(void)
 
     /* RS485_1 */
     ESP_ERROR_CHECK(uart_param_config(RS485_1_UART, &uartConfig));
+#if RS485_1_USE_HALF_DUPLEX
+    ESP_ERROR_CHECK(uart_set_pin(RS485_1_UART, RS485_1_TX, RS485_1_RX,
+                                 RS485_1_DIR, UART_PIN_NO_CHANGE));
+#else
     ESP_ERROR_CHECK(uart_set_pin(RS485_1_UART, RS485_1_TX, RS485_1_RX,
                                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+#endif
     ESP_ERROR_CHECK(uart_driver_install(RS485_1_UART,
                                         RS485_BUF_SIZE, RS485_BUF_SIZE,
                                         0, NULL, 0));
+#if RS485_1_USE_HALF_DUPLEX
+    ESP_ERROR_CHECK(uart_set_mode(RS485_1_UART, UART_MODE_RS485_HALF_DUPLEX));
+#else
     gpio_reset_pin(RS485_1_DIR);
     gpio_set_direction(RS485_1_DIR, GPIO_MODE_OUTPUT);
-    gpio_set_level(RS485_1_DIR, 0); /* RX default */
+    gpio_set_level(RS485_1_DIR, RS485_1_DIR_TX_LEVEL ? 0 : 1); /* RX default */
+#endif
 
     /* RS485_2 */
     ESP_ERROR_CHECK(uart_param_config(RS485_2_UART, &uartConfig));
+#if RS485_2_USE_HALF_DUPLEX
+    ESP_ERROR_CHECK(uart_set_pin(RS485_2_UART, RS485_2_TX, RS485_2_RX,
+                                 RS485_2_DIR, UART_PIN_NO_CHANGE));
+#else
     ESP_ERROR_CHECK(uart_set_pin(RS485_2_UART, RS485_2_TX, RS485_2_RX,
                                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+#endif
     ESP_ERROR_CHECK(uart_driver_install(RS485_2_UART,
                                         RS485_BUF_SIZE, RS485_BUF_SIZE,
                                         0, NULL, 0));
+#if RS485_2_USE_HALF_DUPLEX
+    ESP_ERROR_CHECK(uart_set_mode(RS485_2_UART, UART_MODE_RS485_HALF_DUPLEX));
+#else
     gpio_reset_pin(RS485_2_DIR);
     gpio_set_direction(RS485_2_DIR, GPIO_MODE_OUTPUT);
-    gpio_set_level(RS485_2_DIR, 0); /* RX default */
+    gpio_set_level(RS485_2_DIR, RS485_2_DIR_TX_LEVEL ? 0 : 1); /* RX default */
+#endif
 
-    ESP_LOGI(EXAMPLE_TAG, "RS485_1 & RS485_2 initialized (%d 8N1)", RS485_BAUDRATE);
+    ESP_LOGI(EXAMPLE_TAG,
+             "RS485_1 & RS485_2 initialized (%d 8N1, hd1=%s hd2=%s)",
+             RS485_BAUDRATE,
+             RS485_1_USE_HALF_DUPLEX ? "ON" : "OFF",
+             RS485_2_USE_HALF_DUPLEX ? "ON" : "OFF");
 }
 
 /* ---------- CAN init ---------- */
