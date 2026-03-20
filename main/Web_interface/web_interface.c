@@ -245,14 +245,17 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "<div class='tabs'>"
         "<button class='tab active' onclick='showTab(\"telemetry\",this)'>Telemetry</button>"
         "<button class='tab' onclick='showTab(\"settings\",this)'>Settings</button>"
+        "<button class='tab' onclick='showTab(\"logs\",this)'>Logs</button>"
         "</div>"
         "<div id='telemetry' class='panel active'><div id='telemetryCards' class='grid'></div></div>"
         "<div id='settings' class='panel'><div class='card'><div id='settingsForm'>Loading...</div></div></div>"
+        "<div id='logs' class='panel'><div class='card'><pre id='logsContent' class='mono' style='white-space:pre-wrap;margin:0'>Loading...</pre></div></div>"
         "<script>"
+        "let currentTab='telemetry';"
         "function showTab(id,btn){document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));"
         "document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));"
         "if(btn){btn.classList.add('active');}"
-        "document.getElementById(id).classList.add('active');if(id==='settings'){loadSettings();}}"
+        "currentTab=id;document.getElementById(id).classList.add('active');if(id==='settings'){loadSettings();}if(id==='logs'){refreshLogs();}}"
         "function row(k,v){return '<tr><td>'+k+'</td><td class=\"mono\">'+v+'</td></tr>';}"
         "function card(title,rows){return '<div class=\"card\"><h3>'+title+'</h3><table>'+rows.join('')+'</table></div>';}"
         "function renderTelemetry(t){"
@@ -312,7 +315,20 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "let s=await fetch('/api/settings').then(r=>r.json());"
         "renderSettings(s);"
         "}"
-        "refreshTelemetry();setInterval(refreshTelemetry,2000);"
+        "async function refreshLogs(){"
+        "const el=document.getElementById('logsContent');"
+        "if(!el){return;}"
+        "try{"
+        "const res=await fetch('/api/logs',{cache:'no-store'});"
+        "if(!res.ok){el.textContent='Log fetch failed: HTTP '+res.status;return;}"
+        "const t=await res.text();"
+        "el.textContent=t&&t.trim()?t:'No decoded BMS logs yet.';"
+        "}catch(e){"
+        "el.textContent='Log fetch failed: '+(e&&e.message?e.message:String(e));"
+        "}"
+        "}"
+        "refreshTelemetry();refreshLogs();setInterval(refreshTelemetry,2000);"
+        "setInterval(function(){if(currentTab==='logs'){refreshLogs();}},5000);"
         "</script></body></html>";
 
     httpd_resp_set_type(req, "text/html; charset=utf-8");
@@ -369,6 +385,17 @@ static esp_err_t telemetryHandler(httpd_req_t *req)
 
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t logsHandler(httpd_req_t *req)
+{
+    char text[2048];
+
+    bridgeGetDecodedLogSnapshot(text, sizeof(text));
+    httpd_resp_set_type(req, "text/plain; charset=utf-8");
+    return httpd_resp_send(req,
+                           text[0] != '\0' ? text : "No decoded BMS logs yet.",
+                           HTTPD_RESP_USE_STRLEN);
 }
 
 static esp_err_t settingsHandler(httpd_req_t *req)
@@ -494,6 +521,12 @@ static void startHttpServer(void)
         .handler = telemetryHandler,
         .user_ctx = NULL
     };
+    httpd_uri_t logsUri = {
+        .uri = "/api/logs",
+        .method = HTTP_GET,
+        .handler = logsHandler,
+        .user_ctx = NULL
+    };
     httpd_uri_t settingsUri = {
         .uri = "/api/settings",
         .method = HTTP_GET,
@@ -509,6 +542,7 @@ static void startHttpServer(void)
 
     httpd_register_uri_handler(s_httpd, &rootUri);
     httpd_register_uri_handler(s_httpd, &telemetryUri);
+    httpd_register_uri_handler(s_httpd, &logsUri);
     httpd_register_uri_handler(s_httpd, &settingsUri);
     httpd_register_uri_handler(s_httpd, &settingsPostUri);
 }
