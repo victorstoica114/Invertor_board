@@ -128,6 +128,126 @@ static bool bridgeTryBuildGrowattRs485Telemetry(const bridge_runtime_settings_t 
     return true;
 }
 
+static bool bridgeTryBuildGrowattRs485Log(const bridge_runtime_settings_t *settings,
+                                          char *out,
+                                          uint32_t outSize)
+{
+    modbusDecoder_t *dec = NULL;
+    uint16_t r0001 = 0;
+    uint16_t r0002 = 0;
+    uint16_t r0003 = 0;
+    uint16_t r0004 = 0;
+    uint16_t soc = 0;
+    uint16_t packCv = 0;
+    uint16_t temp = 0;
+    uint16_t cmaxMv = 0;
+    uint16_t cminMv = 0;
+    uint16_t cmaxIdx = 0;
+    uint16_t cminIdx = 0;
+    uint16_t remainCapCah = 0;
+    uint16_t fullCapCah = 0;
+    uint16_t cvTargetCv = 0;
+    uint16_t soh = 0;
+    uint16_t packAbsICa = 0;
+    uint16_t cycleCount = 0;
+    uint16_t ichgLimCa = 0;
+    uint16_t idisLimCa = 0;
+    int pos = 0;
+
+    if (out == NULL || outSize == 0u || settings == NULL) {
+        return false;
+    }
+
+    out[0] = '\0';
+    if (settings->bms_line != LINE_RS485 || settings->bms_protocol != PROTOCOL_RS485_GROWATT) {
+        return false;
+    }
+
+    dec = rs485ForwardSnifferGetDecoder(settings->bms_port);
+    if (dec == NULL || !modbusDecoderHasFreshData(dec, BRIDGE_SOURCE_STALE_MS)) {
+        return false;
+    }
+
+    pos += snprintf(out + pos, outSize - (uint32_t)pos, "%s SNAPSHOT BEGIN\n", dec->ifName != NULL ? dec->ifName : rsNameByPort(settings->bms_port));
+
+    if (modbusDecoderGetReg(dec, GROWATT_MB_REG_INFO_0001, &r0001) &&
+        modbusDecoderGetReg(dec, GROWATT_MB_REG_INFO_0002, &r0002) &&
+        modbusDecoderGetReg(dec, GROWATT_MB_REG_INFO_0003, &r0003) &&
+        modbusDecoderGetReg(dec, GROWATT_MB_REG_INFO_0004, &r0004)) {
+        pos += snprintf(out + pos, outSize - (uint32_t)pos,
+                        "BMS-INFO: r0001..0004 = %04X %04X %04X %04X\n",
+                        (unsigned)r0001, (unsigned)r0002, (unsigned)r0003, (unsigned)r0004);
+    }
+
+    if (modbusDecoderGetReg(dec, GROWATT_MB_REG_SOC_PCT, &soc) &&
+        modbusDecoderGetReg(dec, GROWATT_MB_REG_PACK_V_CV, &packCv) &&
+        modbusDecoderGetReg(dec, GROWATT_MB_REG_TEMP_C, &temp) &&
+        modbusDecoderGetReg(dec, GROWATT_MB_REG_CELL_MAX_MV, &cmaxMv) &&
+        modbusDecoderGetReg(dec, GROWATT_MB_REG_CELL_MIN_MV, &cminMv) &&
+        modbusDecoderGetReg(dec, GROWATT_MB_REG_CELL_MAX_IDX, &cmaxIdx) &&
+        modbusDecoderGetReg(dec, GROWATT_MB_REG_CELL_MIN_IDX, &cminIdx)) {
+        pos += snprintf(out + pos, outSize - (uint32_t)pos,
+                        "BMS: %.2fV | SOC %u%% | %dC | Cmin %.3fV(C%u) | Cmax %.3fV(C%u) | dV %.3fV\n",
+                        (double)packCv / 100.0,
+                        (unsigned)soc,
+                        (int16_t)temp,
+                        (double)cminMv / 1000.0,
+                        (unsigned)cminIdx,
+                        (double)cmaxMv / 1000.0,
+                        (unsigned)cmaxIdx,
+                        (double)(cmaxMv - cminMv) / 1000.0);
+    }
+
+    if (modbusDecoderGetReg(dec, GROWATT_MB_REG_REMAIN_CAP_CAH, &remainCapCah) &&
+        modbusDecoderGetReg(dec, GROWATT_MB_REG_FULL_CAP_CAH, &fullCapCah)) {
+        pos += snprintf(out + pos, outSize - (uint32_t)pos,
+                        "BMS-CAP: RM %.2fAh | FCC %.2fAh\n",
+                        (double)remainCapCah / 100.0,
+                        (double)fullCapCah / 100.0);
+    }
+
+    if (modbusDecoderGetReg(dec, GROWATT_MB_REG_CV_TARGET_CV, &cvTargetCv) &&
+        modbusDecoderGetReg(dec, GROWATT_MB_REG_SOH_PCT, &soh)) {
+        pos += snprintf(out + pos, outSize - (uint32_t)pos,
+                        "BMS-EXT: CVtarget %.2fV | SOH %u%%\n",
+                        (double)cvTargetCv / 100.0,
+                        (unsigned)soh);
+    }
+
+    if (modbusDecoderGetReg(dec, GROWATT_MB_REG_PACK_I_ABS_CA_TENTATIVE, &packAbsICa)) {
+        pos += snprintf(out + pos, outSize - (uint32_t)pos,
+                        "BMS-TENT: |Ipack| %.2fA\n",
+                        (double)packAbsICa / 100.0);
+    }
+    if (modbusDecoderGetReg(dec, GROWATT_MB_REG_CYCLE_COUNT_TENTATIVE, &cycleCount)) {
+        pos += snprintf(out + pos, outSize - (uint32_t)pos,
+                        "BMS-TENT: Cycles %u\n",
+                        (unsigned)cycleCount);
+    }
+    if (modbusDecoderGetReg(dec, GROWATT_MB_REG_ICHG_LIM_CA_TENTATIVE, &ichgLimCa) ||
+        modbusDecoderGetReg(dec, GROWATT_MB_REG_IDIS_LIM_CA_TENTATIVE, &idisLimCa)) {
+        pos += snprintf(out + pos, outSize - (uint32_t)pos,
+                        "BMS-TENT: IchgLim %.2fA | IdisLim %.2fA\n",
+                        (double)ichgLimCa / 100.0,
+                        (double)idisLimCa / 100.0);
+    }
+
+    for (uint8_t i = 0; i < 16u && pos < (int)outSize; i++) {
+        uint16_t mv = 0;
+        if (!modbusDecoderGetReg(dec, (uint16_t)(GROWATT_MB_REG_CELL_BASE + i), &mv)) {
+            continue;
+        }
+        pos += snprintf(out + pos, outSize - (uint32_t)pos,
+                        "Cell%02u = %.3f V (%u mV)\n",
+                        (unsigned)(i + 1u),
+                        (double)mv / 1000.0,
+                        (unsigned)mv);
+    }
+
+    snprintf(out + pos, outSize - (uint32_t)pos, "%s SNAPSHOT END", dec->ifName != NULL ? dec->ifName : rsNameByPort(settings->bms_port));
+    return true;
+}
+
 static bool bridgeTryAttachGrowattCanAlerts(const bridge_runtime_settings_t *settings,
                                             bridgeTelemetrySnapshot_t *out)
 {
@@ -257,7 +377,13 @@ void bridgeSetUniversalBatteryModel(const universal_battery_model_t *in)
 
 void bridgeGetDecodedLogSnapshot(char *out, uint32_t outSize)
 {
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+
     if (out == NULL || outSize == 0) {
+        return;
+    }
+
+    if (bridgeTryBuildGrowattRs485Log(&settings, out, outSize)) {
         return;
     }
 
