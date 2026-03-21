@@ -37,6 +37,13 @@ typedef struct {
 } pylonProbePending_t;
 
 typedef struct {
+    bool valid;
+    uint8_t cid2;
+    uint8_t reqAdr;
+    int64_t seenUs;
+} pylonForwardPending_t;
+
+typedef struct {
     const char *probeName;
     uart_port_t probeUart;
     gpio_num_t probeDirPin;
@@ -53,9 +60,11 @@ static pylon_rs485_cache_t s_pylonCache = {
 
 static pylon_rs485_summary_t s_pylonSummary = {0};
 static pylonProbePending_t s_probePending = {0};
+static pylonForwardPending_t s_forwardPending = {0};
 static TaskHandle_t s_pylonBmsTask = NULL;
 static TaskHandle_t s_pylonInvTask = NULL;
 static TaskHandle_t s_pylonProbeTaskHandle = NULL;
+static char s_pylonDecodedLog[2048];
 
 static void deleteTaskIfRunning(TaskHandle_t *handle)
 {
@@ -245,6 +254,54 @@ static void telemetryFromSummary(void)
     bridgeSetTelemetrySnapshot(&snap);
 }
 
+static void updateDecodedLogSnapshot(void)
+{
+    int64_t nowS = esp_timer_get_time() / 1000000LL;
+
+    snprintf(s_pylonDecodedLog,
+             sizeof(s_pylonDecodedLog),
+             "BMS Decoded Logs\n"
+             "Updated: %lld s uptime\n\n"
+             "Pylon 0x61\n"
+             "  valid : %s\n"
+             "  pack  : I~=%.2fA  SOC~=%u%%  SOH?~=%u%%  cycles~=%u  w0=0x%04X\n"
+             "  cells : max=%.3fV#%02u  min=%.3fV#%02u  dV=%.3fV\n"
+             "  temps : MOS?=%.1fC  T1?=%.1fC  T2?=%.1fC  T4?=%.1fC  T5?=%.1fC\n"
+             "  raw   : [%s]\n\n"
+             "Pylon 0x62\n"
+             "  valid : %s\n"
+             "  raw   : [%s]\n\n"
+             "Pylon 0x63\n"
+             "  valid : %s\n"
+             "  flags : status=0x%02X  likely(discharge=ON charge/balance=OFF)\n"
+             "  raw   : [%s]\n",
+             (long long)nowS,
+             s_pylonCache.valid61 ? "YES" : "NO",
+             (double)s_pylonSummary.current_a,
+             (unsigned)s_pylonSummary.soc_pct,
+             (unsigned)s_pylonSummary.soh_pct,
+             (unsigned)s_pylonSummary.cycles,
+             (unsigned)s_pylonSummary.raw_word0,
+             (double)s_pylonSummary.max_cell_mv / 1000.0,
+             (unsigned)s_pylonSummary.max_cell_idx,
+             (double)s_pylonSummary.min_cell_mv / 1000.0,
+             (unsigned)s_pylonSummary.min_cell_idx,
+             ((double)s_pylonSummary.max_cell_mv - (double)s_pylonSummary.min_cell_mv) / 1000.0,
+             (double)s_pylonSummary.temp_mos_c10 / 10.0,
+             (double)s_pylonSummary.temp_t1_c10 / 10.0,
+             (double)s_pylonSummary.temp_t2_c10 / 10.0,
+             (double)s_pylonSummary.temp_t4_c10 / 10.0,
+             (double)s_pylonSummary.temp_t5_c10 / 10.0,
+             s_pylonCache.valid61 ? s_pylonCache.info61 : "",
+             s_pylonCache.valid62 ? "YES" : "NO",
+             s_pylonCache.valid62 ? s_pylonCache.info62 : "",
+             s_pylonCache.valid63 ? "YES" : "NO",
+             (unsigned)s_pylonSummary.status_63,
+             s_pylonCache.valid63 ? s_pylonCache.info63 : "");
+
+    bridgeSetDecodedLogSnapshot(s_pylonDecodedLog);
+}
+
 static void logPylonFrame(const char *prefix, const uint8_t *frame, int len)
 {
     const int maxHexBytes = 64;
@@ -377,6 +434,7 @@ static void updateSummary61(void)
              (double)s_pylonSummary.temp_t4_c10 / 10.0,
              (double)s_pylonSummary.temp_t5_c10 / 10.0);
     ESP_LOGI(EXAMPLE_TAG, "  raw  : [%s]", s_pylonCache.info61);
+    updateDecodedLogSnapshot();
 }
 
 static void updateSummary63(void)
@@ -394,6 +452,7 @@ static void updateSummary63(void)
              "  flags: status=0x%02X  likely(discharge=ON charge/balance=OFF)",
              (unsigned)s_pylonSummary.status_63);
     ESP_LOGI(EXAMPLE_TAG, "  raw  : [%s]", s_pylonCache.info63);
+    updateDecodedLogSnapshot();
 }
 
 static void cacheResponse(uint8_t requestedCid2, const uint8_t *frame, int len)
@@ -419,6 +478,7 @@ static void cacheResponse(uint8_t requestedCid2, const uint8_t *frame, int len)
             s_pylonCache.valid62 = true;
             ESP_LOGI(EXAMPLE_TAG, "RS485 PYLON 0x62");
             ESP_LOGI(EXAMPLE_TAG, "  raw  : [%s]", s_pylonCache.info62);
+            updateDecodedLogSnapshot();
             break;
         case 0x63:
             if (payloadLen >= (int)sizeof(s_pylonCache.info63)) payloadLen = (int)sizeof(s_pylonCache.info63) - 1;
@@ -549,6 +609,34 @@ static void maybeCheckProbeTimeout(const pylonRs485BridgeCtx_t *ctx, int64_t now
     s_probePending.active = false;
 }
 
+static void maybeHandleForwardDecode(const pylonRs485BridgeCtx_t *ctx,
+                                     const uint8_t *frame,
+                                     int len,
+                                     int64_t nowUs)
+{
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+    uint8_t ver = 0, adr = 0, cid1 = 0, code = 0;
+
+    if (settings.mode != MODE_FORWARD) return;
+    if (!parsePylonHeader(frame, len, &ver, &adr, &cid1, &code)) return;
+    if (cid1 != 0x46) return;
+
+    if (ctx->isInverterSide && (code == 0x61 || code == 0x62 || code == 0x63)) {
+        s_forwardPending.valid = true;
+        s_forwardPending.cid2 = code;
+        s_forwardPending.reqAdr = adr;
+        s_forwardPending.seenUs = nowUs;
+        return;
+    }
+
+    if (ctx->isBmsSide && code == 0x00 && s_forwardPending.valid) {
+        if ((nowUs - s_forwardPending.seenUs) <= 1000000LL) {
+            cacheResponse(s_forwardPending.cid2, frame, len);
+        }
+        s_forwardPending.valid = false;
+    }
+}
+
 static void pylonBridgeTask(void *pv)
 {
     pylonRs485BridgeCtx_t *ctx = (pylonRs485BridgeCtx_t *)pv;
@@ -586,6 +674,7 @@ static void pylonBridgeTask(void *pv)
             if (haveFrame && frameLen > 0 && frameBuf[frameLen - 1] == '\r') {
                 bridge_runtime_settings_t settings = runtimeSettingsGet();
                 logDecodedPylon(frameBuf, frameLen);
+                maybeHandleForwardDecode(ctx, frameBuf, frameLen, nowUs);
 
                 if (settings.mode == MODE_FORWARD) {
                     forwardFrame(ctx->rxName, ctx->txName, ctx->txUart, ctx->txDirPin, frameBuf, frameLen);
@@ -666,9 +755,11 @@ void pylonRs485BridgeEnable(void)
     memset(&s_pylonCache, 0, sizeof(s_pylonCache));
     memset(&s_pylonSummary, 0, sizeof(s_pylonSummary));
     memset(&s_probePending, 0, sizeof(s_probePending));
+    memset(&s_forwardPending, 0, sizeof(s_forwardPending));
     snprintf(s_pylonCache.info62, sizeof(s_pylonCache.info62), "00000000");
     s_pylonCache.valid62 = true;
     bridgeSetTelemetrySnapshot(NULL);
+    bridgeSetDecodedLogSnapshot("");
 
     deleteTaskIfRunning(&s_pylonBmsTask);
     deleteTaskIfRunning(&s_pylonInvTask);
@@ -716,4 +807,7 @@ void pylonRs485BridgeStop(void)
     deleteTaskIfRunning(&s_pylonBmsTask);
     deleteTaskIfRunning(&s_pylonInvTask);
     deleteTaskIfRunning(&s_pylonProbeTaskHandle);
+    memset(&s_forwardPending, 0, sizeof(s_forwardPending));
+    bridgeSetTelemetrySnapshot(NULL);
+    bridgeSetDecodedLogSnapshot("");
 }

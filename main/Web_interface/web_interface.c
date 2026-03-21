@@ -27,12 +27,34 @@ static int s_wifiRetryCount = 0;
 static httpd_handle_t s_httpd = NULL;
 static esp_netif_t *s_wifiStaNetif = NULL;
 static TaskHandle_t s_settingsApplyTask = NULL;
+static char s_logsResponse[2048];
 
 typedef struct {
     bool restartWeb;
 } settingsApplyCtx_t;
 
 static void startHttpServer(void);
+
+static void setNoCacheHeaders(httpd_req_t *req)
+{
+    if (req == NULL) {
+        return;
+    }
+
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    httpd_resp_set_hdr(req, "Pragma", "no-cache");
+    httpd_resp_set_hdr(req, "Expires", "0");
+}
+
+static void configureWebLogLevels(void)
+{
+    esp_log_level_set("httpd", ESP_LOG_WARN);
+    esp_log_level_set("httpd_txrx", ESP_LOG_WARN);
+    esp_log_level_set("httpd_parse", ESP_LOG_WARN);
+    esp_log_level_set("httpd_uri", ESP_LOG_WARN);
+    esp_log_level_set("httpd_sess", ESP_LOG_WARN);
+    esp_log_level_set("event", ESP_LOG_WARN);
+}
 
 static void wifiCopyField(uint8_t *dst, size_t dstSize, const char *src)
 {
@@ -245,14 +267,17 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "<div class='tabs'>"
         "<button class='tab active' onclick='showTab(\"telemetry\",this)'>Telemetry</button>"
         "<button class='tab' onclick='showTab(\"settings\",this)'>Settings</button>"
+        "<button class='tab' onclick='showTab(\"logs\",this)'>Logs</button>"
         "</div>"
         "<div id='telemetry' class='panel active'><div id='telemetryCards' class='grid'></div></div>"
         "<div id='settings' class='panel'><div class='card'><div id='settingsForm'>Loading...</div></div></div>"
+        "<div id='logs' class='panel'><div class='card'><pre id='logsContent' class='mono' style='white-space:pre-wrap;margin:0'>Loading...</pre></div></div>"
         "<script>"
+        "let currentTab='telemetry';"
         "function showTab(id,btn){document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));"
         "document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));"
         "if(btn){btn.classList.add('active');}"
-        "document.getElementById(id).classList.add('active');if(id==='settings'){loadSettings();}}"
+        "currentTab=id;document.getElementById(id).classList.add('active');if(id==='settings'){loadSettings();}if(id==='logs'){refreshLogs();}}"
         "function row(k,v){return '<tr><td>'+k+'</td><td class=\"mono\">'+v+'</td></tr>';}"
         "function card(title,rows){return '<div class=\"card\"><h3>'+title+'</h3><table>'+rows.join('')+'</table></div>';}"
         "function renderTelemetry(t){"
@@ -305,16 +330,30 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "if(body.ok){setTimeout(loadSettings,300);}"
         "}"
         "async function refreshTelemetry(){"
-        "let t=await fetch('/api/telemetry').then(r=>r.json());"
+        "let t=await fetch('/api/telemetry?ts='+Date.now(),{cache:'no-store'}).then(r=>r.json());"
         "renderTelemetry(t);"
         "}"
         "async function loadSettings(){"
-        "let s=await fetch('/api/settings').then(r=>r.json());"
+        "let s=await fetch('/api/settings?ts='+Date.now(),{cache:'no-store'}).then(r=>r.json());"
         "renderSettings(s);"
         "}"
-        "refreshTelemetry();setInterval(refreshTelemetry,2000);"
+        "async function refreshLogs(){"
+        "const el=document.getElementById('logsContent');"
+        "if(!el){return;}"
+        "try{"
+        "const res=await fetch('/api/logs?ts='+Date.now(),{cache:'no-store'});"
+        "if(!res.ok){el.textContent='Log fetch failed: HTTP '+res.status;return;}"
+        "const t=await res.text();"
+        "el.textContent=t&&t.trim()?t:'No decoded BMS logs yet.';"
+        "}catch(e){"
+        "el.textContent='Log fetch failed: '+(e&&e.message?e.message:String(e));"
+        "}"
+        "}"
+        "refreshTelemetry();refreshLogs();setInterval(refreshTelemetry,2000);"
+        "setInterval(function(){if(currentTab==='logs'){refreshLogs();}},5000);"
         "</script></body></html>";
 
+    setNoCacheHeaders(req);
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     return httpd_resp_send(req, html, HTTPD_RESP_USE_STRLEN);
 }
@@ -367,8 +406,20 @@ static esp_err_t telemetryHandler(httpd_req_t *req)
              (double)snap.tempT5C,
              (unsigned)snap.pylonStatus63);
 
+    setNoCacheHeaders(req);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t logsHandler(httpd_req_t *req)
+{
+    bridgeGetDecodedLogSnapshot(s_logsResponse, sizeof(s_logsResponse));
+    ESP_LOGI(WEB_TAG, "/api/logs requested (len=%u)", (unsigned)strlen(s_logsResponse));
+    setNoCacheHeaders(req);
+    httpd_resp_set_type(req, "text/plain; charset=utf-8");
+    return httpd_resp_send(req,
+                           s_logsResponse[0] != '\0' ? s_logsResponse : "No decoded BMS logs yet.",
+                           HTTPD_RESP_USE_STRLEN);
 }
 
 static esp_err_t settingsHandler(httpd_req_t *req)
@@ -411,6 +462,7 @@ static esp_err_t settingsHandler(httpd_req_t *req)
              settings.wifi_password,
              settings.web_port);
 
+    setNoCacheHeaders(req);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
 }
@@ -427,6 +479,7 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
 
     if (received <= 0) {
         httpd_resp_set_status(req, "400 Bad Request");
+        setNoCacheHeaders(req);
         httpd_resp_set_type(req, "application/json");
         return httpd_resp_send(req, errResp, HTTPD_RESP_USE_STRLEN);
     }
@@ -446,10 +499,12 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
 
     if (!runtimeSettingsSave(&settings)) {
         httpd_resp_set_status(req, "400 Bad Request");
+        setNoCacheHeaders(req);
         httpd_resp_set_type(req, "application/json");
         return httpd_resp_send(req, errResp, HTTPD_RESP_USE_STRLEN);
     }
 
+    setNoCacheHeaders(req);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, okResp, HTTPD_RESP_USE_STRLEN);
 
@@ -476,6 +531,7 @@ static void startHttpServer(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = runtimeSettingsGet().web_port;
+    config.stack_size = 8192;
 
     if (httpd_start(&s_httpd, &config) != ESP_OK) {
         ESP_LOGE(WEB_TAG, "Failed to start HTTP server");
@@ -494,6 +550,12 @@ static void startHttpServer(void)
         .handler = telemetryHandler,
         .user_ctx = NULL
     };
+    httpd_uri_t logsUri = {
+        .uri = "/api/logs",
+        .method = HTTP_GET,
+        .handler = logsHandler,
+        .user_ctx = NULL
+    };
     httpd_uri_t settingsUri = {
         .uri = "/api/settings",
         .method = HTTP_GET,
@@ -509,6 +571,7 @@ static void startHttpServer(void)
 
     httpd_register_uri_handler(s_httpd, &rootUri);
     httpd_register_uri_handler(s_httpd, &telemetryUri);
+    httpd_register_uri_handler(s_httpd, &logsUri);
     httpd_register_uri_handler(s_httpd, &settingsUri);
     httpd_register_uri_handler(s_httpd, &settingsPostUri);
 }
@@ -542,6 +605,7 @@ static void webInterfaceTask(void *pv)
 {
     (void)pv;
 
+    configureWebLogLevels();
     s_wifiEventGroup = xEventGroupCreate();
     initWifiSta();
     startHttpServer();

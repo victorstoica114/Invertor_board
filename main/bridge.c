@@ -20,6 +20,7 @@
 #define RS485_VERBOSE_LOGI(...) do { if (RS485_FORWARD_VERBOSE_LOGS) { ESP_LOGI(EXAMPLE_TAG, __VA_ARGS__); } } while (0)
 
 static bridgeTelemetrySnapshot_t gBridgeTelemetry;
+static char gBridgeDecodedLog[2048];
 static TaskHandle_t s_canTaskA = NULL;
 static TaskHandle_t s_canTaskB = NULL;
 static TaskHandle_t s_canSnapshotTask = NULL;
@@ -68,6 +69,25 @@ void bridgeSetTelemetrySnapshot(const bridgeTelemetrySnapshot_t *in)
     }
 
     gBridgeTelemetry = *in;
+}
+
+void bridgeGetDecodedLogSnapshot(char *out, uint32_t outSize)
+{
+    if (out == NULL || outSize == 0) {
+        return;
+    }
+
+    snprintf(out, outSize, "%s", gBridgeDecodedLog);
+}
+
+void bridgeSetDecodedLogSnapshot(const char *text)
+{
+    if (text == NULL) {
+        gBridgeDecodedLog[0] = '\0';
+        return;
+    }
+
+    snprintf(gBridgeDecodedLog, sizeof(gBridgeDecodedLog), "%s", text);
 }
 
 
