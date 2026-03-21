@@ -66,6 +66,8 @@ static TaskHandle_t s_pylonBmsTask = NULL;
 static TaskHandle_t s_pylonInvTask = NULL;
 static TaskHandle_t s_pylonProbeTaskHandle = NULL;
 static char s_pylonDecodedLog[2048];
+static int64_t s_lastPylonBmsTrafficUs = 0;
+static int64_t s_lastPylonInverterTrafficUs = 0;
 
 static void deleteTaskIfRunning(TaskHandle_t *handle)
 {
@@ -73,6 +75,11 @@ static void deleteTaskIfRunning(TaskHandle_t *handle)
         vTaskDelete(*handle);
         *handle = NULL;
     }
+}
+
+static bool pylonProbeModeEnabled(uint8_t mode)
+{
+    return (mode == MODE_BRIDGE) || (mode == MODE_FORWARD);
 }
 
 static bool rs485PortUsesHalfDuplex(uart_port_t uart)
@@ -566,17 +573,17 @@ static void sendCachedResponse(const pylonRs485BridgeCtx_t *ctx, const uint8_t *
     forwardFrame("PYLON_FAKE_BMS", ctx->rxName, ctx->rxUart, ctx->rxDirPin, response, outLen);
 }
 
-static void maybeHandleProbeResponse(const pylonRs485BridgeCtx_t *ctx, const uint8_t *frame, int len)
+static bool maybeHandleProbeResponse(const pylonRs485BridgeCtx_t *ctx, const uint8_t *frame, int len)
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
     uint8_t ver = 0, adr = 0, cid1 = 0, code = 0;
 
-    if (!ctx->isBmsSide || settings.mode != MODE_BRIDGE) return;
-    if (!s_probePending.active) return;
-    if (!parsePylonHeader(frame, len, &ver, &adr, &cid1, &code)) return;
-    if (cid1 != 0x46) return;
-    if (adr != s_probePending.adr) return;
-    if (code != 0x00 && code != 0x90 && code != 0x91) return;
+    if (!ctx->isBmsSide || !pylonProbeModeEnabled(settings.mode)) return false;
+    if (!s_probePending.active) return false;
+    if (!parsePylonHeader(frame, len, &ver, &adr, &cid1, &code)) return false;
+    if (cid1 != 0x46) return false;
+    if (adr != s_probePending.adr) return false;
+    if (code != 0x00 && code != 0x90 && code != 0x91) return false;
 
     ESP_LOGI(EXAMPLE_TAG,
              "RS485 PYLON PROBE RX on %s: ver=0x%02X addr=0x%02X cid1=0x%02X code=0x%02X len=%d",
@@ -594,12 +601,13 @@ static void maybeHandleProbeResponse(const pylonRs485BridgeCtx_t *ctx, const uin
              (unsigned)adr,
              len);
     s_probePending.active = false;
+    return true;
 }
 
 static void maybeCheckProbeTimeout(const pylonRs485BridgeCtx_t *ctx, int64_t nowUs)
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
-    if (!ctx->isBmsSide || settings.mode != MODE_BRIDGE) return;
+    if (!ctx->isBmsSide || !pylonProbeModeEnabled(settings.mode)) return;
     if (!s_probePending.active || nowUs < s_probePending.dueUs) return;
 
     ESP_LOGI(EXAMPLE_TAG,
@@ -651,6 +659,7 @@ static void pylonBridgeTask(void *pv)
     while (1) {
         int len = uart_read_bytes(ctx->rxUart, rxChunk, RS485_BUF_SIZE, pdMS_TO_TICKS(5));
         int64_t nowUs = esp_timer_get_time();
+        bool consumedByProbe = false;
 
         maybeCheckProbeTimeout(ctx, nowUs);
 
@@ -674,16 +683,23 @@ static void pylonBridgeTask(void *pv)
 
             if (haveFrame && frameLen > 0 && frameBuf[frameLen - 1] == '\r') {
                 bridge_runtime_settings_t settings = runtimeSettingsGet();
+                if (ctx->isBmsSide) {
+                    s_lastPylonBmsTrafficUs = nowUs;
+                }
+                if (ctx->isInverterSide) {
+                    s_lastPylonInverterTrafficUs = nowUs;
+                }
                 logDecodedPylon(frameBuf, frameLen);
                 maybeHandleForwardDecode(ctx, frameBuf, frameLen, nowUs);
+                consumedByProbe = maybeHandleProbeResponse(ctx, frameBuf, frameLen);
 
                 if (settings.mode == MODE_FORWARD) {
-                    forwardFrame(ctx->rxName, ctx->txName, ctx->txUart, ctx->txDirPin, frameBuf, frameLen);
+                    if (!consumedByProbe) {
+                        forwardFrame(ctx->rxName, ctx->txName, ctx->txUart, ctx->txDirPin, frameBuf, frameLen);
+                    }
                 } else if (settings.mode == MODE_BRIDGE) {
                     if (ctx->isInverterSide) {
                         sendCachedResponse(ctx, frameBuf, frameLen);
-                    } else if (ctx->isBmsSide) {
-                        maybeHandleProbeResponse(ctx, frameBuf, frameLen);
                     }
                 }
 
@@ -714,12 +730,23 @@ static void pylonProbeTask(void *pv)
     while (1) {
         uint8_t adr = addresses[addrIdx];
         uint8_t cid2 = cid2Seq[cidIdx];
+        int64_t nowUs = esp_timer_get_time();
+        int64_t latestTrafficUs = s_lastPylonBmsTrafficUs;
+
+        if (s_lastPylonInverterTrafficUs > latestTrafficUs) {
+            latestTrafficUs = s_lastPylonInverterTrafficUs;
+        }
+
+        if (latestTrafficUs != 0 && (nowUs - latestTrafficUs) < 1500000LL) {
+            vTaskDelay(pdMS_TO_TICKS(400));
+            continue;
+        }
 
         if (pylonBuildRequest(0x20, adr, cid2, frame, sizeof(frame), &frameLen)) {
             s_probePending.active = true;
             s_probePending.adr = adr;
             s_probePending.cid2 = cid2;
-            s_probePending.dueUs = esp_timer_get_time() + 250000;
+            s_probePending.dueUs = nowUs + 250000;
             ESP_LOGI(EXAMPLE_TAG,
                      "RS485 FWD PYLON_PROBE -> %s: len=%d ASCII=[%.*s]",
                      ctx->probeName,
@@ -757,6 +784,8 @@ void pylonRs485BridgeEnable(void)
     memset(&s_pylonSummary, 0, sizeof(s_pylonSummary));
     memset(&s_probePending, 0, sizeof(s_probePending));
     memset(&s_forwardPending, 0, sizeof(s_forwardPending));
+    s_lastPylonBmsTrafficUs = 0;
+    s_lastPylonInverterTrafficUs = 0;
     snprintf(s_pylonCache.info62, sizeof(s_pylonCache.info62), "00000000");
     s_pylonCache.valid62 = true;
     bridgeSetTelemetrySnapshot(NULL);
@@ -787,11 +816,12 @@ void pylonRs485BridgeEnable(void)
     xTaskCreate(pylonBridgeTask, "pylon_bms_rx", 6144, &bmsCtx, 9, &s_pylonBmsTask);
     xTaskCreate(pylonBridgeTask, "pylon_inv_rx", 6144, &inverterCtx, 9, &s_pylonInvTask);
 
-    if (settings.mode == MODE_BRIDGE) {
+    if (pylonProbeModeEnabled(settings.mode)) {
         probeCtx.probeName = bmsCtx.rxName;
         probeCtx.probeUart = bmsCtx.rxUart;
         probeCtx.probeDirPin = bmsCtx.rxDirPin;
         xTaskCreate(pylonProbeTask, "pylon_probe", 4096, &probeCtx, 8, &s_pylonProbeTaskHandle);
+        ESP_LOGI(EXAMPLE_TAG, "Pylon active probe enabled on %s (mode=%d)", probeCtx.probeName, settings.mode);
     }
 
     ESP_LOGI(EXAMPLE_TAG,
