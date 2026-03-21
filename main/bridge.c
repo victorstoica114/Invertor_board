@@ -127,6 +127,41 @@ static bool bridgeTryBuildGrowattRs485Telemetry(const bridge_runtime_settings_t 
     return true;
 }
 
+static bool bridgeTryAttachGrowattCanAlerts(const bridge_runtime_settings_t *settings,
+                                            bridgeTelemetrySnapshot_t *out)
+{
+    const char *ifname = NULL;
+
+    if (settings == NULL || out == NULL) {
+        return false;
+    }
+    if (settings->bms_line != LINE_CAN || settings->bms_protocol != PROTOCOL_CAN_GROWATT) {
+        return false;
+    }
+
+    ifname = canNameByPort(settings->bms_port);
+    if (!canDecoderHasFreshData(ifname, BRIDGE_SOURCE_STALE_MS)) {
+        return false;
+    }
+
+    canDecoderGetGrowattAlertText(ifname,
+                                  out->protections, sizeof(out->protections),
+                                  out->alarms, sizeof(out->alarms),
+                                  out->warnings, sizeof(out->warnings));
+
+    if (out->source[0] == '\0') {
+        snprintf(out->source, sizeof(out->source), "%s cache", ifname);
+    }
+    if (out->protocol[0] == '\0') {
+        snprintf(out->protocol, sizeof(out->protocol), "CAN_GROWATT");
+    }
+    if (out->protections[0] != '\0' || out->alarms[0] != '\0' || out->warnings[0] != '\0') {
+        out->valid = true;
+    }
+
+    return true;
+}
+
 void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
@@ -143,6 +178,8 @@ void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
         }
         memset(out, 0, sizeof(*out));
     }
+
+    bridgeTryAttachGrowattCanAlerts(&settings, out);
 
     if (out->source[0] == '\0') {
         snprintf(out->source, sizeof(out->source), "runtime");

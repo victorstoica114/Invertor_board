@@ -266,6 +266,11 @@ static esp_err_t rootHandler(httpd_req_t *req)
         ".cell-item.min{border-color:#d17a22}"
         ".cell-item .label{display:block;color:#8aa0b7;margin-bottom:4px}"
         ".cell-item .value{display:block;font-family:Consolas,monospace}"
+        ".alert-list{display:flex;flex-wrap:wrap;gap:8px}"
+        ".badge{display:inline-block;background:#0f1a24;border:1px solid #2b3c4f;border-radius:999px;padding:6px 10px;font-family:Consolas,monospace;font-size:12px}"
+        ".badge.prot{border-color:#d17a22;color:#ffd8a8}"
+        ".badge.alarm{border-color:#c94f4f;color:#ffc6c6}"
+        ".badge.warn{border-color:#c6a03d;color:#ffe9a8}"
         ".mono{font-family:Consolas,monospace}"
         "select,button{background:#0f1a24;color:#fff;border:1px solid #2b3c4f;border-radius:8px;padding:8px 10px}"
         "button{cursor:pointer;background:#1f8a70}"
@@ -301,13 +306,21 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "}"
         "return '<div class=\"card\"><h3>All Cells</h3><div class=\"cell-grid\">'+items.join('')+'</div></div>';"
         "}"
+        "function alertBadges(title,kind,text){"
+        "const items=(text&&text.trim())?text.split(/,\\s*/).filter(Boolean):[];"
+        "if(!items.length){return '<div class=\"card\"><h3>'+title+'</h3><div class=\"mono\">None</div></div>';}"
+        "return '<div class=\"card\"><h3>'+title+'</h3><div class=\"alert-list\">'+items.map(x=>'<span class=\"badge '+kind+'\">'+x+'</span>').join('')+'</div></div>';"
+        "}"
         "function renderTelemetry(t){"
         "const cards=["
         "card('Runtime',[row('Valid',t.valid?'YES':'NO'),row('Source',t.source),row('Protocol',t.protocol),row('Status 0x63',t.status_63)]),"
         "card('Pack',[row('Current',t.current_a.toFixed(2)+' A'),row('SOC',t.soc_pct+' %'),row('SOH',t.soh_pct+' %'),row('Cycles',t.cycles)]),"
         "card('Cells',[row('Cell Max',t.cell_max_v.toFixed(3)+' V @ #'+t.cell_max_idx),row('Cell Min',t.cell_min_v.toFixed(3)+' V @ #'+t.cell_min_idx),row('Delta',t.delta_v.toFixed(3)+' V')]),"
         "card('Temperatures',[row('MOS',t.temp_mos_c.toFixed(1)+' C'),row('T1',t.temp_t1_c.toFixed(1)+' C'),row('T2',t.temp_t2_c.toFixed(1)+' C'),row('T4',t.temp_t4_c.toFixed(1)+' C'),row('T5',t.temp_t5_c.toFixed(1)+' C')]),"
-        "cellGridCard(t)"
+        "cellGridCard(t),"
+        "alertBadges('Protections','prot',t.protections),"
+        "alertBadges('Alarms','alarm',t.alarms),"
+        "alertBadges('Warnings','warn',t.warnings)"
         "];"
         "document.getElementById('telemetryCards').innerHTML=cards.join('');"
         "}"
@@ -410,6 +423,9 @@ static esp_err_t telemetryHandler(httpd_req_t *req)
                     "\"temp_t5_c\":%.1f,"
                     "\"status_63\":%u,"
                     "\"cell_count\":%u,"
+                    "\"protections\":\"%s\","
+                    "\"alarms\":\"%s\","
+                    "\"warnings\":\"%s\","
                     "\"cells_v\":[",
                     snap.valid ? "true" : "false",
                     snap.source,
@@ -429,7 +445,10 @@ static esp_err_t telemetryHandler(httpd_req_t *req)
                     (double)snap.tempT4C,
                     (double)snap.tempT5C,
                     (unsigned)snap.pylonStatus63,
-                    (unsigned)snap.cellCount);
+                    (unsigned)snap.cellCount,
+                    snap.protections,
+                    snap.alarms,
+                    snap.warnings);
 
     for (uint8_t i = 0; i < snap.cellCount && pos < (int)sizeof(json); i++) {
         pos += snprintf(json + pos,

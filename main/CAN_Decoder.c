@@ -337,6 +337,70 @@ static void logActiveBitNames(const char *ifname,
              (buf[0] != '\0') ? buf : "(only reserved bits)");
 }
 
+static bool canStrEndsWith(const char *value, const char *suffix)
+{
+    size_t valueLen = 0;
+    size_t suffixLen = 0;
+
+    if (value == NULL || suffix == NULL) {
+        return false;
+    }
+
+    valueLen = strlen(value);
+    suffixLen = strlen(suffix);
+    if (suffixLen > valueLen) {
+        return false;
+    }
+    return strcmp(value + valueLen - suffixLen, suffix) == 0;
+}
+
+static void appendAlertName(char *out, uint32_t outSize, const char *name)
+{
+    size_t pos = 0;
+
+    if (out == NULL || outSize == 0u || name == NULL || name[0] == '\0') {
+        return;
+    }
+
+    pos = strlen(out);
+    if (pos >= outSize - 1u) {
+        return;
+    }
+    if (pos > 0u) {
+        pos += (size_t)snprintf(out + pos, outSize - pos, ", ");
+    }
+    if (pos < outSize - 1u) {
+        snprintf(out + pos, outSize - pos, "%s", name);
+    }
+}
+
+static void appendAlertBitsByCategory(char *protectionsOut,
+                                      uint32_t protectionsOutSize,
+                                      char *alarmsOut,
+                                      uint32_t alarmsOutSize,
+                                      char *warningsOut,
+                                      uint32_t warningsOutSize,
+                                      uint8_t bits,
+                                      const char *const names[8])
+{
+    for (int i = 0; i < 8; i++) {
+        const char *name = names[i];
+        if (((bits >> i) & 0x01u) == 0u || name == NULL) {
+            continue;
+        }
+
+        if (canStrEndsWith(name, "_warn")) {
+            appendAlertName(warningsOut, warningsOutSize, name);
+        } else if (canStrEndsWith(name, "_alarm")) {
+            appendAlertName(alarmsOut, alarmsOutSize, name);
+        } else if (canStrEndsWith(name, "_prot") ||
+                   canStrEndsWith(name, "_fault") ||
+                   strncmp(name, "flt_", 4u) == 0) {
+            appendAlertName(protectionsOut, protectionsOutSize, name);
+        }
+    }
+}
+
 static void logRawCanMsg(const char *ifname, const twai_message_t *m)
 {
     char dataHex[3 * 8 + 1] = {0};
@@ -703,6 +767,84 @@ bool canDecoderHasFreshData(const char *ifname, uint32_t maxAgeMs)
     }
 
     return false;
+}
+
+bool canDecoderGetGrowattAlertText(const char *ifname,
+                                   char *protectionsOut,
+                                   uint32_t protectionsOutSize,
+                                   char *alarmsOut,
+                                   uint32_t alarmsOutSize,
+                                   char *warningsOut,
+                                   uint32_t warningsOutSize)
+{
+    const char *name = (ifname != NULL) ? ifname : "CAN1";
+    canBmsCachedFrame_t local[CAN_BMS_CACHE_COUNT];
+    canBmsCachedFrame_t *src = canBmsCacheForIf(name);
+    int idx312 = 0;
+    int idx323 = 0;
+    bool any = false;
+
+    if (protectionsOut != NULL && protectionsOutSize > 0u) {
+        protectionsOut[0] = '\0';
+    }
+    if (alarmsOut != NULL && alarmsOutSize > 0u) {
+        alarmsOut[0] = '\0';
+    }
+    if (warningsOut != NULL && warningsOutSize > 0u) {
+        warningsOut[0] = '\0';
+    }
+
+    if (src == NULL) {
+        return false;
+    }
+
+    portENTER_CRITICAL(&g_canBmsCacheMux);
+    memcpy(local, src, sizeof(local));
+    portEXIT_CRITICAL(&g_canBmsCacheMux);
+
+    idx312 = canBmsCacheIndex(GROWATT_CAN_ID_312_PROT_ALM);
+    if (idx312 >= 0 && local[idx312].valid && local[idx312].dlc >= 4u) {
+        appendAlertBitsByCategory(protectionsOut, protectionsOutSize,
+                                  alarmsOut, alarmsOutSize,
+                                  warningsOut, warningsOutSize,
+                                  local[idx312].data[0], k312Prot1Bits);
+        appendAlertBitsByCategory(protectionsOut, protectionsOutSize,
+                                  alarmsOut, alarmsOutSize,
+                                  warningsOut, warningsOutSize,
+                                  local[idx312].data[1], k312Prot2Bits);
+        appendAlertBitsByCategory(protectionsOut, protectionsOutSize,
+                                  alarmsOut, alarmsOutSize,
+                                  warningsOut, warningsOutSize,
+                                  local[idx312].data[2], k312Alm1Bits);
+        appendAlertBitsByCategory(protectionsOut, protectionsOutSize,
+                                  alarmsOut, alarmsOutSize,
+                                  warningsOut, warningsOutSize,
+                                  local[idx312].data[3], k312Alm2Bits);
+        any = true;
+    }
+
+    idx323 = canBmsCacheIndex(GROWATT_CAN_ID_323_CELLCOUNT_PROT_WARN);
+    if (idx323 >= 0 && local[idx323].valid && local[idx323].dlc >= 8u) {
+        appendAlertBitsByCategory(protectionsOut, protectionsOutSize,
+                                  alarmsOut, alarmsOutSize,
+                                  warningsOut, warningsOutSize,
+                                  local[idx323].data[4], k323Prot3Bits);
+        appendAlertBitsByCategory(protectionsOut, protectionsOutSize,
+                                  alarmsOut, alarmsOutSize,
+                                  warningsOut, warningsOutSize,
+                                  local[idx323].data[5], k323Prot4Bits);
+        appendAlertBitsByCategory(protectionsOut, protectionsOutSize,
+                                  alarmsOut, alarmsOutSize,
+                                  warningsOut, warningsOutSize,
+                                  local[idx323].data[6], k323Prot5Bits);
+        appendAlertBitsByCategory(protectionsOut, protectionsOutSize,
+                                  alarmsOut, alarmsOutSize,
+                                  warningsOut, warningsOutSize,
+                                  local[idx323].data[7], k323Warn3Bits);
+        any = true;
+    }
+
+    return any;
 }
 
 void canDecoderOnFrame(const char *ifname, const twai_message_t *m)
