@@ -1,0 +1,15 @@
+#pragma once
+
+#include "driver/twai.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+void canInit(void);
+twai_handle_t canGetBus0(void);
+twai_handle_t canGetBus1(void);
+
+#ifdef __cplusplus
+}
+#endif

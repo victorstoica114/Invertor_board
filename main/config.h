@@ -9,10 +9,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#include "driver/twai.h"
-#include "driver/uart.h"
-#include "driver/gpio.h"
-
 /* Common log tag */
 #define EXAMPLE_TAG "SNIFFER_BRIDGE"
 
@@ -166,20 +162,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/* Init/config */
-void rs485Init(void);
-void canInit(void);
-
-/* Resource accessors */
-twai_handle_t canGetBus0(void);   /* CAN1 */
-twai_handle_t canGetBus1(void);   /* CAN2 */
-
-uart_port_t rs485GetUart1(void);  /* RS485_1_UART */
-uart_port_t rs485GetUart2(void);  /* RS485_2_UART */
-
-gpio_num_t rs485GetDir1(void);    /* RS485_1_DIR */
-gpio_num_t rs485GetDir2(void);    /* RS485_2_DIR */
 
 /* Bridge filtering lists (configuration) */
 extern const uint32_t g_can1ToCan2ExcludeIds[];

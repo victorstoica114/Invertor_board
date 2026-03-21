@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "Protocols/Common/universal_battery_model.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -33,6 +35,8 @@ void canBridgeEnable(void);
 void bridgeReloadFromRuntimeSettings(void);
 void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out);
 void bridgeSetTelemetrySnapshot(const bridgeTelemetrySnapshot_t *in);
+void bridgeGetUniversalBatteryModel(universal_battery_model_t *out);
+void bridgeSetUniversalBatteryModel(const universal_battery_model_t *in);
 void bridgeGetDecodedLogSnapshot(char *out, uint32_t outSize);
 void bridgeSetDecodedLogSnapshot(const char *text);
 

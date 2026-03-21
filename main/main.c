@@ -5,6 +5,8 @@
 
 #include "config.h"
 #include "bridge.h"
+#include "Drivers/CAN/can_driver.h"
+#include "Drivers/RS485/rs485_driver.h"
 #include "runtime_settings.h"
 #include "Web_interface/web_interface.h"
 
@@ -18,8 +20,7 @@ void app_main(void)
     rs485Init();
     canInit();
 
-    rs485BridgeEnable();
-    canBridgeEnable();
+    bridgeReloadFromRuntimeSettings();
     webInterfaceStartTask();
 
     ESP_LOGI(EXAMPLE_TAG, "Sniffer/bridge running.");
