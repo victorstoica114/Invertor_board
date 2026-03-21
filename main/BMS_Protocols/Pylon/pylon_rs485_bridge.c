@@ -3,6 +3,7 @@
 #include "../../bridge.h"
 #include "../../config.h"
 #include "../../runtime_settings.h"
+#include "../../Drivers/RS485/rs485_driver.h"
 #include "pylon_rs485_protocol.h"
 
 #include <inttypes.h>
