@@ -162,7 +162,7 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
 
     if (bmsOnCan || invOnCan) {
         const char *snapIf = bmsOnCan ? canNameByPort(settings->bms_port) : canNameByPort(settings->inverter_port);
-        xTaskCreate(canPeriodicSnapshotTask, "can_snapshot", 4096, (void *)snapIf, 7, &s_canSnapshotTask);
+        xTaskCreate(canPeriodicSnapshotTask, "can_snapshot", 6144, (void *)snapIf, 7, &s_canSnapshotTask);
         ESP_LOGI(EXAMPLE_TAG, "CAN periodic snapshot enabled (%d ms)", CAN_DECODER_SNAPSHOT_PRINT_PERIOD_MS);
     }
 

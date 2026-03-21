@@ -30,6 +30,7 @@ static canBmsCachedFrame_t g_can1BmsCache[CAN_BMS_CACHE_COUNT];
 static canBmsCachedFrame_t g_can2BmsCache[CAN_BMS_CACHE_COUNT];
 static canBmsCachedFrame_t g_can1PylonCache[PYLON_CAN_CACHE_COUNT];
 static canBmsCachedFrame_t g_can2PylonCache[PYLON_CAN_CACHE_COUNT];
+static char g_pylonCanLogText[2048];
 
 static canBmsCachedFrame_t *canBmsCacheForIf(const char *ifname)
 {
@@ -618,7 +619,6 @@ static void decodePylonCanSnapshot(const char *ifname, const canBmsCachedFrame_t
     const canBmsCachedFrame_t *f377 = pylonFrameById(cache, 0x377u);
     const canBmsCachedFrame_t *f379 = pylonFrameById(cache, 0x379u);
     bridgeTelemetrySnapshot_t snap = {0};
-    char logText[2048];
     char raw359[32] = {0};
     char raw35A[32] = {0};
     char raw35C[32] = {0};
@@ -709,8 +709,8 @@ static void decodePylonCanSnapshot(const char *ifname, const canBmsCachedFrame_t
     snap.tempT2C = tempMaxTentative;
     bridgeSetTelemetrySnapshot(&snap);
 
-    snprintf(logText,
-             sizeof(logText),
+    snprintf(g_pylonCanLogText,
+             sizeof(g_pylonCanLogText),
              "CAN Pylon\n"
              "  valid : %s\n"
              "  name  : %s\n"
@@ -751,7 +751,7 @@ static void decodePylonCanSnapshot(const char *ifname, const canBmsCachedFrame_t
              ascii377[0] ? ascii377 : "-",
              raw379[0] ? raw379 : "-");
 
-    bridgeSetDecodedLogSnapshot(logText);
+    bridgeSetDecodedLogSnapshot(g_pylonCanLogText);
 
     ESP_LOGI(EXAMPLE_TAG, "CAN-%s PYLON SNAPSHOT", ifname);
     ESP_LOGI(EXAMPLE_TAG, "  valid : %s", snap.valid ? "YES" : "NO");
