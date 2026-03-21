@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "config.h"
+#include "CAN_Decoder.h"
 #include "runtime_settings.h"
 #include "Drivers/CAN/can_driver.h"
 #include "Drivers/RS485/rs485_driver.h"
