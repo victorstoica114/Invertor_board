@@ -646,7 +646,7 @@ static void canRs485GrowattTask(void *pv)
                 sent = canRsSendGrowattResponse(ctx, func, start, count, &model, socPct);
 
 #if CAN_RS485_SOC_LOG_EVERY_N > 0
-                if ((ctx->reqCount % CAN_RS485_SOC_LOG_EVERY_N) == 0u) {
+                if (ctx->reqCount <= 3u || (ctx->reqCount % CAN_RS485_SOC_LOG_EVERY_N) == 0u) {
                     ESP_LOGI(EXAMPLE_TAG,
                              "CAN->RS485 Growatt translator on %s: req start=0x%04X count=0x%04X sent=%s src=%s soc=%u pack=%.2fV",
                              ctx->ifName,
