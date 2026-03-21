@@ -37,14 +37,18 @@ static bool validateSettings(const bridge_runtime_settings_t *s)
     if (s->mode < MODE_SNIFFER || s->mode > MODE_BRIDGE) return false;
     if (s->bms_line < LINE_CAN || s->bms_line > LINE_RS485) return false;
     if (s->inverter_line < LINE_CAN || s->inverter_line > LINE_RS485) return false;
-    if (s->bms_protocol < PROTOCOL_CAN_GROWATT || s->bms_protocol > PROTOCOL_RS485_PYLON) return false;
-    if (s->inverter_protocol < PROTOCOL_CAN_GROWATT || s->inverter_protocol > PROTOCOL_RS485_PYLON) return false;
+    if (s->bms_protocol < PROTOCOL_CAN_GROWATT || s->bms_protocol > PROTOCOL_CAN_PYLON) return false;
+    if (s->inverter_protocol < PROTOCOL_CAN_GROWATT || s->inverter_protocol > PROTOCOL_CAN_PYLON) return false;
     if (s->bms_port < 1 || s->bms_port > 2) return false;
     if (s->inverter_port < 1 || s->inverter_port > 2) return false;
     if (s->web_port == 0) return false;
     if (s->wifi_ssid[0] == '\0') return false;
-    if ((s->bms_line == LINE_CAN) && (s->bms_protocol != PROTOCOL_CAN_GROWATT)) return false;
-    if ((s->inverter_line == LINE_CAN) && (s->inverter_protocol != PROTOCOL_CAN_GROWATT)) return false;
+    if ((s->bms_line == LINE_CAN) &&
+        (s->bms_protocol != PROTOCOL_CAN_GROWATT) &&
+        (s->bms_protocol != PROTOCOL_CAN_PYLON)) return false;
+    if ((s->inverter_line == LINE_CAN) &&
+        (s->inverter_protocol != PROTOCOL_CAN_GROWATT) &&
+        (s->inverter_protocol != PROTOCOL_CAN_PYLON)) return false;
     if ((s->bms_line == LINE_RS485) &&
         (s->bms_protocol != PROTOCOL_RS485_GROWATT) &&
         (s->bms_protocol != PROTOCOL_RS485_PYLON)) return false;

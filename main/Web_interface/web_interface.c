@@ -91,6 +91,7 @@ static const char *protocolToStr(int protocol)
         case PROTOCOL_CAN_GROWATT: return "CAN_GROWATT";
         case PROTOCOL_RS485_GROWATT: return "RS485_GROWATT";
         case PROTOCOL_RS485_PYLON: return "RS485_PYLON";
+        case PROTOCOL_CAN_PYLON: return "CAN_PYLON";
         default: return "UNKNOWN";
     }
 }
@@ -293,7 +294,7 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "function sel(id,val,opts){return '<select id=\"'+id+'\">'+opts.map(o=>'<option value=\"'+o.value+'\"'+(String(o.value)===String(val)?' selected':'')+'>'+o.label+'</option>').join('')+'</select>';}"
         "const modeOpts=[{value:1,label:'sniffer'},{value:2,label:'forward'},{value:3,label:'bridge'}];"
         "const lineOpts=[{value:1,label:'CAN'},{value:2,label:'RS485'}];"
-        "const protoOpts=[{value:1,label:'CAN_GROWATT'},{value:2,label:'RS485_GROWATT'},{value:3,label:'RS485_PYLON'}];"
+        "const protoOpts=[{value:1,label:'CAN_GROWATT'},{value:2,label:'RS485_GROWATT'},{value:3,label:'RS485_PYLON'},{value:4,label:'CAN_PYLON'}];"
         "const portOpts=[{value:1,label:'1'},{value:2,label:'2'}];"
         "const rows=["
         "row('Mode',sel('mode',s.mode_id,modeOpts)),"

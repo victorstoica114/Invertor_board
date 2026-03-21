@@ -126,6 +126,14 @@ static void rs485BmsPollerTask(void *pv)
 
     size_t reqIdx = 0;
     uint32_t sentCount = 0;
+    uint32_t silentCount = 0;
+    const TickType_t responseWaitTicks = pdMS_TO_TICKS(120);
+
+    ESP_LOGI(EXAMPLE_TAG,
+             "RS485 poller task running on %s slave=%u period=%ums",
+             ctx->txName,
+             (unsigned)ctx->slaveId,
+             (unsigned)ctx->periodMs);
 
     while (1) {
         uint8_t req[8];
@@ -147,7 +155,7 @@ static void rs485BmsPollerTask(void *pv)
 
         sentCount++;
 #if RS485_BMS_POLL_LOG_EVERY_N > 0
-        if ((sentCount % RS485_BMS_POLL_LOG_EVERY_N) == 0u) {
+        if (sentCount <= 3u || (sentCount % RS485_BMS_POLL_LOG_EVERY_N) == 0u) {
             ESP_LOGI(EXAMPLE_TAG,
                      "RS485 poller TX on %s: slave=%u req=%s start=0x%04X count=0x%04X cnt=%lu",
                      ctx->txName,
@@ -160,7 +168,39 @@ static void rs485BmsPollerTask(void *pv)
 #endif
 
         reqIdx = (reqIdx + 1u) % (sizeof(kPollReqs) / sizeof(kPollReqs[0]));
-        vTaskDelay(pdMS_TO_TICKS(ctx->periodMs));
+
+        vTaskDelay(responseWaitTicks);
+
+        if (ctx->targetDec != NULL) {
+            if (ctx->targetDec->lastByteUs <= nowUs) {
+                silentCount++;
+                if (silentCount <= 5u || (silentCount % 10u) == 0u) {
+                    ESP_LOGW(EXAMPLE_TAG,
+                             "RS485 poller no response on %s: slave=%u req=%s start=0x%04X count=0x%04X silent=%lu",
+                             ctx->txName,
+                             (unsigned)ctx->slaveId,
+                             kPollReqs[(reqIdx + (sizeof(kPollReqs) / sizeof(kPollReqs[0])) - 1u) % (sizeof(kPollReqs) / sizeof(kPollReqs[0]))].name,
+                             (unsigned)start,
+                             (unsigned)count,
+                             (unsigned long)silentCount);
+                }
+            } else {
+                silentCount = 0;
+                if (sentCount <= 3u) {
+                    ESP_LOGI(EXAMPLE_TAG,
+                             "RS485 poller saw RX activity on %s after req=%s",
+                             ctx->txName,
+                             kPollReqs[(reqIdx + (sizeof(kPollReqs) / sizeof(kPollReqs[0])) - 1u) % (sizeof(kPollReqs) / sizeof(kPollReqs[0]))].name);
+                }
+            }
+        }
+
+        {
+            TickType_t periodTicks = pdMS_TO_TICKS(ctx->periodMs);
+            if (periodTicks > responseWaitTicks) {
+                vTaskDelay(periodTicks - responseWaitTicks);
+            }
+        }
     }
 }
 
@@ -599,7 +639,8 @@ void rs485ForwardSnifferStart(const bridge_runtime_settings_t *settings)
         }
     }
 
-    if ((settings->bms_line == LINE_RS485) && (settings->inverter_line == LINE_CAN)) {
+    if ((settings->bms_line == LINE_RS485) &&
+        (settings->bms_protocol == PROTOCOL_RS485_GROWATT)) {
 #if RS485_BMS_POLLER_ENABLE
         if (rs485ForwardEnabled) {
             ESP_LOGW(EXAMPLE_TAG, "RS485 BMS poller disabled because RS485 forward is ON (avoid collisions)");
@@ -612,10 +653,12 @@ void rs485ForwardSnifferStart(const bridge_runtime_settings_t *settings)
             poller.targetDec = rs485ForwardSnifferGetDecoder(settings->bms_port);
             xTaskCreate(rs485BmsPollerTask, "rs485_bms_poller", 3072, &poller, 8, &s_rs485PollerTask);
             ESP_LOGI(EXAMPLE_TAG,
-                     "RS485 BMS poller enabled (tx=%s slave=%u period=%ums)",
+                     "RS485 BMS poller enabled (tx=%s slave=%u period=%ums prot=RS485_GROWATT inv_line=%u inv_prot=%u)",
                      poller.txName,
                      (unsigned)poller.slaveId,
-                     (unsigned)poller.periodMs);
+                     (unsigned)poller.periodMs,
+                     (unsigned)settings->inverter_line,
+                     (unsigned)settings->inverter_protocol);
         }
 #endif
     }

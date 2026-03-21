@@ -2,6 +2,7 @@
 
 #include "config.h"
 #include "BMS_Protocols/Growatt/growatt_modbus_map.h"
+#include "BMS_Protocols/Pylon/pylon_can_protocol.h"
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -24,6 +25,8 @@ typedef struct {
 static portMUX_TYPE g_canBmsCacheMux = portMUX_INITIALIZER_UNLOCKED;
 static canBmsCachedFrame_t g_can1BmsCache[CAN_BMS_CACHE_COUNT];
 static canBmsCachedFrame_t g_can2BmsCache[CAN_BMS_CACHE_COUNT];
+static pylon_can_frame_t g_can1PylonCache[PYLON_CAN_CACHE_COUNT];
+static pylon_can_frame_t g_can2PylonCache[PYLON_CAN_CACHE_COUNT];
 
 static canBmsCachedFrame_t *canBmsCacheForIf(const char *ifname)
 {
@@ -35,6 +38,20 @@ static canBmsCachedFrame_t *canBmsCacheForIf(const char *ifname)
     }
     if (strcmp(ifname, "CAN2") == 0) {
         return g_can2BmsCache;
+    }
+    return NULL;
+}
+
+static pylon_can_frame_t *canPylonCacheForIf(const char *ifname)
+{
+    if (ifname == NULL) {
+        return g_can1PylonCache;
+    }
+    if (strcmp(ifname, "CAN1") == 0) {
+        return g_can1PylonCache;
+    }
+    if (strcmp(ifname, "CAN2") == 0) {
+        return g_can2PylonCache;
     }
     return NULL;
 }
@@ -69,6 +86,28 @@ static void canBmsCacheUpdate(const char *ifname, const twai_message_t *m)
     portEXIT_CRITICAL(&g_canBmsCacheMux);
 }
 
+static void canPylonCacheUpdate(const char *ifname, const twai_message_t *m)
+{
+    if (ifname == NULL || m == NULL) return;
+
+    pylon_can_frame_t *cache = canPylonCacheForIf(ifname);
+    if (cache == NULL) return;
+
+    if ((uint32_t)m->identifier < PYLON_CAN_ID_MIN || (uint32_t)m->identifier > PYLON_CAN_ID_MAX) return;
+    int idx = (int)((uint32_t)m->identifier - PYLON_CAN_ID_MIN);
+
+    pylon_can_frame_t f = {0};
+    f.valid = true;
+    f.id = (uint32_t)m->identifier;
+    f.dlc = (uint8_t)m->data_length_code;
+    if (f.dlc > 8u) f.dlc = 8u;
+    memcpy(f.data, m->data, f.dlc);
+
+    portENTER_CRITICAL(&g_canBmsCacheMux);
+    cache[idx] = f;
+    portEXIT_CRITICAL(&g_canBmsCacheMux);
+}
+
 static inline uint16_t can_be16(const uint8_t *p)
 {
     return (uint16_t)((((uint16_t)p[0]) << 8) | (uint16_t)p[1]);
@@ -82,6 +121,36 @@ static inline int16_t can_be16s(const uint8_t *p)
 static inline uint16_t can_le16(const uint8_t *p)
 {
     return (uint16_t)((((uint16_t)p[1]) << 8) | (uint16_t)p[0]);
+}
+
+static inline int16_t can_le16s(const uint8_t *p)
+{
+    return (int16_t)can_le16(p);
+}
+
+static void formatCanData(const uint8_t *data, uint8_t dlc, char *out, size_t outSize)
+{
+    size_t pos = 0;
+    uint8_t n = dlc;
+
+    if (out == NULL || outSize == 0) {
+        return;
+    }
+
+    out[0] = '\0';
+    if (data == NULL) {
+        return;
+    }
+
+    if (n > 8u) {
+        n = 8u;
+    }
+    for (uint8_t i = 0; i < n && pos + 4u < outSize; i++) {
+        pos += (size_t)snprintf(&out[pos], outSize - pos, "%02X ", data[i]);
+    }
+    if (pos > 0) {
+        out[pos - 1u] = '\0';
+    }
 }
 
 static const char *growattChemStr(uint8_t code)
@@ -482,9 +551,12 @@ void canDecoderPrintCachedSnapshot(const char *ifname)
 {
     const char *name = (ifname != NULL) ? ifname : "CAN1";
     canBmsCachedFrame_t local[CAN_BMS_CACHE_COUNT];
+    pylon_can_frame_t pylonLocal[PYLON_CAN_CACHE_COUNT];
     bool any = false;
+    bool anyPylon = false;
 
     canBmsCachedFrame_t *src = canBmsCacheForIf(name);
+    pylon_can_frame_t *pylonSrc = canPylonCacheForIf(name);
     if (src == NULL) {
         ESP_LOGI(EXAMPLE_TAG, "CAN-%s SNAPSHOT: unsupported BMS cache interface", name);
         return;
@@ -492,7 +564,18 @@ void canDecoderPrintCachedSnapshot(const char *ifname)
 
     portENTER_CRITICAL(&g_canBmsCacheMux);
     memcpy(local, src, sizeof(local));
+    if (pylonSrc != NULL) {
+        memcpy(pylonLocal, pylonSrc, sizeof(pylonLocal));
+    } else {
+        memset(pylonLocal, 0, sizeof(pylonLocal));
+    }
     portEXIT_CRITICAL(&g_canBmsCacheMux);
+
+    anyPylon = pylonCanAnyValid(pylonLocal, PYLON_CAN_CACHE_COUNT);
+    if (anyPylon) {
+        pylonCanDecodeSnapshot(name, pylonLocal, PYLON_CAN_CACHE_COUNT);
+        return;
+    }
 
     for (size_t i = 0; i < CAN_BMS_CACHE_COUNT; i++) {
         if (local[i].valid) {
@@ -530,14 +613,33 @@ bool canDecoderTryGetSocPct(const char *ifname, uint8_t *socOut)
 
     const char *name = (ifname != NULL) ? ifname : "CAN1";
     canBmsCachedFrame_t local[CAN_BMS_CACHE_COUNT];
+    pylon_can_frame_t pylonLocal[PYLON_CAN_CACHE_COUNT];
     canBmsCachedFrame_t *src = canBmsCacheForIf(name);
+    pylon_can_frame_t *pylonSrc = canPylonCacheForIf(name);
     if (src == NULL) {
         return false;
     }
 
     portENTER_CRITICAL(&g_canBmsCacheMux);
     memcpy(local, src, sizeof(local));
+    if (pylonSrc != NULL) {
+        memcpy(pylonLocal, pylonSrc, sizeof(pylonLocal));
+    } else {
+        memset(pylonLocal, 0, sizeof(pylonLocal));
+    }
     portEXIT_CRITICAL(&g_canBmsCacheMux);
+
+    {
+        int idx355 = (int)(0x355u - PYLON_CAN_ID_MIN);
+        if (idx355 >= 0 && (size_t)idx355 < PYLON_CAN_CACHE_COUNT &&
+            pylonLocal[idx355].valid && pylonLocal[idx355].dlc >= 2u) {
+            uint16_t soc = can_le16(&pylonLocal[idx355].data[0]);
+            if (soc <= 100u) {
+                *socOut = (uint8_t)soc;
+                return true;
+            }
+        }
+    }
 
     int idx313 = canBmsCacheIndex(GROWATT_CAN_ID_313_V_I_SOC_SOH);
     if (idx313 >= 0 && local[idx313].valid && local[idx313].dlc >= 7u) {
@@ -566,6 +668,7 @@ void canDecoderOnFrame(const char *ifname, const twai_message_t *m)
     if (m == NULL) return;
 
     canBmsCacheUpdate(ifname, m);
+    canPylonCacheUpdate(ifname, m);
 
     if (CAN_DECODER_SHOW_RAW_FRAMES) {
         logRawCanMsg(ifname, m);
