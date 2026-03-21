@@ -34,6 +34,17 @@ typedef struct {
 
 static void startHttpServer(void);
 
+static void setNoCacheHeaders(httpd_req_t *req)
+{
+    if (req == NULL) {
+        return;
+    }
+
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    httpd_resp_set_hdr(req, "Pragma", "no-cache");
+    httpd_resp_set_hdr(req, "Expires", "0");
+}
+
 static void wifiCopyField(uint8_t *dst, size_t dstSize, const char *src)
 {
     size_t copyLen = 0;
@@ -308,18 +319,18 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "if(body.ok){setTimeout(loadSettings,300);}"
         "}"
         "async function refreshTelemetry(){"
-        "let t=await fetch('/api/telemetry').then(r=>r.json());"
+        "let t=await fetch('/api/telemetry?ts='+Date.now(),{cache:'no-store'}).then(r=>r.json());"
         "renderTelemetry(t);"
         "}"
         "async function loadSettings(){"
-        "let s=await fetch('/api/settings').then(r=>r.json());"
+        "let s=await fetch('/api/settings?ts='+Date.now(),{cache:'no-store'}).then(r=>r.json());"
         "renderSettings(s);"
         "}"
         "async function refreshLogs(){"
         "const el=document.getElementById('logsContent');"
         "if(!el){return;}"
         "try{"
-        "const res=await fetch('/api/logs',{cache:'no-store'});"
+        "const res=await fetch('/api/logs?ts='+Date.now(),{cache:'no-store'});"
         "if(!res.ok){el.textContent='Log fetch failed: HTTP '+res.status;return;}"
         "const t=await res.text();"
         "el.textContent=t&&t.trim()?t:'No decoded BMS logs yet.';"
@@ -331,6 +342,7 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "setInterval(function(){if(currentTab==='logs'){refreshLogs();}},5000);"
         "</script></body></html>";
 
+    setNoCacheHeaders(req);
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     return httpd_resp_send(req, html, HTTPD_RESP_USE_STRLEN);
 }
@@ -383,6 +395,7 @@ static esp_err_t telemetryHandler(httpd_req_t *req)
              (double)snap.tempT5C,
              (unsigned)snap.pylonStatus63);
 
+    setNoCacheHeaders(req);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
 }
@@ -392,6 +405,8 @@ static esp_err_t logsHandler(httpd_req_t *req)
     char text[2048];
 
     bridgeGetDecodedLogSnapshot(text, sizeof(text));
+    ESP_LOGI(WEB_TAG, "/api/logs requested (len=%u)", (unsigned)strlen(text));
+    setNoCacheHeaders(req);
     httpd_resp_set_type(req, "text/plain; charset=utf-8");
     return httpd_resp_send(req,
                            text[0] != '\0' ? text : "No decoded BMS logs yet.",
@@ -438,6 +453,7 @@ static esp_err_t settingsHandler(httpd_req_t *req)
              settings.wifi_password,
              settings.web_port);
 
+    setNoCacheHeaders(req);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
 }
@@ -454,6 +470,7 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
 
     if (received <= 0) {
         httpd_resp_set_status(req, "400 Bad Request");
+        setNoCacheHeaders(req);
         httpd_resp_set_type(req, "application/json");
         return httpd_resp_send(req, errResp, HTTPD_RESP_USE_STRLEN);
     }
@@ -473,10 +490,12 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
 
     if (!runtimeSettingsSave(&settings)) {
         httpd_resp_set_status(req, "400 Bad Request");
+        setNoCacheHeaders(req);
         httpd_resp_set_type(req, "application/json");
         return httpd_resp_send(req, errResp, HTTPD_RESP_USE_STRLEN);
     }
 
+    setNoCacheHeaders(req);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, okResp, HTTPD_RESP_USE_STRLEN);
 
