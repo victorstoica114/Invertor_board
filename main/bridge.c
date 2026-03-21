@@ -57,6 +57,8 @@ void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
     if (out->protocol[0] == '\0') {
         if (settings.bms_protocol == PROTOCOL_RS485_PYLON || settings.inverter_protocol == PROTOCOL_RS485_PYLON) {
             snprintf(out->protocol, sizeof(out->protocol), "RS485_PYLON");
+        } else if (settings.bms_protocol == PROTOCOL_CAN_PYLON || settings.inverter_protocol == PROTOCOL_CAN_PYLON) {
+            snprintf(out->protocol, sizeof(out->protocol), "CAN_PYLON");
         } else if (settings.bms_protocol == PROTOCOL_RS485_GROWATT || settings.inverter_protocol == PROTOCOL_RS485_GROWATT) {
             snprintf(out->protocol, sizeof(out->protocol), "RS485_GROWATT");
         } else {
