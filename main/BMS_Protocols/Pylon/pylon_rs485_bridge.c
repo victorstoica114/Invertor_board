@@ -69,6 +69,10 @@ static char s_pylonDecodedLog[2048];
 static int64_t s_lastPylonBmsTrafficUs = 0;
 static int64_t s_lastPylonInverterTrafficUs = 0;
 
+static void telemetryFromSummary(void);
+static void updateSummary61(void);
+static void updateSummary63(void);
+
 static void deleteTaskIfRunning(TaskHandle_t *handle)
 {
     if (handle != NULL && *handle != NULL) {
