@@ -57,6 +57,76 @@ static gpio_num_t rsDirByPort(int port)
     return (port == 1) ? rs485GetDir1() : rs485GetDir2();
 }
 
+static bool bridgeTryBuildGrowattRs485Telemetry(const bridge_runtime_settings_t *settings,
+                                                bridgeTelemetrySnapshot_t *out)
+{
+    modbusDecoder_t *dec = NULL;
+    uint16_t soc = 0;
+    uint16_t packAbsICa = 0;
+    uint16_t soh = 0;
+    uint16_t cycles = 0;
+    uint16_t cmaxMv = 0;
+    uint16_t cminMv = 0;
+    uint16_t cmaxIdx = 0;
+    uint16_t cminIdx = 0;
+    uint16_t temp = 0;
+    uint8_t cellCount = 0;
+
+    if (settings == NULL || out == NULL) {
+        return false;
+    }
+    if (settings->bms_line != LINE_RS485 || settings->bms_protocol != PROTOCOL_RS485_GROWATT) {
+        return false;
+    }
+
+    dec = rs485ForwardSnifferGetDecoder(settings->bms_port);
+    if (dec == NULL || !modbusDecoderHasFreshData(dec, BRIDGE_SOURCE_STALE_MS)) {
+        return false;
+    }
+
+    if (!modbusDecoderGetReg(dec, GROWATT_MB_REG_SOC_PCT, &soc) ||
+        !modbusDecoderGetReg(dec, GROWATT_MB_REG_CELL_MAX_MV, &cmaxMv) ||
+        !modbusDecoderGetReg(dec, GROWATT_MB_REG_CELL_MIN_MV, &cminMv) ||
+        !modbusDecoderGetReg(dec, GROWATT_MB_REG_CELL_MAX_IDX, &cmaxIdx) ||
+        !modbusDecoderGetReg(dec, GROWATT_MB_REG_CELL_MIN_IDX, &cminIdx)) {
+        return false;
+    }
+
+    memset(out, 0, sizeof(*out));
+    out->valid = true;
+    snprintf(out->source, sizeof(out->source), "%s cache", dec->ifName != NULL ? dec->ifName : rsNameByPort(settings->bms_port));
+    snprintf(out->protocol, sizeof(out->protocol), "RS485_GROWATT");
+    out->socPct = (uint8_t)soc;
+    if (modbusDecoderGetReg(dec, GROWATT_MB_REG_PACK_I_ABS_CA_TENTATIVE, &packAbsICa)) {
+        out->currentA = (float)packAbsICa / 100.0f;
+    }
+    if (modbusDecoderGetReg(dec, GROWATT_MB_REG_SOH_PCT, &soh)) {
+        out->sohPct = (uint8_t)soh;
+    }
+    if (modbusDecoderGetReg(dec, GROWATT_MB_REG_CYCLE_COUNT_TENTATIVE, &cycles)) {
+        out->cycles = cycles;
+    }
+    if (modbusDecoderGetReg(dec, GROWATT_MB_REG_TEMP_C, &temp)) {
+        out->tempMosC = (float)(int16_t)temp;
+    }
+    out->cellMaxV = (float)cmaxMv / 1000.0f;
+    out->cellMinV = (float)cminMv / 1000.0f;
+    out->cellMaxIdx = (uint8_t)cmaxIdx;
+    out->cellMinIdx = (uint8_t)cminIdx;
+    out->deltaV = out->cellMaxV - out->cellMinV;
+
+    for (uint8_t i = 0; i < 16u; i++) {
+        uint16_t mv = 0;
+        if (!modbusDecoderGetReg(dec, (uint16_t)(GROWATT_MB_REG_CELL_BASE + i), &mv)) {
+            continue;
+        }
+        out->cellVoltagesV[i] = (float)mv / 1000.0f;
+        cellCount = (uint8_t)(i + 1u);
+    }
+    out->cellCount = cellCount;
+    return true;
+}
+
 void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
@@ -66,6 +136,13 @@ void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
     }
 
     *out = gBridgeTelemetry;
+
+    if (settings.bms_line == LINE_RS485 && settings.bms_protocol == PROTOCOL_RS485_GROWATT) {
+        if (bridgeTryBuildGrowattRs485Telemetry(&settings, out)) {
+            return;
+        }
+        memset(out, 0, sizeof(*out));
+    }
 
     if (out->source[0] == '\0') {
         snprintf(out->source, sizeof(out->source), "runtime");

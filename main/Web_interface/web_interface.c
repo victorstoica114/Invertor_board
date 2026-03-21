@@ -260,6 +260,12 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "td{padding:8px;border-bottom:1px solid #2b3c4f;vertical-align:top}"
         "td:first-child{color:#8aa0b7;width:42%}"
         ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}"
+        ".cell-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}"
+        ".cell-item{background:#0f1a24;border:1px solid #2b3c4f;border-radius:10px;padding:10px 12px}"
+        ".cell-item.max{border-color:#1f8a70}"
+        ".cell-item.min{border-color:#d17a22}"
+        ".cell-item .label{display:block;color:#8aa0b7;margin-bottom:4px}"
+        ".cell-item .value{display:block;font-family:Consolas,monospace}"
         ".mono{font-family:Consolas,monospace}"
         "select,button{background:#0f1a24;color:#fff;border:1px solid #2b3c4f;border-radius:8px;padding:8px 10px}"
         "button{cursor:pointer;background:#1f8a70}"
@@ -281,12 +287,27 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "currentTab=id;document.getElementById(id).classList.add('active');if(id==='settings'){loadSettings();}if(id==='logs'){refreshLogs();}}"
         "function row(k,v){return '<tr><td>'+k+'</td><td class=\"mono\">'+v+'</td></tr>';}"
         "function card(title,rows){return '<div class=\"card\"><h3>'+title+'</h3><table>'+rows.join('')+'</table></div>';}"
+        "function cellGridCard(t){"
+        "const count=(t.cell_count&&t.cell_count>0)?t.cell_count:(Array.isArray(t.cells_v)?t.cells_v.length:0);"
+        "if(!count){return '<div class=\"card\"><h3>All Cells</h3><div class=\"mono\">No per-cell voltages available.</div></div>';}"
+        "const items=[];"
+        "for(let i=0;i<count;i++){"
+        "const v=Array.isArray(t.cells_v)?t.cells_v[i]:0;"
+        "const idx=i+1;"
+        "let cls='cell-item';"
+        "if(idx===t.cell_max_idx){cls+=' max';}"
+        "if(idx===t.cell_min_idx){cls+=' min';}"
+        "items.push('<div class=\"'+cls+'\"><span class=\"label\">Cell '+String(idx).padStart(2,'0')+'</span><span class=\"value\">'+(v>0?v.toFixed(3)+' V':'-')+'</span></div>');"
+        "}"
+        "return '<div class=\"card\"><h3>All Cells</h3><div class=\"cell-grid\">'+items.join('')+'</div></div>';"
+        "}"
         "function renderTelemetry(t){"
         "const cards=["
         "card('Runtime',[row('Valid',t.valid?'YES':'NO'),row('Source',t.source),row('Protocol',t.protocol),row('Status 0x63',t.status_63)]),"
         "card('Pack',[row('Current',t.current_a.toFixed(2)+' A'),row('SOC',t.soc_pct+' %'),row('SOH',t.soh_pct+' %'),row('Cycles',t.cycles)]),"
         "card('Cells',[row('Cell Max',t.cell_max_v.toFixed(3)+' V @ #'+t.cell_max_idx),row('Cell Min',t.cell_min_v.toFixed(3)+' V @ #'+t.cell_min_idx),row('Delta',t.delta_v.toFixed(3)+' V')]),"
-        "card('Temperatures',[row('MOS',t.temp_mos_c.toFixed(1)+' C'),row('T1',t.temp_t1_c.toFixed(1)+' C'),row('T2',t.temp_t2_c.toFixed(1)+' C'),row('T4',t.temp_t4_c.toFixed(1)+' C'),row('T5',t.temp_t5_c.toFixed(1)+' C')])"
+        "card('Temperatures',[row('MOS',t.temp_mos_c.toFixed(1)+' C'),row('T1',t.temp_t1_c.toFixed(1)+' C'),row('T2',t.temp_t2_c.toFixed(1)+' C'),row('T4',t.temp_t4_c.toFixed(1)+' C'),row('T5',t.temp_t5_c.toFixed(1)+' C')]),"
+        "cellGridCard(t)"
         "];"
         "document.getElementById('telemetryCards').innerHTML=cards.join('');"
         "}"
@@ -362,50 +383,63 @@ static esp_err_t rootHandler(httpd_req_t *req)
 static esp_err_t telemetryHandler(httpd_req_t *req)
 {
     bridgeTelemetrySnapshot_t snap = {0};
-    char json[768];
+    char json[2048];
+    int pos = 0;
 
     bridgeGetTelemetrySnapshot(&snap);
 
-    snprintf(json,
-             sizeof(json),
-             "{"
-             "\"valid\":%s,"
-             "\"source\":\"%s\","
-             "\"protocol\":\"%s\","
-             "\"current_a\":%.2f,"
-             "\"soc_pct\":%u,"
-             "\"soh_pct\":%u,"
-             "\"cycles\":%u,"
-             "\"cell_max_v\":%.3f,"
-             "\"cell_min_v\":%.3f,"
-             "\"cell_max_idx\":%u,"
-             "\"cell_min_idx\":%u,"
-             "\"delta_v\":%.3f,"
-             "\"temp_mos_c\":%.1f,"
-             "\"temp_t1_c\":%.1f,"
-             "\"temp_t2_c\":%.1f,"
-             "\"temp_t4_c\":%.1f,"
-             "\"temp_t5_c\":%.1f,"
-             "\"status_63\":%u"
-             "}",
-             snap.valid ? "true" : "false",
-             snap.source,
-             snap.protocol,
-             (double)snap.currentA,
-             (unsigned)snap.socPct,
-             (unsigned)snap.sohPct,
-             (unsigned)snap.cycles,
-             (double)snap.cellMaxV,
-             (double)snap.cellMinV,
-             (unsigned)snap.cellMaxIdx,
-             (unsigned)snap.cellMinIdx,
-             (double)snap.deltaV,
-             (double)snap.tempMosC,
-             (double)snap.tempT1C,
-             (double)snap.tempT2C,
-             (double)snap.tempT4C,
-             (double)snap.tempT5C,
-             (unsigned)snap.pylonStatus63);
+    pos += snprintf(json + pos,
+                    sizeof(json) - pos,
+                    "{"
+                    "\"valid\":%s,"
+                    "\"source\":\"%s\","
+                    "\"protocol\":\"%s\","
+                    "\"current_a\":%.2f,"
+                    "\"soc_pct\":%u,"
+                    "\"soh_pct\":%u,"
+                    "\"cycles\":%u,"
+                    "\"cell_max_v\":%.3f,"
+                    "\"cell_min_v\":%.3f,"
+                    "\"cell_max_idx\":%u,"
+                    "\"cell_min_idx\":%u,"
+                    "\"delta_v\":%.3f,"
+                    "\"temp_mos_c\":%.1f,"
+                    "\"temp_t1_c\":%.1f,"
+                    "\"temp_t2_c\":%.1f,"
+                    "\"temp_t4_c\":%.1f,"
+                    "\"temp_t5_c\":%.1f,"
+                    "\"status_63\":%u,"
+                    "\"cell_count\":%u,"
+                    "\"cells_v\":[",
+                    snap.valid ? "true" : "false",
+                    snap.source,
+                    snap.protocol,
+                    (double)snap.currentA,
+                    (unsigned)snap.socPct,
+                    (unsigned)snap.sohPct,
+                    (unsigned)snap.cycles,
+                    (double)snap.cellMaxV,
+                    (double)snap.cellMinV,
+                    (unsigned)snap.cellMaxIdx,
+                    (unsigned)snap.cellMinIdx,
+                    (double)snap.deltaV,
+                    (double)snap.tempMosC,
+                    (double)snap.tempT1C,
+                    (double)snap.tempT2C,
+                    (double)snap.tempT4C,
+                    (double)snap.tempT5C,
+                    (unsigned)snap.pylonStatus63,
+                    (unsigned)snap.cellCount);
+
+    for (uint8_t i = 0; i < snap.cellCount && pos < (int)sizeof(json); i++) {
+        pos += snprintf(json + pos,
+                        sizeof(json) - pos,
+                        "%s%.3f",
+                        (i == 0u) ? "" : ",",
+                        (double)snap.cellVoltagesV[i]);
+    }
+
+    snprintf(json + pos, sizeof(json) - pos, "]}");
 
     setNoCacheHeaders(req);
     httpd_resp_set_type(req, "application/json");

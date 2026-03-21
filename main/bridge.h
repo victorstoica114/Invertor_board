@@ -28,6 +28,8 @@ typedef struct {
     float tempT4C;
     float tempT5C;
     uint8_t pylonStatus63;
+    uint8_t cellCount;
+    float cellVoltagesV[16];
 } bridgeTelemetrySnapshot_t;
 
 void rs485BridgeEnable(void);
