@@ -150,12 +150,13 @@ void rs485BridgeEnable(void)
     const bool canToInvRs485Growatt =
         (settings.bms_line == LINE_CAN) &&
         (settings.inverter_line == LINE_RS485) &&
-        (settings.bms_protocol == PROTOCOL_CAN_GROWATT) &&
+        ((settings.bms_protocol == PROTOCOL_CAN_GROWATT) ||
+         (settings.bms_protocol == PROTOCOL_CAN_PYLON)) &&
         (settings.inverter_protocol == PROTOCOL_RS485_GROWATT);
 
     pylonRs485BridgeStop();
     rs485Can322BridgeStop();
-    canRs485SocBridgeStop();
+    canRs485GrowattBridgeStop();
     rs485ForwardSnifferStop();
 
     if (pylonRs485BridgeHandlesCurrentConfig()) {
@@ -170,9 +171,10 @@ void rs485BridgeEnable(void)
                                 canBusByPort(settings.inverter_port),
                                 canNameByPort(settings.inverter_port));
     } else if (canToInvRs485Growatt) {
-        canRs485SocBridgeEnable(rsUartByPort(settings.inverter_port),
-                                rsDirByPort(settings.inverter_port),
-                                rsNameByPort(settings.inverter_port));
+        canRs485GrowattBridgeEnable(rsUartByPort(settings.inverter_port),
+                                    rsDirByPort(settings.inverter_port),
+                                    rsNameByPort(settings.inverter_port),
+                                    canNameByPort(settings.bms_port));
     }
 }
 

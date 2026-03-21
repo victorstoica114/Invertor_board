@@ -1,6 +1,7 @@
 #include "rs485_can_bridge.h"
 
 #include "config.h"
+#include "bridge.h"
 #include "BMS_Protocols/Growatt/growatt_modbus_map.h"
 #include "CAN_Decoder.h"
 
@@ -27,14 +28,15 @@ typedef struct {
     uart_port_t uart;
     gpio_num_t dirPin;
     const char *ifName;
+    const char *srcCanIf;
     uint8_t slaveId;
     uint8_t fakeSocPct;
     uint32_t reqCount;
     uint32_t rspCount;
-} canRs485SocCtx_t;
+} canRs485GrowattCtx_t;
 
-static canRs485SocCtx_t g_canRsSocCtx;
-static TaskHandle_t g_canRsSocTaskHandle;
+static canRs485GrowattCtx_t g_canRsGrowattCtx;
+static TaskHandle_t g_canRsGrowattTaskHandle;
 
 static inline void putBe16(uint8_t *p, uint16_t v)
 {
@@ -280,6 +282,237 @@ static void canRsSetTx(gpio_num_t dirPin, bool txEn)
     gpio_set_level(dirPin, txEn ? 1 : 0);
 }
 
+static bool canRsModelLooksUsable(const universal_battery_model_t *model)
+{
+    return model != NULL && model->valid;
+}
+
+static uint16_t canRsRoundScaled(float value, float scale, uint16_t fallback)
+{
+    float scaled = value * scale;
+    int32_t rounded = 0;
+
+    if (!(value == value)) {
+        return fallback;
+    }
+
+    if (scaled < 0.0f) {
+        return fallback;
+    }
+
+    rounded = (int32_t)(scaled + 0.5f);
+    if (rounded < 0) {
+        return fallback;
+    }
+    if (rounded > 65535) {
+        return 65535u;
+    }
+    return (uint16_t)rounded;
+}
+
+static uint16_t canRsAbsScaled(float value, float scale, uint16_t fallback)
+{
+    if (value < 0.0f) {
+        value = -value;
+    }
+    return canRsRoundScaled(value, scale, fallback);
+}
+
+static uint16_t canRsSocFromSources(const canRs485GrowattCtx_t *ctx,
+                                    const universal_battery_model_t *model,
+                                    bool *fromModel,
+                                    bool *fromCan)
+{
+    uint8_t socPct = (ctx != NULL) ? ctx->fakeSocPct : 0u;
+    bool socFromCan = false;
+    bool socFromModel = false;
+
+    if (fromModel != NULL) {
+        *fromModel = false;
+    }
+    if (fromCan != NULL) {
+        *fromCan = false;
+    }
+
+    if (model != NULL && model->valid && model->socPct <= 100u) {
+        socPct = model->socPct;
+        socFromModel = true;
+    } else if (ctx != NULL && ctx->srcCanIf != NULL) {
+        socFromCan = canDecoderTryGetSocPct(ctx->srcCanIf, &socPct);
+    }
+
+    if (fromModel != NULL) {
+        *fromModel = socFromModel;
+    }
+    if (fromCan != NULL) {
+        *fromCan = socFromCan;
+    }
+    return socPct;
+}
+
+static void canRsSynthCellRegs(const universal_battery_model_t *model, uint16_t cells[16])
+{
+    uint16_t maxMv = RS485_CAN_BRIDGE_FALLBACK_CELL_MAX_MV;
+    uint16_t minMv = RS485_CAN_BRIDGE_FALLBACK_CELL_MIN_MV;
+    uint8_t maxIdx = (uint8_t)RS485_CAN_BRIDGE_FALLBACK_CELL_MAX_IDX;
+    uint8_t minIdx = (uint8_t)RS485_CAN_BRIDGE_FALLBACK_CELL_MIN_IDX;
+    uint16_t avgMv = 0;
+
+    if (model != NULL) {
+        if (model->cellMaxV > 0.0f) {
+            maxMv = canRsRoundScaled(model->cellMaxV, 1000.0f, maxMv);
+        }
+        if (model->cellMinV > 0.0f) {
+            minMv = canRsRoundScaled(model->cellMinV, 1000.0f, minMv);
+        }
+        if (model->cellMaxIdx >= 1u && model->cellMaxIdx <= 16u) {
+            maxIdx = model->cellMaxIdx;
+        }
+        if (model->cellMinIdx >= 1u && model->cellMinIdx <= 16u) {
+            minIdx = model->cellMinIdx;
+        }
+    }
+
+    if (maxMv < minMv) {
+        uint16_t tmpMv = maxMv;
+        uint8_t tmpIdx = maxIdx;
+        maxMv = minMv;
+        minMv = tmpMv;
+        maxIdx = minIdx;
+        minIdx = tmpIdx;
+    }
+
+    if (model != NULL && model->packVoltageV > 0.0f) {
+        avgMv = canRsRoundScaled(model->packVoltageV / 16.0f, 1000.0f, 0u);
+    }
+    if (avgMv == 0u) {
+        avgMv = (uint16_t)((maxMv + minMv) / 2u);
+    }
+    if (avgMv < minMv) {
+        avgMv = minMv;
+    }
+    if (avgMv > maxMv) {
+        avgMv = maxMv;
+    }
+
+    for (int i = 0; i < 16; i++) {
+        cells[i] = avgMv;
+    }
+
+    if (maxIdx >= 1u && maxIdx <= 16u) {
+        cells[maxIdx - 1u] = maxMv;
+    }
+    if (minIdx >= 1u && minIdx <= 16u) {
+        cells[minIdx - 1u] = minMv;
+    }
+}
+
+static uint16_t canRsSynthStatusFlags(const universal_battery_model_t *model)
+{
+    uint16_t status = 0u;
+
+    if (model != NULL && model->protocolState != 0u) {
+        status = (uint16_t)(model->protocolState & 0xFFFFu);
+    }
+
+    if (model != NULL) {
+        if (model->balanceEnabled) {
+            status |= 0x0020u;
+        }
+        if (model->dischargeEnabled) {
+            status |= 0x0040u;
+        }
+        if (model->chargeEnabled) {
+            status |= 0x0080u;
+        }
+    }
+
+    return status;
+}
+
+static uint16_t canRsSynthGrowattReg(const universal_battery_model_t *model,
+                                     uint16_t addr,
+                                     uint16_t socPct,
+                                     uint16_t fullCapCah,
+                                     const uint16_t cells[16])
+{
+    bool modelOk = canRsModelLooksUsable(model);
+
+    switch (addr) {
+        case GROWATT_MB_REG_INFO_0001:
+            return 0x0001u;
+        case GROWATT_MB_REG_INFO_0002:
+            return 0x0010u;
+        case GROWATT_MB_REG_INFO_0003:
+            return 0x0001u;
+        case GROWATT_MB_REG_INFO_0004:
+            return 0x0000u;
+        case GROWATT_MB_REG_STATUS_FLAGS:
+            return canRsSynthStatusFlags(model);
+        case GROWATT_MB_REG_SOC_PCT:
+            return socPct;
+        case GROWATT_MB_REG_PACK_V_CV:
+            if (modelOk && model->packVoltageV > 0.0f) {
+                return canRsRoundScaled(model->packVoltageV, 100.0f, RS485_CAN_BRIDGE_FALLBACK_PACK_V_CV);
+            }
+            return RS485_CAN_BRIDGE_FALLBACK_PACK_V_CV;
+        case GROWATT_MB_REG_PACK_I_ABS_CA_TENTATIVE:
+            if (modelOk) {
+                return canRsAbsScaled(model->packCurrentA, 100.0f, (uint16_t)(RS485_CAN_BRIDGE_FALLBACK_PACK_I_0P1 * 10));
+            }
+            return (uint16_t)(RS485_CAN_BRIDGE_FALLBACK_PACK_I_0P1 * 10);
+        case GROWATT_MB_REG_TEMP_C:
+            if (modelOk) {
+                return canRsRoundScaled(model->temperaturesC[0], 1.0f, (uint16_t)RS485_CAN_BRIDGE_FALLBACK_TEMP_C);
+            }
+            return (uint16_t)RS485_CAN_BRIDGE_FALLBACK_TEMP_C;
+        case GROWATT_MB_REG_CYCLE_COUNT_TENTATIVE:
+            if (modelOk && model->cycleCount > 0u) {
+                return model->cycleCount;
+            }
+            return RS485_CAN_BRIDGE_FALLBACK_CYCLE_COUNT;
+        case GROWATT_MB_REG_REMAIN_CAP_CAH:
+            return (uint16_t)(((uint32_t)fullCapCah * (uint32_t)socPct) / 100u);
+        case GROWATT_MB_REG_FULL_CAP_CAH:
+            return fullCapCah;
+        case GROWATT_MB_REG_SOH_PCT:
+            if (modelOk && model->sohPct <= 100u) {
+                return model->sohPct;
+            }
+            return RS485_CAN_BRIDGE_FALLBACK_SOH_PCT;
+        case GROWATT_MB_REG_CV_TARGET_CV:
+            if (modelOk && model->chargeVoltageLimitV > 0.0f) {
+                return canRsRoundScaled(model->chargeVoltageLimitV, 100.0f, RS485_CAN_BRIDGE_FALLBACK_PACK_V_CV);
+            }
+            return canRsSynthGrowattReg(model, GROWATT_MB_REG_PACK_V_CV, socPct, fullCapCah, cells);
+        case GROWATT_MB_REG_ICHG_LIM_CA_TENTATIVE:
+            if (modelOk && model->chargeCurrentLimitA > 0.0f) {
+                return canRsAbsScaled(model->chargeCurrentLimitA, 100.0f, 0u);
+            }
+            return 0u;
+        case GROWATT_MB_REG_IDIS_LIM_CA_TENTATIVE:
+            if (modelOk && model->dischargeCurrentLimitA > 0.0f) {
+                return canRsAbsScaled(model->dischargeCurrentLimitA, 100.0f, 0u);
+            }
+            return 0u;
+        case GROWATT_MB_REG_CELL_MAX_MV:
+            return cells[clampCellIdxU8((modelOk ? model->cellMaxIdx : 0u), (uint8_t)RS485_CAN_BRIDGE_FALLBACK_CELL_MAX_IDX) - 1u];
+        case GROWATT_MB_REG_CELL_MIN_MV:
+            return cells[clampCellIdxU8((modelOk ? model->cellMinIdx : 0u), (uint8_t)RS485_CAN_BRIDGE_FALLBACK_CELL_MIN_IDX) - 1u];
+        case GROWATT_MB_REG_CELL_MAX_IDX:
+            return clampCellIdxU8((modelOk ? model->cellMaxIdx : 0u), (uint8_t)RS485_CAN_BRIDGE_FALLBACK_CELL_MAX_IDX);
+        case GROWATT_MB_REG_CELL_MIN_IDX:
+            return clampCellIdxU8((modelOk ? model->cellMinIdx : 0u), (uint8_t)RS485_CAN_BRIDGE_FALLBACK_CELL_MIN_IDX);
+        case GROWATT_MB_REG_CELL_EXTRA:
+            return 0u;
+        default:
+            if (addr >= GROWATT_MB_REG_CELL_BASE && addr <= GROWATT_MB_REG_CELL_LAST) {
+                return cells[addr - GROWATT_MB_REG_CELL_BASE];
+            }
+            return 0u;
+    }
+}
+
 static bool canRsParseReadReq(const uint8_t *frame,
                               int len,
                               uint8_t slaveId,
@@ -321,13 +554,16 @@ static bool canRsParseReadReq(const uint8_t *frame,
     return true;
 }
 
-static bool canRsSendSocResponse(canRs485SocCtx_t *ctx,
-                                 uint8_t func,
-                                 uint16_t start,
-                                 uint16_t count,
-                                 uint8_t socPct,
-                                 bool *socInjected)
+static bool canRsSendGrowattResponse(canRs485GrowattCtx_t *ctx,
+                                     uint8_t func,
+                                     uint16_t start,
+                                     uint16_t count,
+                                     const universal_battery_model_t *model,
+                                     uint16_t socPct)
 {
+    uint16_t fullCapCah = RS485_CAN_BRIDGE_FALLBACK_FCC_10MAH;
+    uint16_t cells[16];
+
     if (ctx == NULL) {
         return false;
     }
@@ -342,13 +578,12 @@ static bool canRsSendSocResponse(canRs485SocCtx_t *ctx,
     resp[1] = func;
     resp[2] = (uint8_t)(count * 2u);
 
-    bool injected = false;
-    const uint32_t reqStart = start;
-    const uint32_t reqEnd = reqStart + (uint32_t)count - 1u;
-    if (((uint32_t)GROWATT_MB_REG_SOC_PCT >= reqStart) && ((uint32_t)GROWATT_MB_REG_SOC_PCT <= reqEnd)) {
-        const uint16_t offset = (uint16_t)((uint32_t)GROWATT_MB_REG_SOC_PCT - reqStart);
-        putBe16(&resp[3 + (offset * 2u)], (uint16_t)socPct);
-        injected = true;
+    canRsSynthCellRegs(model, cells);
+
+    for (uint16_t i = 0; i < count; i++) {
+        uint16_t addr = (uint16_t)(start + i);
+        uint16_t val = canRsSynthGrowattReg(model, addr, socPct, fullCapCah, cells);
+        putBe16(&resp[3 + (i * 2u)], val);
     }
 
     uint16_t crc = canRsCrc16(resp, respLen - 2);
@@ -361,15 +596,12 @@ static bool canRsSendSocResponse(canRs485SocCtx_t *ctx,
     canRsSetTx(ctx->dirPin, false);
 
     ctx->rspCount++;
-    if (socInjected != NULL) {
-        *socInjected = injected;
-    }
     return true;
 }
 
-static void canRs485SocTask(void *pv)
+static void canRs485GrowattTask(void *pv)
 {
-    canRs485SocCtx_t *ctx = (canRs485SocCtx_t *)pv;
+    canRs485GrowattCtx_t *ctx = (canRs485GrowattCtx_t *)pv;
     uint8_t rxChunk[64];
     uint8_t frameBuf[256];
     uint16_t frameLen = 0;
@@ -402,27 +634,28 @@ static void canRs485SocTask(void *pv)
             uint16_t start = 0;
             uint16_t count = 0;
             bool sent = false;
-            bool injected = false;
+            universal_battery_model_t model = {0};
+            bool socFromModel = false;
+            bool socFromCan = false;
+            uint16_t socPct = 0;
 
             if (canRsParseReadReq(frameBuf, frameLen, ctx->slaveId, &func, &start, &count)) {
-                const char *bmsCanIf = (BMS_PORT == 1) ? "CAN1" : "CAN2";
-                uint8_t socPct = ctx->fakeSocPct;
-                bool socFromCan = canDecoderTryGetSocPct(bmsCanIf, &socPct);
-
+                bridgeGetUniversalBatteryModel(&model);
+                socPct = canRsSocFromSources(ctx, &model, &socFromModel, &socFromCan);
                 ctx->reqCount++;
-                sent = canRsSendSocResponse(ctx, func, start, count, socPct, &injected);
+                sent = canRsSendGrowattResponse(ctx, func, start, count, &model, socPct);
 
 #if CAN_RS485_SOC_LOG_EVERY_N > 0
                 if ((ctx->reqCount % CAN_RS485_SOC_LOG_EVERY_N) == 0u) {
                     ESP_LOGI(EXAMPLE_TAG,
-                             "CAN->RS485 SOC slave on %s: req start=0x%04X count=0x%04X sent=%s soc=%s src=%s pct=%u",
+                             "CAN->RS485 Growatt translator on %s: req start=0x%04X count=0x%04X sent=%s src=%s soc=%u pack=%.2fV",
                              ctx->ifName,
                              (unsigned)start,
                              (unsigned)count,
                              sent ? "Y" : "N",
-                             injected ? "Y" : "N",
-                             socFromCan ? "CAN" : "FAKE",
-                             (unsigned)socPct);
+                             socFromModel ? "UNIVERSAL" : (socFromCan ? "CAN_SOC+FALLBACK" : "FALLBACK"),
+                             (unsigned)socPct,
+                             (double)model.packVoltageV);
                 }
 #endif
             }
@@ -433,49 +666,55 @@ static void canRs485SocTask(void *pv)
     }
 }
 
-void canRs485SocBridgeEnable(uart_port_t inverterUart, gpio_num_t inverterDir, const char *ifName)
+void canRs485GrowattBridgeEnable(uart_port_t inverterUart,
+                                 gpio_num_t inverterDir,
+                                 const char *ifName,
+                                 const char *srcCanIf)
 {
 #if !CAN_RS485_SOC_TRANSLATOR_ENABLE
     (void)inverterUart;
     (void)inverterDir;
     (void)ifName;
-    ESP_LOGI(EXAMPLE_TAG, "CAN->RS485 SOC slave disabled by config");
+    (void)srcCanIf;
+    ESP_LOGI(EXAMPLE_TAG, "CAN->RS485 Growatt translator disabled by config");
     return;
 #else
-    if (g_canRsSocTaskHandle != NULL) {
-        ESP_LOGI(EXAMPLE_TAG, "CAN->RS485 SOC slave already running");
+    if (g_canRsGrowattTaskHandle != NULL) {
+        ESP_LOGI(EXAMPLE_TAG, "CAN->RS485 Growatt translator already running");
         return;
     }
 
-    memset(&g_canRsSocCtx, 0, sizeof(g_canRsSocCtx));
-    g_canRsSocCtx.uart = inverterUart;
-    g_canRsSocCtx.dirPin = inverterDir;
-    g_canRsSocCtx.ifName = (ifName != NULL) ? ifName : "RS485";
-    g_canRsSocCtx.slaveId = (uint8_t)CAN_RS485_SOC_SLAVE_ID;
-    g_canRsSocCtx.fakeSocPct = (uint8_t)((CAN_RS485_SOC_FAKE_PCT > 100u) ? 100u : CAN_RS485_SOC_FAKE_PCT);
+    memset(&g_canRsGrowattCtx, 0, sizeof(g_canRsGrowattCtx));
+    g_canRsGrowattCtx.uart = inverterUart;
+    g_canRsGrowattCtx.dirPin = inverterDir;
+    g_canRsGrowattCtx.ifName = (ifName != NULL) ? ifName : "RS485";
+    g_canRsGrowattCtx.srcCanIf = (srcCanIf != NULL) ? srcCanIf : "CAN1";
+    g_canRsGrowattCtx.slaveId = (uint8_t)CAN_RS485_SOC_SLAVE_ID;
+    g_canRsGrowattCtx.fakeSocPct = (uint8_t)((CAN_RS485_SOC_FAKE_PCT > 100u) ? 100u : CAN_RS485_SOC_FAKE_PCT);
 
-    xTaskCreate(canRs485SocTask,
-                "can_to_rs485_soc",
+    xTaskCreate(canRs485GrowattTask,
+                "can_to_rs485_gw",
                 4096,
-                &g_canRsSocCtx,
+                &g_canRsGrowattCtx,
                 9,
-                &g_canRsSocTaskHandle);
+                &g_canRsGrowattTaskHandle);
 
     ESP_LOGI(EXAMPLE_TAG,
-             "CAN->RS485 SOC slave enabled (if=%s slave=%u fakeSOC=%u%%)",
-             g_canRsSocCtx.ifName,
-             (unsigned)g_canRsSocCtx.slaveId,
-             (unsigned)g_canRsSocCtx.fakeSocPct);
+             "CAN->RS485 Growatt translator enabled (if=%s src=%s slave=%u fallbackSOC=%u%%)",
+             g_canRsGrowattCtx.ifName,
+             g_canRsGrowattCtx.srcCanIf,
+             (unsigned)g_canRsGrowattCtx.slaveId,
+             (unsigned)g_canRsGrowattCtx.fakeSocPct);
 #endif
 }
 
-void canRs485SocBridgeStop(void)
+void canRs485GrowattBridgeStop(void)
 {
-    if (g_canRsSocTaskHandle != NULL) {
-        vTaskDelete(g_canRsSocTaskHandle);
-        g_canRsSocTaskHandle = NULL;
+    if (g_canRsGrowattTaskHandle != NULL) {
+        vTaskDelete(g_canRsGrowattTaskHandle);
+        g_canRsGrowattTaskHandle = NULL;
     }
-    memset(&g_canRsSocCtx, 0, sizeof(g_canRsSocCtx));
+    memset(&g_canRsGrowattCtx, 0, sizeof(g_canRsGrowattCtx));
 }
 
 void rs485Can322BridgeEnable(modbusDecoder_t *srcDecoder, twai_handle_t txBus, const char *txName)
