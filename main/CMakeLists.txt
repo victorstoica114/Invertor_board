@@ -12,6 +12,7 @@ idf_component_register(
         "modbusDecoder.c"
         "rs485_can_bridge.c"
         "BMS_Protocols/Pylon/pylon_rs485_bridge.c"
+        "BMS_Protocols/Pylon/pylon_can_protocol.c"
         "Web_interface/web_interface.c"
         # "modbusResp.c"
     INCLUDE_DIRS
