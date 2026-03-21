@@ -2,6 +2,7 @@
 
 #include "config.h"
 #include "bridge.h"
+#include "runtime_settings.h"
 #include "BMS_Protocols/Growatt/growatt_modbus_map.h"
 #include "CAN_Decoder.h"
 
