@@ -548,9 +548,16 @@ void rs485ForwardSnifferStart(const bridge_runtime_settings_t *settings)
     static rs485BridgeCtx_t bmsSniff;
     static rs485BridgeCtx_t invSniff;
     static rs485BmsPollerCtx_t poller;
-    const bool rs485ForwardEnabled = (settings != NULL) && (settings->mode == MODE_FORWARD);
     const bool bmsOnRs = (settings != NULL) && (settings->bms_line == LINE_RS485);
     const bool invOnRs = (settings != NULL) && (settings->inverter_line == LINE_RS485);
+    const bool rs485DirectPassthroughInBridge = (settings != NULL) &&
+                                                (settings->mode == MODE_BRIDGE) &&
+                                                bmsOnRs &&
+                                                invOnRs &&
+                                                (settings->bms_protocol == PROTOCOL_RS485_GROWATT) &&
+                                                (settings->inverter_protocol == PROTOCOL_RS485_GROWATT);
+    const bool rs485ForwardEnabled = (settings != NULL) &&
+                                     ((settings->mode == MODE_FORWARD) || rs485DirectPassthroughInBridge);
     const bool inverseCanToRs = (settings != NULL) &&
                                 (settings->bms_line == LINE_CAN) &&
                                 (settings->inverter_line == LINE_RS485) &&
@@ -577,6 +584,10 @@ void rs485ForwardSnifferStart(const bridge_runtime_settings_t *settings)
     ESP_LOGI(EXAMPLE_TAG, "RS485 reg exclude list: %s (%u entries configured)",
              RS485_REG_EXCLUDE_LIST_ENABLE ? "ON" : "OFF",
              (unsigned)g_rs485ForwardExcludeRegsCount);
+    if (rs485DirectPassthroughInBridge) {
+        ESP_LOGI(EXAMPLE_TAG,
+                 "RS485 bridge mode uses direct pass-through because both sides are RS485_GROWATT");
+    }
 
     if (bmsOnRs && invOnRs) {
         bmsToInv.rxName = rsNameByPort(settings->bms_port);
