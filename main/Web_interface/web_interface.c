@@ -27,6 +27,7 @@ static int s_wifiRetryCount = 0;
 static httpd_handle_t s_httpd = NULL;
 static esp_netif_t *s_wifiStaNetif = NULL;
 static TaskHandle_t s_settingsApplyTask = NULL;
+static char s_logsResponse[2048];
 
 typedef struct {
     bool restartWeb;
@@ -43,6 +44,16 @@ static void setNoCacheHeaders(httpd_req_t *req)
     httpd_resp_set_hdr(req, "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
     httpd_resp_set_hdr(req, "Pragma", "no-cache");
     httpd_resp_set_hdr(req, "Expires", "0");
+}
+
+static void configureWebLogLevels(void)
+{
+    esp_log_level_set("httpd", ESP_LOG_WARN);
+    esp_log_level_set("httpd_txrx", ESP_LOG_WARN);
+    esp_log_level_set("httpd_parse", ESP_LOG_WARN);
+    esp_log_level_set("httpd_uri", ESP_LOG_WARN);
+    esp_log_level_set("httpd_sess", ESP_LOG_WARN);
+    esp_log_level_set("event", ESP_LOG_WARN);
 }
 
 static void wifiCopyField(uint8_t *dst, size_t dstSize, const char *src)
@@ -402,14 +413,12 @@ static esp_err_t telemetryHandler(httpd_req_t *req)
 
 static esp_err_t logsHandler(httpd_req_t *req)
 {
-    char text[2048];
-
-    bridgeGetDecodedLogSnapshot(text, sizeof(text));
-    ESP_LOGI(WEB_TAG, "/api/logs requested (len=%u)", (unsigned)strlen(text));
+    bridgeGetDecodedLogSnapshot(s_logsResponse, sizeof(s_logsResponse));
+    ESP_LOGI(WEB_TAG, "/api/logs requested (len=%u)", (unsigned)strlen(s_logsResponse));
     setNoCacheHeaders(req);
     httpd_resp_set_type(req, "text/plain; charset=utf-8");
     return httpd_resp_send(req,
-                           text[0] != '\0' ? text : "No decoded BMS logs yet.",
+                           s_logsResponse[0] != '\0' ? s_logsResponse : "No decoded BMS logs yet.",
                            HTTPD_RESP_USE_STRLEN);
 }
 
@@ -522,6 +531,7 @@ static void startHttpServer(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = runtimeSettingsGet().web_port;
+    config.stack_size = 8192;
 
     if (httpd_start(&s_httpd, &config) != ESP_OK) {
         ESP_LOGE(WEB_TAG, "Failed to start HTTP server");
@@ -595,6 +605,7 @@ static void webInterfaceTask(void *pv)
 {
     (void)pv;
 
+    configureWebLogLevels();
     s_wifiEventGroup = xEventGroupCreate();
     initWifiSta();
     startHttpServer();
