@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "esp_timer.h"
 
 #define CAN_DECODER_IMMEDIATE_DECODE_LOG_ENABLE 0
 #define CAN_BMS_CACHE_ID_MIN GROWATT_CAN_CACHE_ID_MIN
@@ -18,6 +19,7 @@
 typedef struct {
     bool valid;
     uint32_t id;
+    uint32_t updatedMs;
     uint8_t dlc;
     uint8_t data[8];
 } canBmsCachedFrame_t;
@@ -77,6 +79,7 @@ static void canBmsCacheUpdate(const char *ifname, const twai_message_t *m)
     canBmsCachedFrame_t f = {0};
     f.valid = true;
     f.id = (uint32_t)m->identifier;
+    f.updatedMs = (uint32_t)(esp_timer_get_time() / 1000LL);
     f.dlc = (uint8_t)m->data_length_code;
     if (f.dlc > 8u) f.dlc = 8u;
     memcpy(f.data, m->data, f.dlc);
@@ -99,6 +102,7 @@ static void canPylonCacheUpdate(const char *ifname, const twai_message_t *m)
     pylon_can_frame_t f = {0};
     f.valid = true;
     f.id = (uint32_t)m->identifier;
+    f.updatedMs = (uint32_t)(esp_timer_get_time() / 1000LL);
     f.dlc = (uint8_t)m->data_length_code;
     if (f.dlc > 8u) f.dlc = 8u;
     memcpy(f.data, m->data, f.dlc);
@@ -663,6 +667,44 @@ bool canDecoderTryGetSocPct(const char *ifname, uint8_t *socOut)
 
     return false;
 }
+
+bool canDecoderHasFreshData(const char *ifname, uint32_t maxAgeMs)
+{
+    const char *name = (ifname != NULL) ? ifname : "CAN1";
+    canBmsCachedFrame_t local[CAN_BMS_CACHE_COUNT];
+    pylon_can_frame_t pylonLocal[PYLON_CAN_CACHE_COUNT];
+    canBmsCachedFrame_t *src = canBmsCacheForIf(name);
+    pylon_can_frame_t *pylonSrc = canPylonCacheForIf(name);
+    uint32_t nowMs = (uint32_t)(esp_timer_get_time() / 1000LL);
+
+    if (src == NULL) {
+        return false;
+    }
+
+    portENTER_CRITICAL(&g_canBmsCacheMux);
+    memcpy(local, src, sizeof(local));
+    if (pylonSrc != NULL) {
+        memcpy(pylonLocal, pylonSrc, sizeof(pylonLocal));
+    } else {
+        memset(pylonLocal, 0, sizeof(pylonLocal));
+    }
+    portEXIT_CRITICAL(&g_canBmsCacheMux);
+
+    for (size_t i = 0; i < PYLON_CAN_CACHE_COUNT; i++) {
+        if (pylonLocal[i].valid && (nowMs - pylonLocal[i].updatedMs) <= maxAgeMs) {
+            return true;
+        }
+    }
+
+    for (size_t i = 0; i < CAN_BMS_CACHE_COUNT; i++) {
+        if (local[i].valid && (nowMs - local[i].updatedMs) <= maxAgeMs) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 void canDecoderOnFrame(const char *ifname, const twai_message_t *m)
 {
     if (m == NULL) return;

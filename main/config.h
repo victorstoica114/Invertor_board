@@ -93,6 +93,9 @@
 #define WEB_INTERFACE_TASK_STACK 6144
 #define WEB_INTERFACE_TASK_PRIO 5
 
+/* Source freshness: translators must stop answering if source data goes stale. */
+#define BRIDGE_SOURCE_STALE_MS 2000u
+
 /* Compile-time validation */
 #if ((BMS_line != LINE_CAN) && (BMS_line != LINE_RS485))
 #error "BMS_line must be LINE_CAN or LINE_RS485"

@@ -287,6 +287,21 @@ static bool canRsModelLooksUsable(const universal_battery_model_t *model)
     return model != NULL && model->valid;
 }
 
+static bool canRsSourceFresh(const canRs485GrowattCtx_t *ctx, const universal_battery_model_t *model)
+{
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+
+    if (settings.bms_protocol == PROTOCOL_CAN_PYLON) {
+        return canRsModelLooksUsable(model);
+    }
+
+    if (ctx != NULL && ctx->srcCanIf != NULL) {
+        return canDecoderHasFreshData(ctx->srcCanIf, BRIDGE_SOURCE_STALE_MS);
+    }
+
+    return false;
+}
+
 static uint16_t canRsRoundScaled(float value, float scale, uint16_t fallback)
 {
     float scaled = value * scale;
@@ -641,9 +656,11 @@ static void canRs485GrowattTask(void *pv)
 
             if (canRsParseReadReq(frameBuf, frameLen, ctx->slaveId, &func, &start, &count)) {
                 bridgeGetUniversalBatteryModel(&model);
-                socPct = canRsSocFromSources(ctx, &model, &socFromModel, &socFromCan);
                 ctx->reqCount++;
-                sent = canRsSendGrowattResponse(ctx, func, start, count, &model, socPct);
+                if (canRsSourceFresh(ctx, &model)) {
+                    socPct = canRsSocFromSources(ctx, &model, &socFromModel, &socFromCan);
+                    sent = canRsSendGrowattResponse(ctx, func, start, count, &model, socPct);
+                }
 
 #if CAN_RS485_SOC_LOG_EVERY_N > 0
                 if (ctx->reqCount <= 3u || (ctx->reqCount % CAN_RS485_SOC_LOG_EVERY_N) == 0u) {
@@ -653,7 +670,7 @@ static void canRs485GrowattTask(void *pv)
                              (unsigned)start,
                              (unsigned)count,
                              sent ? "Y" : "N",
-                             socFromModel ? "UNIVERSAL" : (socFromCan ? "CAN_SOC+FALLBACK" : "FALLBACK"),
+                             sent ? (socFromModel ? "UNIVERSAL" : (socFromCan ? "CAN_SOC+FALLBACK" : "FALLBACK")) : "STALE_OR_MISSING",
                              (unsigned)socPct,
                              (double)model.packVoltageV);
                 }

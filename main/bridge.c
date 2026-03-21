@@ -11,10 +11,26 @@
 #include "Operation_Modes/rs485_forward_sniffer.h"
 #include "BMS_Protocols/Pylon/pylon_rs485_bridge.h"
 #include "rs485_can_bridge.h"
+#include "esp_timer.h"
 
 static bridgeTelemetrySnapshot_t gBridgeTelemetry;
 static universal_battery_model_t gUniversalBatteryModel;
 static char gBridgeDecodedLog[2048];
+
+static uint32_t bridgeNowMs(void)
+{
+    return (uint32_t)(esp_timer_get_time() / 1000LL);
+}
+
+static bool bridgeUniversalBatteryModelIsFresh(const universal_battery_model_t *model)
+{
+    uint32_t nowMs = bridgeNowMs();
+
+    if (model == NULL || !model->valid || model->updatedMs == 0u) {
+        return false;
+    }
+    return (nowMs - model->updatedMs) <= BRIDGE_SOURCE_STALE_MS;
+}
 
 static const char *canNameByPort(int port)
 {
@@ -92,6 +108,7 @@ void bridgeSetTelemetrySnapshot(const bridgeTelemetrySnapshot_t *in)
     gUniversalBatteryModel.temperaturesC[3] = in->tempT4C;
     gUniversalBatteryModel.temperaturesC[4] = in->tempT5C;
     gUniversalBatteryModel.protocolState = in->pylonStatus63;
+    gUniversalBatteryModel.updatedMs = in->valid ? bridgeNowMs() : 0u;
 }
 
 void bridgeGetUniversalBatteryModel(universal_battery_model_t *out)
@@ -101,6 +118,9 @@ void bridgeGetUniversalBatteryModel(universal_battery_model_t *out)
     }
 
     *out = gUniversalBatteryModel;
+    if (!bridgeUniversalBatteryModelIsFresh(out)) {
+        memset(out, 0, sizeof(*out));
+    }
 }
 
 void bridgeSetUniversalBatteryModel(const universal_battery_model_t *in)
@@ -111,6 +131,13 @@ void bridgeSetUniversalBatteryModel(const universal_battery_model_t *in)
     }
 
     gUniversalBatteryModel = *in;
+    if (gUniversalBatteryModel.valid) {
+        if (gUniversalBatteryModel.updatedMs == 0u) {
+            gUniversalBatteryModel.updatedMs = bridgeNowMs();
+        }
+    } else {
+        gUniversalBatteryModel.updatedMs = 0u;
+    }
 }
 
 void bridgeGetDecodedLogSnapshot(char *out, uint32_t outSize)

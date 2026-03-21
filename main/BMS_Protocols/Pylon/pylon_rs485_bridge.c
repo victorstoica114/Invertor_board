@@ -95,6 +95,28 @@ static bool pylonCanToRs485ModeEnabled(const bridge_runtime_settings_t *settings
            (settings->inverter_protocol == PROTOCOL_RS485_PYLON);
 }
 
+static bool pylonBmsSourceFresh(const bridge_runtime_settings_t *settings)
+{
+    int64_t nowUs = esp_timer_get_time();
+
+    if (settings == NULL) {
+        return false;
+    }
+
+    if (pylonCanToRs485ModeEnabled(settings)) {
+        universal_battery_model_t model = {0};
+        bridgeGetUniversalBatteryModel(&model);
+        return model.valid;
+    }
+
+    if (settings->bms_line == LINE_RS485) {
+        return (s_lastPylonBmsTrafficUs != 0) &&
+               ((nowUs - s_lastPylonBmsTrafficUs) <= ((int64_t)BRIDGE_SOURCE_STALE_MS * 1000LL));
+    }
+
+    return false;
+}
+
 static bool rs485PortUsesHalfDuplex(uart_port_t uart)
 {
     if (uart == RS485_1_UART) return RS485_1_USE_HALF_DUPLEX != 0;
@@ -376,6 +398,14 @@ static void maybeRefreshSyntheticCacheFromUniversal(void)
     char info63[sizeof(s_pylonCache.info63)] = {0};
 
     if (!pylonCanToRs485ModeEnabled(&settings)) {
+        return;
+    }
+
+    if (!pylonBmsSourceFresh(&settings)) {
+        s_pylonCache.valid61 = false;
+        s_pylonCache.valid62 = false;
+        s_pylonCache.valid63 = false;
+        memset(&s_pylonSummary, 0, sizeof(s_pylonSummary));
         return;
     }
 
@@ -675,15 +705,12 @@ static bool buildCachedResponse(const uint8_t *request,
                                 uint8_t *outCid2,
                                 uint8_t *outAdr)
 {
-    static const char *INFO_61_FALLBACK =
-        "D3180000640000006400640DBF00340CB000140BA80BAA00350BA600150BA80BAA00360BA600160BA80BA900370BA70017";
-    static const char *INFO_62_FALLBACK = "00000000";
-    static const char *INFO_63_FALLBACK = "DDE0AF0027102710C0";
     uint8_t ver = 0, adr = 0, cid1 = 0, cid2 = 0;
     const char *infoAscii = NULL;
     char body[192];
     uint16_t checksum;
     uint16_t lengthField;
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
 
     if (!parsePylonHeader(request, requestLen, &ver, &adr, &cid1, &cid2) || cid1 != 0x46) {
         return false;
@@ -691,15 +718,22 @@ static bool buildCachedResponse(const uint8_t *request,
 
     maybeRefreshSyntheticCacheFromUniversal();
 
+    if (!pylonBmsSourceFresh(&settings)) {
+        return false;
+    }
+
     switch (cid2) {
         case 0x61:
-            infoAscii = s_pylonCache.valid61 ? s_pylonCache.info61 : INFO_61_FALLBACK;
+            if (!s_pylonCache.valid61) return false;
+            infoAscii = s_pylonCache.info61;
             break;
         case 0x62:
-            infoAscii = s_pylonCache.valid62 ? s_pylonCache.info62 : INFO_62_FALLBACK;
+            if (!s_pylonCache.valid62) return false;
+            infoAscii = s_pylonCache.info62;
             break;
         case 0x63:
-            infoAscii = s_pylonCache.valid63 ? s_pylonCache.info63 : INFO_63_FALLBACK;
+            if (!s_pylonCache.valid63) return false;
+            infoAscii = s_pylonCache.info63;
             break;
         default:
             return false;

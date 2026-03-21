@@ -15,6 +15,7 @@ extern "C" {
 typedef struct {
     bool valid;
     uint32_t id;
+    uint32_t updatedMs;
     uint8_t dlc;
     uint8_t data[8];
 } pylon_can_frame_t;
