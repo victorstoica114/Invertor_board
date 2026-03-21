@@ -82,6 +82,15 @@ static bool pylonProbeModeEnabled(uint8_t mode)
     return (mode == MODE_BRIDGE) || (mode == MODE_FORWARD);
 }
 
+static bool pylonCanToRs485ModeEnabled(const bridge_runtime_settings_t *settings)
+{
+    return (settings != NULL) &&
+           (settings->bms_line == LINE_CAN) &&
+           (settings->inverter_line == LINE_RS485) &&
+           (settings->bms_protocol == PROTOCOL_CAN_PYLON) &&
+           (settings->inverter_protocol == PROTOCOL_RS485_PYLON);
+}
+
 static bool rs485PortUsesHalfDuplex(uart_port_t uart)
 {
     if (uart == RS485_1_UART) return RS485_1_USE_HALF_DUPLEX != 0;
@@ -229,6 +238,159 @@ static uint16_t be16(const uint8_t *p)
 static int16_t be16s(const uint8_t *p)
 {
     return (int16_t)be16(p);
+}
+
+static void putBe16(uint8_t *p, uint16_t v)
+{
+    p[0] = (uint8_t)((v >> 8) & 0xFFu);
+    p[1] = (uint8_t)(v & 0xFFu);
+}
+
+static void encodeHexAscii(const uint8_t *bytes, int len, char *out, size_t outSize)
+{
+    size_t pos = 0;
+
+    if (out == NULL || outSize == 0) {
+        return;
+    }
+    out[0] = '\0';
+    if (bytes == NULL || len <= 0) {
+        return;
+    }
+
+    for (int i = 0; i < len && pos + 3u < outSize; i++) {
+        pos += (size_t)snprintf(&out[pos], outSize - pos, "%02X", bytes[i]);
+    }
+}
+
+static bool buildCanDerivedInfo61(char *out, size_t outSize)
+{
+    static const uint8_t template61[49] = {
+        0x21, 0x8F, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x00, 0x64,
+        0x64, 0x12, 0x65, 0x00, 0x03, 0x11, 0xD4, 0x00, 0x0C, 0x0B,
+        0xC2, 0x0B, 0xC7, 0x00, 0x04, 0x0B, 0xBE, 0x00, 0x02, 0x0B,
+        0xC0, 0x0B, 0xC0, 0x00, 0x00, 0x0B, 0xC0, 0x00, 0x00, 0x0B,
+        0xC0, 0x0B, 0xC0, 0x00, 0x00, 0x0B, 0xC0, 0x00, 0x00
+    };
+    universal_battery_model_t model;
+    uint8_t bytes[sizeof(template61)];
+    uint16_t kelvinTemp = 0;
+    uint16_t maxMv = 0;
+    uint16_t minMv = 0;
+    uint8_t maxIdx = 3u;
+    uint8_t minIdx = 12u;
+
+    bridgeGetUniversalBatteryModel(&model);
+    if (!model.valid) {
+        return false;
+    }
+
+    memcpy(bytes, template61, sizeof(bytes));
+    bytes[1] = 0x90u;
+    putBe16(&bytes[2], (uint16_t)((int16_t)(model.packCurrentA * 100.0f)));
+    bytes[4] = model.socPct;
+    putBe16(&bytes[5], model.cycleCount);
+    bytes[9] = model.sohPct;
+
+    maxMv = (uint16_t)(model.cellMaxV > 0.0f ? (model.cellMaxV * 1000.0f) : 0.0f);
+    minMv = (uint16_t)(model.cellMinV > 0.0f ? (model.cellMinV * 1000.0f) : 0.0f);
+    if (maxMv > 0u) {
+        putBe16(&bytes[11], maxMv);
+    }
+    if (minMv > 0u) {
+        putBe16(&bytes[15], minMv);
+    }
+
+    if (model.cellMaxIdx >= 1u && model.cellMaxIdx <= 16u) {
+        maxIdx = model.cellMaxIdx;
+    }
+    if (model.cellMinIdx >= 1u && model.cellMinIdx <= 16u) {
+        minIdx = model.cellMinIdx;
+    }
+    putBe16(&bytes[13], maxIdx);
+    putBe16(&bytes[17], minIdx);
+
+    if (model.temperaturesC[0] > -100.0f) {
+        kelvinTemp = (uint16_t)(model.temperaturesC[0] * 10.0f + 2731.0f);
+        putBe16(&bytes[19], kelvinTemp);
+    }
+    if (model.temperaturesC[1] > -100.0f) {
+        kelvinTemp = (uint16_t)(model.temperaturesC[1] * 10.0f + 2731.0f);
+        putBe16(&bytes[21], kelvinTemp);
+    }
+    if (model.temperaturesC[2] > -100.0f) {
+        kelvinTemp = (uint16_t)(model.temperaturesC[2] * 10.0f + 2731.0f);
+        putBe16(&bytes[25], kelvinTemp);
+    }
+    if (model.temperaturesC[3] > -100.0f) {
+        kelvinTemp = (uint16_t)(model.temperaturesC[3] * 10.0f + 2731.0f);
+        putBe16(&bytes[29], kelvinTemp);
+    }
+    if (model.temperaturesC[4] > -100.0f) {
+        kelvinTemp = (uint16_t)(model.temperaturesC[4] * 10.0f + 2731.0f);
+        putBe16(&bytes[31], kelvinTemp);
+        putBe16(&bytes[35], kelvinTemp);
+        putBe16(&bytes[39], kelvinTemp);
+        putBe16(&bytes[41], kelvinTemp);
+        putBe16(&bytes[45], kelvinTemp);
+    }
+
+    encodeHexAscii(bytes, (int)sizeof(bytes), out, outSize);
+    return out[0] != '\0';
+}
+
+static bool buildCanDerivedInfo63(char *out, size_t outSize)
+{
+    static const uint8_t template63[9] = {0x05, 0xE0, 0xB1, 0x80, 0x00, 0x00, 0x07, 0x6C, 0x40};
+    universal_battery_model_t model;
+    uint8_t bytes[sizeof(template63)];
+
+    bridgeGetUniversalBatteryModel(&model);
+    if (!model.valid) {
+        return false;
+    }
+
+    memcpy(bytes, template63, sizeof(bytes));
+    if (model.protocolState != 0u) {
+        bytes[8] = (uint8_t)(model.protocolState & 0xFFu);
+    } else {
+        uint8_t status = 0u;
+        if (model.chargeEnabled) status |= 0x80u;
+        if (model.dischargeEnabled) status |= 0x40u;
+        if (model.balanceEnabled) status |= 0x20u;
+        bytes[8] = status;
+    }
+
+    encodeHexAscii(bytes, (int)sizeof(bytes), out, outSize);
+    return out[0] != '\0';
+}
+
+static void maybeRefreshSyntheticCacheFromUniversal(void)
+{
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+    char info61[sizeof(s_pylonCache.info61)] = {0};
+    char info63[sizeof(s_pylonCache.info63)] = {0};
+
+    if (!pylonCanToRs485ModeEnabled(&settings)) {
+        return;
+    }
+
+    if (buildCanDerivedInfo61(info61, sizeof(info61))) {
+        snprintf(s_pylonCache.info61, sizeof(s_pylonCache.info61), "%s", info61);
+        s_pylonCache.valid61 = true;
+        updateSummary61();
+        telemetryFromSummary();
+    }
+
+    snprintf(s_pylonCache.info62, sizeof(s_pylonCache.info62), "00000000");
+    s_pylonCache.valid62 = true;
+
+    if (buildCanDerivedInfo63(info63, sizeof(info63))) {
+        snprintf(s_pylonCache.info63, sizeof(s_pylonCache.info63), "%s", info63);
+        s_pylonCache.valid63 = true;
+        updateSummary63();
+        telemetryFromSummary();
+    }
 }
 
 static void telemetryFromSummary(void)
@@ -523,6 +685,8 @@ static bool buildCachedResponse(const uint8_t *request,
         return false;
     }
 
+    maybeRefreshSyntheticCacheFromUniversal();
+
     switch (cid2) {
         case 0x61:
             infoAscii = s_pylonCache.valid61 ? s_pylonCache.info61 : INFO_61_FALLBACK;
@@ -767,10 +931,11 @@ static void pylonProbeTask(void *pv)
 bool pylonRs485BridgeHandlesCurrentConfig(void)
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
-    return (settings.bms_line == LINE_RS485) &&
-           (settings.inverter_line == LINE_RS485) &&
-           (settings.bms_protocol == PROTOCOL_RS485_PYLON) &&
-           (settings.inverter_protocol == PROTOCOL_RS485_PYLON);
+    return ((settings.bms_line == LINE_RS485) &&
+            (settings.inverter_line == LINE_RS485) &&
+            (settings.bms_protocol == PROTOCOL_RS485_PYLON) &&
+            (settings.inverter_protocol == PROTOCOL_RS485_PYLON)) ||
+           pylonCanToRs485ModeEnabled(&settings);
 }
 
 void pylonRs485BridgeEnable(void)
@@ -813,15 +978,25 @@ void pylonRs485BridgeEnable(void)
     inverterCtx.isBmsSide = false;
     inverterCtx.isInverterSide = true;
 
-    xTaskCreate(pylonBridgeTask, "pylon_bms_rx", 6144, &bmsCtx, 9, &s_pylonBmsTask);
+    if (settings.bms_line == LINE_RS485) {
+        xTaskCreate(pylonBridgeTask, "pylon_bms_rx", 6144, &bmsCtx, 9, &s_pylonBmsTask);
+    }
     xTaskCreate(pylonBridgeTask, "pylon_inv_rx", 6144, &inverterCtx, 9, &s_pylonInvTask);
 
-    if (pylonProbeModeEnabled(settings.mode)) {
+    if ((settings.bms_line == LINE_RS485) && pylonProbeModeEnabled(settings.mode)) {
         probeCtx.probeName = bmsCtx.rxName;
         probeCtx.probeUart = bmsCtx.rxUart;
         probeCtx.probeDirPin = bmsCtx.rxDirPin;
         xTaskCreate(pylonProbeTask, "pylon_probe", 4096, &probeCtx, 8, &s_pylonProbeTaskHandle);
         ESP_LOGI(EXAMPLE_TAG, "Pylon active probe enabled on %s (mode=%d)", probeCtx.probeName, settings.mode);
+    }
+
+    maybeRefreshSyntheticCacheFromUniversal();
+    if (pylonCanToRs485ModeEnabled(&settings)) {
+        ESP_LOGI(EXAMPLE_TAG, "Pylon CAN->RS485 translator armed (BMS=CAN_PYLON inverter=RS485_PYLON)");
+        if (settings.mode != MODE_BRIDGE) {
+            ESP_LOGW(EXAMPLE_TAG, "Pylon CAN->RS485 translation requires Mode=bridge; forward will not answer inverter requests");
+        }
     }
 
     ESP_LOGI(EXAMPLE_TAG,

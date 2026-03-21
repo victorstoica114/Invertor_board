@@ -142,6 +142,8 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
     uint16_t soc = 0;
     uint16_t soh = 0;
     uint8_t moduleCount = 0;
+    uint8_t status35C = 0;
+    universal_battery_model_t model = {0};
 
     if (f351 && f351->dlc >= 8u) {
         chargeVoltLimit = (float)pylonCanLe16(&f351->data[0]) / 10.0f;
@@ -167,6 +169,9 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
     }
     if (f35C) {
         formatCanData(f35C->data, f35C->dlc, raw35C, sizeof(raw35C));
+        if (f35C->dlc >= 1u) {
+            status35C = f35C->data[0];
+        }
     }
     if (f35E) {
         formatCanAscii(f35E->data, f35E->dlc, ascii35E, sizeof(ascii35E));
@@ -205,7 +210,33 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
     snap.tempMosC = avgTemp;
     snap.tempT1C = tempMinTentative;
     snap.tempT2C = tempMaxTentative;
+    snap.pylonStatus63 = status35C;
     bridgeSetTelemetrySnapshot(&snap);
+
+    model.valid = snap.valid;
+    model.packVoltageV = packVolt;
+    model.packCurrentA = packCurrent;
+    model.socPct = snap.socPct;
+    model.sohPct = snap.sohPct;
+    model.cycleCount = snap.cycles;
+    model.chargeVoltageLimitV = chargeVoltLimit;
+    model.chargeCurrentLimitA = chargeCurrentLimit;
+    model.dischargeCurrentLimitA = dischargeCurrentLimit;
+    model.cellMaxV = cellMaxTentative;
+    model.cellMinV = cellMinTentative;
+    model.cellMaxIdx = 0u;
+    model.cellMinIdx = 0u;
+    model.cellDeltaV = (cellMaxTentative > 0.0f && cellMinTentative > 0.0f) ? (cellMaxTentative - cellMinTentative) : 0.0f;
+    model.temperaturesC[0] = avgTemp;
+    model.temperaturesC[1] = tempMinTentative;
+    model.temperaturesC[2] = tempMaxTentative;
+    model.temperaturesC[3] = tempMinTentative;
+    model.temperaturesC[4] = tempMaxTentative;
+    model.chargeEnabled = (status35C & 0x80u) != 0u;
+    model.dischargeEnabled = (status35C & 0x40u) != 0u;
+    model.balanceEnabled = (status35C & 0x20u) != 0u;
+    model.protocolState = status35C;
+    bridgeSetUniversalBatteryModel(&model);
 
     snprintf(s_pylonCanLogText,
              sizeof(s_pylonCanLogText),
