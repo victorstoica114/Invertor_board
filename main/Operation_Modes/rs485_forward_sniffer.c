@@ -599,7 +599,8 @@ void rs485ForwardSnifferStart(const bridge_runtime_settings_t *settings)
         }
     }
 
-    if ((settings->bms_line == LINE_RS485) && (settings->inverter_line == LINE_CAN)) {
+    if ((settings->bms_line == LINE_RS485) &&
+        (settings->bms_protocol == PROTOCOL_RS485_GROWATT)) {
 #if RS485_BMS_POLLER_ENABLE
         if (rs485ForwardEnabled) {
             ESP_LOGW(EXAMPLE_TAG, "RS485 BMS poller disabled because RS485 forward is ON (avoid collisions)");
@@ -612,10 +613,12 @@ void rs485ForwardSnifferStart(const bridge_runtime_settings_t *settings)
             poller.targetDec = rs485ForwardSnifferGetDecoder(settings->bms_port);
             xTaskCreate(rs485BmsPollerTask, "rs485_bms_poller", 3072, &poller, 8, &s_rs485PollerTask);
             ESP_LOGI(EXAMPLE_TAG,
-                     "RS485 BMS poller enabled (tx=%s slave=%u period=%ums)",
+                     "RS485 BMS poller enabled (tx=%s slave=%u period=%ums prot=RS485_GROWATT inv_line=%u inv_prot=%u)",
                      poller.txName,
                      (unsigned)poller.slaveId,
-                     (unsigned)poller.periodMs);
+                     (unsigned)poller.periodMs,
+                     (unsigned)settings->inverter_line,
+                     (unsigned)settings->inverter_protocol);
         }
 #endif
     }
