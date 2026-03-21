@@ -1,7 +1,7 @@
 #include "CAN_Decoder.h"
 
 #include "config.h"
-#include "Growatt_regs.h"
+#include "BMS_Protocols/Growatt/growatt_modbus_map.h"
 
 #include <inttypes.h>
 #include <stdio.h>

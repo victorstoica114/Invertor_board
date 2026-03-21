@@ -1,7 +1,7 @@
 #include "rs485_can_bridge.h"
 
 #include "config.h"
-#include "Growatt_regs.h"
+#include "BMS_Protocols/Growatt/growatt_modbus_map.h"
 #include "CAN_Decoder.h"
 
 #include <stdbool.h>

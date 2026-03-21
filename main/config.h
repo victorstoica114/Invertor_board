@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#include "Growatt_regs.h"
+#include "BMS_Protocols/Growatt/growatt_modbus_map.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
