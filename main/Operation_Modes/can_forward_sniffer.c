@@ -26,6 +26,24 @@ static TaskHandle_t s_canTaskA = NULL;
 static TaskHandle_t s_canTaskB = NULL;
 static TaskHandle_t s_canSnapshotTask = NULL;
 
+static bool createCanTask(TaskFunction_t fn,
+                          const char *name,
+                          uint32_t stack,
+                          void *arg,
+                          UBaseType_t prio,
+                          TaskHandle_t *outHandle)
+{
+    BaseType_t rc = xTaskCreate(fn, name, stack, arg, prio, outHandle);
+    if (rc != pdPASS) {
+        ESP_LOGE(EXAMPLE_TAG, "xTaskCreate failed for %s", name);
+        if (outHandle != NULL) {
+            *outHandle = NULL;
+        }
+        return false;
+    }
+    return true;
+}
+
 static void deleteTaskIfRunning(TaskHandle_t *handle)
 {
     if (handle != NULL && *handle != NULL) {
@@ -186,8 +204,9 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
 
     if (bmsOnCan || invOnCan) {
         const char *snapIf = bmsOnCan ? canNameByPort(settings->bms_port) : canNameByPort(settings->inverter_port);
-        xTaskCreate(canPeriodicSnapshotTask, "can_snapshot", 6144, (void *)snapIf, 7, &s_canSnapshotTask);
-        ESP_LOGI(EXAMPLE_TAG, "CAN periodic snapshot enabled (%d ms)", CAN_DECODER_SNAPSHOT_PRINT_PERIOD_MS);
+        if (createCanTask(canPeriodicSnapshotTask, "can_snapshot", 6144, (void *)snapIf, 7, &s_canSnapshotTask)) {
+            ESP_LOGI(EXAMPLE_TAG, "CAN periodic snapshot enabled (%d ms)", CAN_DECODER_SNAPSHOT_PRINT_PERIOD_MS);
+        }
     }
 
     if (bmsOnCan && invOnCan) {
@@ -209,8 +228,8 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
         invToBms.rawLogEnabled = invCanPylon || invCanDeye;
         invToBms.rawLogLabel = canProtocolLabel(settings->inverter_protocol);
 
-        xTaskCreate(canBridgeTask, "can_bms_to_inv", 4096, &bmsToInv, 10, &s_canTaskA);
-        xTaskCreate(canBridgeTask, "can_inv_to_bms", 4096, &invToBms, 10, &s_canTaskB);
+        createCanTask(canBridgeTask, "can_bms_to_inv", 4096, &bmsToInv, 10, &s_canTaskA);
+        createCanTask(canBridgeTask, "can_inv_to_bms", 4096, &invToBms, 10, &s_canTaskB);
 
         ESP_LOGI(EXAMPLE_TAG,
                  "CAN bridge enabled (%s[P%d] <-> %s[P%d]), forward=%s, exclude=%s",
@@ -238,8 +257,9 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
         bmsSniff.forwardEnabled = false;
         bmsSniff.rawLogEnabled = bmsCanPylon || bmsCanDeye;
         bmsSniff.rawLogLabel = canProtocolLabel(settings->bms_protocol);
-        xTaskCreate(canBridgeTask, "can_bms_sniff", 4096, &bmsSniff, 10, &s_canTaskA);
-        ESP_LOGI(EXAMPLE_TAG, "CAN sniffer enabled on BMS side (%s[P%d])", bmsSniff.rxName, settings->bms_port);
+        if (createCanTask(canBridgeTask, "can_bms_sniff", 4096, &bmsSniff, 10, &s_canTaskA)) {
+            ESP_LOGI(EXAMPLE_TAG, "CAN sniffer enabled on BMS side (%s[P%d])", bmsSniff.rxName, settings->bms_port);
+        }
         if (bmsCanPylon) {
             ESP_LOGI(EXAMPLE_TAG, "CAN Pylon diagnostic logging enabled on BMS side (%s[P%d])",
                      bmsSniff.rxName,
@@ -260,8 +280,9 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
         invSniff.forwardEnabled = false;
         invSniff.rawLogEnabled = invCanPylon || invCanDeye;
         invSniff.rawLogLabel = canProtocolLabel(settings->inverter_protocol);
-        xTaskCreate(canBridgeTask, "can_inv_sniff", 4096, &invSniff, 10, &s_canTaskB);
-        ESP_LOGI(EXAMPLE_TAG, "CAN sniffer enabled on inverter side (%s[P%d])", invSniff.rxName, settings->inverter_port);
+        if (createCanTask(canBridgeTask, "can_inv_sniff", 4096, &invSniff, 10, &s_canTaskB)) {
+            ESP_LOGI(EXAMPLE_TAG, "CAN sniffer enabled on inverter side (%s[P%d])", invSniff.rxName, settings->inverter_port);
+        }
         if (invCanPylon) {
             ESP_LOGI(EXAMPLE_TAG, "CAN Pylon diagnostic logging enabled on inverter side (%s[P%d])",
                      invSniff.rxName,
