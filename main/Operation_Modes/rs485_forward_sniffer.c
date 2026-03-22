@@ -39,6 +39,24 @@ static TaskHandle_t s_rs485TaskA = NULL;
 static TaskHandle_t s_rs485TaskB = NULL;
 static TaskHandle_t s_rs485SnapshotTask = NULL;
 static TaskHandle_t s_rs485PollerTask = NULL;
+
+static bool createRsTask(TaskFunction_t fn,
+                         const char *name,
+                         uint32_t stack,
+                         void *arg,
+                         UBaseType_t prio,
+                         TaskHandle_t *outHandle)
+{
+    BaseType_t rc = xTaskCreate(fn, name, stack, arg, prio, outHandle);
+    if (rc != pdPASS) {
+        ESP_LOGE(EXAMPLE_TAG, "xTaskCreate failed for %s", name);
+        if (outHandle != NULL) {
+            *outHandle = NULL;
+        }
+        return false;
+    }
+    return true;
+}
 static modbusDecoder_t gRsDec1;
 static modbusDecoder_t gRsDec2;
 
@@ -541,6 +559,12 @@ void rs485ForwardSnifferStop(void)
     deleteTaskIfRunning(&s_rs485PollerTask);
 }
 
+void rs485ForwardSnifferResetDecoders(void)
+{
+    modbusDecoderInit(&gRsDec1, "RS485_1", 5000);
+    modbusDecoderInit(&gRsDec2, "RS485_2", 5000);
+}
+
 void rs485ForwardSnifferStart(const bridge_runtime_settings_t *settings)
 {
     static rs485BridgeCtx_t bmsToInv;
@@ -571,16 +595,13 @@ void rs485ForwardSnifferStart(const bridge_runtime_settings_t *settings)
         return;
     }
 
-    xTaskCreate(rs485PeriodicSnapshotTask, "rs485_snapshot", 4096, NULL, 7, &s_rs485SnapshotTask);
+    if (createRsTask(rs485PeriodicSnapshotTask, "rs485_snapshot", 4096, NULL, 7, &s_rs485SnapshotTask)) {
+        if (gRsDec1.ifName == NULL || gRsDec2.ifName == NULL) {
+            rs485ForwardSnifferResetDecoders();
+        }
 
-    if (gRsDec1.ifName == NULL) {
-        modbusDecoderInit(&gRsDec1, "RS485_1", 5000);
+        ESP_LOGI(EXAMPLE_TAG, "RS485 periodic snapshot enabled (%d ms)", MODBUS_DECODER_SNAPSHOT_PRINT_PERIOD_MS);
     }
-    if (gRsDec2.ifName == NULL) {
-        modbusDecoderInit(&gRsDec2, "RS485_2", 5000);
-    }
-
-    ESP_LOGI(EXAMPLE_TAG, "RS485 periodic snapshot enabled (%d ms)", MODBUS_DECODER_SNAPSHOT_PRINT_PERIOD_MS);
     ESP_LOGI(EXAMPLE_TAG, "RS485 reg exclude list: %s (%u entries configured)",
              RS485_REG_EXCLUDE_LIST_ENABLE ? "ON" : "OFF",
              (unsigned)g_rs485ForwardExcludeRegsCount);
@@ -608,8 +629,8 @@ void rs485ForwardSnifferStart(const bridge_runtime_settings_t *settings)
         invToBms.forwardEnabled = rs485ForwardEnabled;
         invToBms.bmsToInverterDir = false;
 
-        xTaskCreate(rs485BridgeTask, "rs485_bms_to_inv", 4096, &bmsToInv, 9, &s_rs485TaskA);
-        xTaskCreate(rs485BridgeTask, "rs485_inv_to_bms", 4096, &invToBms, 9, &s_rs485TaskB);
+        createRsTask(rs485BridgeTask, "rs485_bms_to_inv", 4096, &bmsToInv, 9, &s_rs485TaskA);
+        createRsTask(rs485BridgeTask, "rs485_inv_to_bms", 4096, &invToBms, 9, &s_rs485TaskB);
 
         ESP_LOGI(EXAMPLE_TAG,
                  "RS485 bridge enabled (%s[P%d] <-> %s[P%d]), forward=%s, exclude=%s",
@@ -629,8 +650,9 @@ void rs485ForwardSnifferStart(const bridge_runtime_settings_t *settings)
             bmsSniff.applyRegExcludeList = RS485_REG_EXCLUDE_LIST_ENABLE;
             bmsSniff.forwardEnabled = false;
             bmsSniff.bmsToInverterDir = false;
-            xTaskCreate(rs485BridgeTask, "rs485_bms_sniff", 4096, &bmsSniff, 9, &s_rs485TaskA);
-            ESP_LOGI(EXAMPLE_TAG, "RS485 sniffer enabled on BMS side (%s[P%d])", bmsSniff.rxName, settings->bms_port);
+            if (createRsTask(rs485BridgeTask, "rs485_bms_sniff", 4096, &bmsSniff, 9, &s_rs485TaskA)) {
+                ESP_LOGI(EXAMPLE_TAG, "RS485 sniffer enabled on BMS side (%s[P%d])", bmsSniff.rxName, settings->bms_port);
+            }
         }
 
         if (invOnRs && !inverseCanToRs) {
@@ -642,8 +664,9 @@ void rs485ForwardSnifferStart(const bridge_runtime_settings_t *settings)
             invSniff.applyRegExcludeList = RS485_REG_EXCLUDE_LIST_ENABLE;
             invSniff.forwardEnabled = false;
             invSniff.bmsToInverterDir = false;
-            xTaskCreate(rs485BridgeTask, "rs485_inv_sniff", 4096, &invSniff, 9, &s_rs485TaskB);
-            ESP_LOGI(EXAMPLE_TAG, "RS485 sniffer enabled on inverter side (%s[P%d])", invSniff.rxName, settings->inverter_port);
+            if (createRsTask(rs485BridgeTask, "rs485_inv_sniff", 4096, &invSniff, 9, &s_rs485TaskB)) {
+                ESP_LOGI(EXAMPLE_TAG, "RS485 sniffer enabled on inverter side (%s[P%d])", invSniff.rxName, settings->inverter_port);
+            }
         } else if (inverseCanToRs) {
             ESP_LOGI(EXAMPLE_TAG, "RS485 inverter side reserved for CAN->RS485 translator (%s[P%d])",
                      rsNameByPort(settings->inverter_port),
@@ -663,14 +686,15 @@ void rs485ForwardSnifferStart(const bridge_runtime_settings_t *settings)
             poller.slaveId = (uint8_t)RS485_BMS_SLAVE_ID;
             poller.periodMs = RS485_BMS_POLL_PERIOD_MS;
             poller.targetDec = rs485ForwardSnifferGetDecoder(settings->bms_port);
-            xTaskCreate(rs485BmsPollerTask, "rs485_bms_poller", 3072, &poller, 8, &s_rs485PollerTask);
-            ESP_LOGI(EXAMPLE_TAG,
-                     "RS485 BMS poller enabled (tx=%s slave=%u period=%ums prot=RS485_GROWATT inv_line=%u inv_prot=%u)",
-                     poller.txName,
-                     (unsigned)poller.slaveId,
-                     (unsigned)poller.periodMs,
-                     (unsigned)settings->inverter_line,
-                     (unsigned)settings->inverter_protocol);
+            if (createRsTask(rs485BmsPollerTask, "rs485_bms_poller", 3072, &poller, 8, &s_rs485PollerTask)) {
+                ESP_LOGI(EXAMPLE_TAG,
+                         "RS485 BMS poller enabled (tx=%s slave=%u period=%ums prot=RS485_GROWATT inv_line=%u inv_prot=%u)",
+                         poller.txName,
+                         (unsigned)poller.slaveId,
+                         (unsigned)poller.periodMs,
+                         (unsigned)settings->inverter_line,
+                         (unsigned)settings->inverter_protocol);
+            }
         }
 #endif
     }

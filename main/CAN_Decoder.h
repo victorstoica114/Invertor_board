@@ -16,6 +16,7 @@ void canDecoderOnFrame(const char *ifname, const twai_message_t *m);
 void canDecoderPrintCachedSnapshot(const char *ifname);
 bool canDecoderTryGetSocPct(const char *ifname, uint8_t *socOut);
 bool canDecoderHasFreshData(const char *ifname, uint32_t maxAgeMs);
+void canDecoderResetCaches(void);
 bool canDecoderGetGrowattAlertText(const char *ifname,
                                    char *protectionsOut,
                                    uint32_t protectionsOutSize,

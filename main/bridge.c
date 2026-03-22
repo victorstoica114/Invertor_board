@@ -12,6 +12,7 @@
 #include "Operation_Modes/rs485_forward_sniffer.h"
 #include "BMS_Protocols/Pylon/pylon_rs485_bridge.h"
 #include "rs485_can_bridge.h"
+#include "esp_log.h"
 #include "esp_timer.h"
 
 static bridgeTelemetrySnapshot_t gBridgeTelemetry;
@@ -366,6 +367,15 @@ void canBridgeEnable(void)
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
 
+    ESP_LOGI(EXAMPLE_TAG,
+             "Enable CAN bridge path: mode=%u bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u)",
+             (unsigned)settings.mode,
+             (unsigned)settings.bms_line,
+             (unsigned)settings.bms_protocol,
+             (unsigned)settings.bms_port,
+             (unsigned)settings.inverter_line,
+             (unsigned)settings.inverter_protocol,
+             (unsigned)settings.inverter_port);
     canForwardSnifferStart(&settings);
 }
 
@@ -383,6 +393,16 @@ void rs485BridgeEnable(void)
         ((settings.bms_protocol == PROTOCOL_CAN_GROWATT) ||
          (settings.bms_protocol == PROTOCOL_CAN_PYLON)) &&
         (settings.inverter_protocol == PROTOCOL_RS485_GROWATT);
+
+    ESP_LOGI(EXAMPLE_TAG,
+             "Enable RS485 bridge path: mode=%u bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u)",
+             (unsigned)settings.mode,
+             (unsigned)settings.bms_line,
+             (unsigned)settings.bms_protocol,
+             (unsigned)settings.bms_port,
+             (unsigned)settings.inverter_line,
+             (unsigned)settings.inverter_protocol,
+             (unsigned)settings.inverter_port);
 
     pylonRs485BridgeStop();
     rs485Can322BridgeStop();
@@ -410,6 +430,31 @@ void rs485BridgeEnable(void)
 
 void bridgeReloadFromRuntimeSettings(void)
 {
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+
+    ESP_LOGI(EXAMPLE_TAG,
+             "Reload bridge: mode=%u bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u)",
+             (unsigned)settings.mode,
+             (unsigned)settings.bms_line,
+             (unsigned)settings.bms_protocol,
+             (unsigned)settings.bms_port,
+             (unsigned)settings.inverter_line,
+             (unsigned)settings.inverter_protocol,
+             (unsigned)settings.inverter_port);
+
+    pylonRs485BridgeStop();
+    rs485Can322BridgeStop();
+    canRs485GrowattBridgeStop();
+    rs485ForwardSnifferStop();
+    canForwardSnifferStop();
+
+    canDecoderResetCaches();
+    rs485ForwardSnifferResetDecoders();
+    rs485Reinit();
+    memset(&gBridgeTelemetry, 0, sizeof(gBridgeTelemetry));
+    memset(&gUniversalBatteryModel, 0, sizeof(gUniversalBatteryModel));
+    gBridgeDecodedLog[0] = '\0';
+
     rs485BridgeEnable();
     canBridgeEnable();
 }

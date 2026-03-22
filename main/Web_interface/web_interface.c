@@ -30,6 +30,8 @@ static TaskHandle_t s_settingsApplyTask = NULL;
 static char s_logsResponse[2048];
 
 typedef struct {
+    bool reloadBridge;
+    bool restartWifi;
     bool restartWeb;
 } settingsApplyCtx_t;
 
@@ -160,6 +162,49 @@ static bool extractJsonString(const char *json, const char *key, char *out, size
     return true;
 }
 
+static bool settingsEqual(const bridge_runtime_settings_t *a, const bridge_runtime_settings_t *b)
+{
+    if (a == NULL || b == NULL) {
+        return false;
+    }
+
+    return a->mode == b->mode &&
+           a->bms_line == b->bms_line &&
+           a->inverter_line == b->inverter_line &&
+           a->bms_protocol == b->bms_protocol &&
+           a->inverter_protocol == b->inverter_protocol &&
+           a->bms_port == b->bms_port &&
+           a->inverter_port == b->inverter_port &&
+           a->web_port == b->web_port &&
+           strcmp(a->wifi_ssid, b->wifi_ssid) == 0 &&
+           strcmp(a->wifi_password, b->wifi_password) == 0;
+}
+
+static bool bridgeSettingsEqual(const bridge_runtime_settings_t *a, const bridge_runtime_settings_t *b)
+{
+    if (a == NULL || b == NULL) {
+        return false;
+    }
+
+    return a->mode == b->mode &&
+           a->bms_line == b->bms_line &&
+           a->inverter_line == b->inverter_line &&
+           a->bms_protocol == b->bms_protocol &&
+           a->inverter_protocol == b->inverter_protocol &&
+           a->bms_port == b->bms_port &&
+           a->inverter_port == b->inverter_port;
+}
+
+static bool wifiSettingsEqual(const bridge_runtime_settings_t *a, const bridge_runtime_settings_t *b)
+{
+    if (a == NULL || b == NULL) {
+        return false;
+    }
+
+    return strcmp(a->wifi_ssid, b->wifi_ssid) == 0 &&
+           strcmp(a->wifi_password, b->wifi_password) == 0;
+}
+
 static void wifiApplyRuntimeSettings(void)
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
@@ -189,10 +234,28 @@ static void stopHttpServer(void)
 static void settingsApplyTask(void *pv)
 {
     settingsApplyCtx_t ctx = *(settingsApplyCtx_t *)pv;
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+
+    ESP_LOGI(WEB_TAG,
+             "Applying settings: mode=%u bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) reloadBridge=%s restartWifi=%s restartWeb=%s",
+             (unsigned)settings.mode,
+             (unsigned)settings.bms_line,
+             (unsigned)settings.bms_protocol,
+             (unsigned)settings.bms_port,
+             (unsigned)settings.inverter_line,
+             (unsigned)settings.inverter_protocol,
+             (unsigned)settings.inverter_port,
+             ctx.reloadBridge ? "YES" : "NO",
+             ctx.restartWifi ? "YES" : "NO",
+             ctx.restartWeb ? "YES" : "NO");
 
     vTaskDelay(pdMS_TO_TICKS(300));
-    bridgeReloadFromRuntimeSettings();
-    wifiApplyRuntimeSettings();
+    if (ctx.reloadBridge) {
+        bridgeReloadFromRuntimeSettings();
+    }
+    if (ctx.restartWifi) {
+        wifiApplyRuntimeSettings();
+    }
 
     if (ctx.restartWeb) {
         stopHttpServer();
@@ -337,24 +400,41 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "}"
         "function renderSettings(s){"
         "function sel(id,val,opts){return '<select id=\"'+id+'\">'+opts.map(o=>'<option value=\"'+o.value+'\"'+(String(o.value)===String(val)?' selected':'')+'>'+o.label+'</option>').join('')+'</select>';}"
+        "function validProtoOpts(line){"
+        "const all=[{value:1,label:'CAN_GROWATT'},{value:2,label:'RS485_GROWATT'},{value:3,label:'RS485_PYLON'},{value:4,label:'CAN_PYLON'},{value:5,label:'CAN_DEYE'}];"
+        "if(String(line)==='1'){return all.filter(o=>o.value===1||o.value===4||o.value===5);}"
+        "if(String(line)==='2'){return all.filter(o=>o.value===2||o.value===3);}"
+        "return all;"
+        "}"
+        "function syncProto(lineId,protoId){"
+        "const lineEl=document.getElementById(lineId);"
+        "const protoEl=document.getElementById(protoId);"
+        "if(!lineEl||!protoEl){return;}"
+        "const current=protoEl.value;"
+        "const opts=validProtoOpts(lineEl.value);"
+        "const keep=opts.some(o=>String(o.value)===String(current));"
+        "const next=keep?current:String(opts[0].value);"
+        "protoEl.innerHTML=opts.map(o=>'<option value=\"'+o.value+'\"'+(String(o.value)===String(next)?' selected':'')+'>'+o.label+'</option>').join('');"
+        "}"
         "const modeOpts=[{value:1,label:'sniffer'},{value:2,label:'forward'},{value:3,label:'bridge'}];"
         "const lineOpts=[{value:1,label:'CAN'},{value:2,label:'RS485'}];"
-        "const protoOpts=[{value:1,label:'CAN_GROWATT'},{value:2,label:'RS485_GROWATT'},{value:3,label:'RS485_PYLON'},{value:4,label:'CAN_PYLON'},{value:5,label:'CAN_DEYE'}];"
         "const portOpts=[{value:1,label:'1'},{value:2,label:'2'}];"
         "const rows=["
         "row('Mode',sel('mode',s.mode_id,modeOpts)),"
-        "row('BMS line',sel('bms_line',s.bms_line_id,lineOpts)),"
         "row('Inverter line',sel('inverter_line',s.inverter_line_id,lineOpts)),"
-        "row('BMS protocol',sel('bms_protocol',s.bms_protocol_id,protoOpts)),"
-        "row('Inverter protocol',sel('inverter_protocol',s.inverter_protocol_id,protoOpts)),"
-        "row('BMS port',sel('bms_port',s.bms_port,portOpts)),"
+        "row('Inverter protocol',sel('inverter_protocol',s.inverter_protocol_id,validProtoOpts(s.inverter_line_id))),"
         "row('Inverter port',sel('inverter_port',s.inverter_port,portOpts)),"
+        "row('BMS line',sel('bms_line',s.bms_line_id,lineOpts)),"
+        "row('BMS protocol',sel('bms_protocol',s.bms_protocol_id,validProtoOpts(s.bms_line_id))),"
+        "row('BMS port',sel('bms_port',s.bms_port,portOpts)),"
         "row('Wi-Fi SSID','<input id=\"wifi_ssid\" value=\"'+s.wifi_ssid+'\" />'),"
         "row('Wi-Fi PASS','<input id=\"wifi_password\" type=\"password\" value=\"'+s.wifi_password+'\" />'),"
         "row('Web port','<input id=\"web_port\" type=\"number\" min=\"1\" max=\"65535\" value=\"'+s.web_port+'\" />')"
         "];"
         "const actions='<div class=\"actions\"><button onclick=\"saveSettings()\">Save</button><span id=\"settingsStatus\" class=\"mono\"></span></div>';"
         "document.getElementById('settingsForm').innerHTML='<table>'+rows.join('')+'</table>'+actions;"
+        "document.getElementById('bms_line').addEventListener('change',function(){syncProto('bms_line','bms_protocol');});"
+        "document.getElementById('inverter_line').addEventListener('change',function(){syncProto('inverter_line','inverter_protocol');});"
         "}"
         "async function saveSettings(){"
         "const payload={"
@@ -542,12 +622,13 @@ static esp_err_t settingsHandler(httpd_req_t *req)
 
 static esp_err_t settingsPostHandler(httpd_req_t *req)
 {
-    char buf[256];
+    char buf[512];
     int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
     bridge_runtime_settings_t settings = runtimeSettingsGet();
     bridge_runtime_settings_t oldSettings = settings;
     int v = 0;
     const char *okResp = "{\"ok\":true,\"message\":\"Saved and applied\"}";
+    const char *sameResp = "{\"ok\":true,\"message\":\"No changes\"}";
     const char *errResp = "{\"ok\":false,\"message\":\"Invalid settings\"}";
 
     if (received <= 0) {
@@ -558,6 +639,8 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
     }
 
     buf[received] = '\0';
+
+    ESP_LOGI(WEB_TAG, "Settings POST payload: %s", buf);
 
     if (extractJsonInt(buf, "mode", &v)) settings.mode = (uint8_t)v;
     if (extractJsonInt(buf, "bms_line", &v)) settings.bms_line = (uint8_t)v;
@@ -570,7 +653,34 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
     (void)extractJsonString(buf, "wifi_password", settings.wifi_password, sizeof(settings.wifi_password));
     if (extractJsonInt(buf, "web_port", &v)) settings.web_port = (uint16_t)v;
 
+    ESP_LOGI(WEB_TAG,
+             "Parsed settings old: mode=%u bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u)",
+             (unsigned)oldSettings.mode,
+             (unsigned)oldSettings.bms_line,
+             (unsigned)oldSettings.bms_protocol,
+             (unsigned)oldSettings.bms_port,
+             (unsigned)oldSettings.inverter_line,
+             (unsigned)oldSettings.inverter_protocol,
+             (unsigned)oldSettings.inverter_port);
+    ESP_LOGI(WEB_TAG,
+             "Parsed settings new: mode=%u bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u)",
+             (unsigned)settings.mode,
+             (unsigned)settings.bms_line,
+             (unsigned)settings.bms_protocol,
+             (unsigned)settings.bms_port,
+             (unsigned)settings.inverter_line,
+             (unsigned)settings.inverter_protocol,
+             (unsigned)settings.inverter_port);
+
+    if (settingsEqual(&settings, &oldSettings)) {
+        ESP_LOGI(WEB_TAG, "Settings unchanged; skipping runtime reload");
+        setNoCacheHeaders(req);
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_send(req, sameResp, HTTPD_RESP_USE_STRLEN);
+    }
+
     if (!runtimeSettingsSave(&settings)) {
+        ESP_LOGW(WEB_TAG, "Settings rejected by runtimeSettingsSave()");
         httpd_resp_set_status(req, "400 Bad Request");
         setNoCacheHeaders(req);
         httpd_resp_set_type(req, "application/json");
@@ -587,6 +697,8 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
     }
 
     static settingsApplyCtx_t applyCtx;
+    applyCtx.reloadBridge = !bridgeSettingsEqual(&settings, &oldSettings);
+    applyCtx.restartWifi = !wifiSettingsEqual(&settings, &oldSettings);
     applyCtx.restartWeb = (settings.web_port != oldSettings.web_port);
 
     xTaskCreate(
