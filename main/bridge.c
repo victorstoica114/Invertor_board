@@ -410,6 +410,18 @@ void rs485BridgeEnable(void)
 
 void bridgeReloadFromRuntimeSettings(void)
 {
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+
+    ESP_LOGI(EXAMPLE_TAG,
+             "Reload bridge: mode=%u bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u)",
+             (unsigned)settings.mode,
+             (unsigned)settings.bms_line,
+             (unsigned)settings.bms_protocol,
+             (unsigned)settings.bms_port,
+             (unsigned)settings.inverter_line,
+             (unsigned)settings.inverter_protocol,
+             (unsigned)settings.inverter_port);
+
     pylonRs485BridgeStop();
     rs485Can322BridgeStop();
     canRs485GrowattBridgeStop();

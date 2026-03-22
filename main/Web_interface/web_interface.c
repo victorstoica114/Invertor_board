@@ -189,6 +189,18 @@ static void stopHttpServer(void)
 static void settingsApplyTask(void *pv)
 {
     settingsApplyCtx_t ctx = *(settingsApplyCtx_t *)pv;
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+
+    ESP_LOGI(WEB_TAG,
+             "Applying settings: mode=%u bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) restartWeb=%s",
+             (unsigned)settings.mode,
+             (unsigned)settings.bms_line,
+             (unsigned)settings.bms_protocol,
+             (unsigned)settings.bms_port,
+             (unsigned)settings.inverter_line,
+             (unsigned)settings.inverter_protocol,
+             (unsigned)settings.inverter_port,
+             ctx.restartWeb ? "YES" : "NO");
 
     vTaskDelay(pdMS_TO_TICKS(300));
     bridgeReloadFromRuntimeSettings();
@@ -542,7 +554,7 @@ static esp_err_t settingsHandler(httpd_req_t *req)
 
 static esp_err_t settingsPostHandler(httpd_req_t *req)
 {
-    char buf[256];
+    char buf[512];
     int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
     bridge_runtime_settings_t settings = runtimeSettingsGet();
     bridge_runtime_settings_t oldSettings = settings;
@@ -559,6 +571,8 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
 
     buf[received] = '\0';
 
+    ESP_LOGI(WEB_TAG, "Settings POST payload: %s", buf);
+
     if (extractJsonInt(buf, "mode", &v)) settings.mode = (uint8_t)v;
     if (extractJsonInt(buf, "bms_line", &v)) settings.bms_line = (uint8_t)v;
     if (extractJsonInt(buf, "inverter_line", &v)) settings.inverter_line = (uint8_t)v;
@@ -570,7 +584,27 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
     (void)extractJsonString(buf, "wifi_password", settings.wifi_password, sizeof(settings.wifi_password));
     if (extractJsonInt(buf, "web_port", &v)) settings.web_port = (uint16_t)v;
 
+    ESP_LOGI(WEB_TAG,
+             "Parsed settings old: mode=%u bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u)",
+             (unsigned)oldSettings.mode,
+             (unsigned)oldSettings.bms_line,
+             (unsigned)oldSettings.bms_protocol,
+             (unsigned)oldSettings.bms_port,
+             (unsigned)oldSettings.inverter_line,
+             (unsigned)oldSettings.inverter_protocol,
+             (unsigned)oldSettings.inverter_port);
+    ESP_LOGI(WEB_TAG,
+             "Parsed settings new: mode=%u bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u)",
+             (unsigned)settings.mode,
+             (unsigned)settings.bms_line,
+             (unsigned)settings.bms_protocol,
+             (unsigned)settings.bms_port,
+             (unsigned)settings.inverter_line,
+             (unsigned)settings.inverter_protocol,
+             (unsigned)settings.inverter_port);
+
     if (!runtimeSettingsSave(&settings)) {
+        ESP_LOGW(WEB_TAG, "Settings rejected by runtimeSettingsSave()");
         httpd_resp_set_status(req, "400 Bad Request");
         setNoCacheHeaders(req);
         httpd_resp_set_type(req, "application/json");
