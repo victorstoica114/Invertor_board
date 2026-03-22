@@ -410,6 +410,18 @@ void rs485BridgeEnable(void)
 
 void bridgeReloadFromRuntimeSettings(void)
 {
+    pylonRs485BridgeStop();
+    rs485Can322BridgeStop();
+    canRs485GrowattBridgeStop();
+    rs485ForwardSnifferStop();
+    canForwardSnifferStop();
+
+    canDecoderResetCaches();
+    rs485ForwardSnifferResetDecoders();
+    memset(&gBridgeTelemetry, 0, sizeof(gBridgeTelemetry));
+    memset(&gUniversalBatteryModel, 0, sizeof(gUniversalBatteryModel));
+    gBridgeDecodedLog[0] = '\0';
+
     rs485BridgeEnable();
     canBridgeEnable();
 }

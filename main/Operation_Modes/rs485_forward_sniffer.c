@@ -541,6 +541,12 @@ void rs485ForwardSnifferStop(void)
     deleteTaskIfRunning(&s_rs485PollerTask);
 }
 
+void rs485ForwardSnifferResetDecoders(void)
+{
+    modbusDecoderInit(&gRsDec1, "RS485_1", 5000);
+    modbusDecoderInit(&gRsDec2, "RS485_2", 5000);
+}
+
 void rs485ForwardSnifferStart(const bridge_runtime_settings_t *settings)
 {
     static rs485BridgeCtx_t bmsToInv;
@@ -573,11 +579,8 @@ void rs485ForwardSnifferStart(const bridge_runtime_settings_t *settings)
 
     xTaskCreate(rs485PeriodicSnapshotTask, "rs485_snapshot", 4096, NULL, 7, &s_rs485SnapshotTask);
 
-    if (gRsDec1.ifName == NULL) {
-        modbusDecoderInit(&gRsDec1, "RS485_1", 5000);
-    }
-    if (gRsDec2.ifName == NULL) {
-        modbusDecoderInit(&gRsDec2, "RS485_2", 5000);
+    if (gRsDec1.ifName == NULL || gRsDec2.ifName == NULL) {
+        rs485ForwardSnifferResetDecoders();
     }
 
     ESP_LOGI(EXAMPLE_TAG, "RS485 periodic snapshot enabled (%d ms)", MODBUS_DECODER_SNAPSHOT_PRINT_PERIOD_MS);
