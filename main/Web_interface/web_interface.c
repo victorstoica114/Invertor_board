@@ -30,6 +30,8 @@ static TaskHandle_t s_settingsApplyTask = NULL;
 static char s_logsResponse[2048];
 
 typedef struct {
+    bool reloadBridge;
+    bool restartWifi;
     bool restartWeb;
 } settingsApplyCtx_t;
 
@@ -160,6 +162,49 @@ static bool extractJsonString(const char *json, const char *key, char *out, size
     return true;
 }
 
+static bool settingsEqual(const bridge_runtime_settings_t *a, const bridge_runtime_settings_t *b)
+{
+    if (a == NULL || b == NULL) {
+        return false;
+    }
+
+    return a->mode == b->mode &&
+           a->bms_line == b->bms_line &&
+           a->inverter_line == b->inverter_line &&
+           a->bms_protocol == b->bms_protocol &&
+           a->inverter_protocol == b->inverter_protocol &&
+           a->bms_port == b->bms_port &&
+           a->inverter_port == b->inverter_port &&
+           a->web_port == b->web_port &&
+           strcmp(a->wifi_ssid, b->wifi_ssid) == 0 &&
+           strcmp(a->wifi_password, b->wifi_password) == 0;
+}
+
+static bool bridgeSettingsEqual(const bridge_runtime_settings_t *a, const bridge_runtime_settings_t *b)
+{
+    if (a == NULL || b == NULL) {
+        return false;
+    }
+
+    return a->mode == b->mode &&
+           a->bms_line == b->bms_line &&
+           a->inverter_line == b->inverter_line &&
+           a->bms_protocol == b->bms_protocol &&
+           a->inverter_protocol == b->inverter_protocol &&
+           a->bms_port == b->bms_port &&
+           a->inverter_port == b->inverter_port;
+}
+
+static bool wifiSettingsEqual(const bridge_runtime_settings_t *a, const bridge_runtime_settings_t *b)
+{
+    if (a == NULL || b == NULL) {
+        return false;
+    }
+
+    return strcmp(a->wifi_ssid, b->wifi_ssid) == 0 &&
+           strcmp(a->wifi_password, b->wifi_password) == 0;
+}
+
 static void wifiApplyRuntimeSettings(void)
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
@@ -192,7 +237,7 @@ static void settingsApplyTask(void *pv)
     bridge_runtime_settings_t settings = runtimeSettingsGet();
 
     ESP_LOGI(WEB_TAG,
-             "Applying settings: mode=%u bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) restartWeb=%s",
+             "Applying settings: mode=%u bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) reloadBridge=%s restartWifi=%s restartWeb=%s",
              (unsigned)settings.mode,
              (unsigned)settings.bms_line,
              (unsigned)settings.bms_protocol,
@@ -200,11 +245,17 @@ static void settingsApplyTask(void *pv)
              (unsigned)settings.inverter_line,
              (unsigned)settings.inverter_protocol,
              (unsigned)settings.inverter_port,
+             ctx.reloadBridge ? "YES" : "NO",
+             ctx.restartWifi ? "YES" : "NO",
              ctx.restartWeb ? "YES" : "NO");
 
     vTaskDelay(pdMS_TO_TICKS(300));
-    bridgeReloadFromRuntimeSettings();
-    wifiApplyRuntimeSettings();
+    if (ctx.reloadBridge) {
+        bridgeReloadFromRuntimeSettings();
+    }
+    if (ctx.restartWifi) {
+        wifiApplyRuntimeSettings();
+    }
 
     if (ctx.restartWeb) {
         stopHttpServer();
@@ -560,6 +611,7 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
     bridge_runtime_settings_t oldSettings = settings;
     int v = 0;
     const char *okResp = "{\"ok\":true,\"message\":\"Saved and applied\"}";
+    const char *sameResp = "{\"ok\":true,\"message\":\"No changes\"}";
     const char *errResp = "{\"ok\":false,\"message\":\"Invalid settings\"}";
 
     if (received <= 0) {
@@ -603,6 +655,13 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
              (unsigned)settings.inverter_protocol,
              (unsigned)settings.inverter_port);
 
+    if (settingsEqual(&settings, &oldSettings)) {
+        ESP_LOGI(WEB_TAG, "Settings unchanged; skipping runtime reload");
+        setNoCacheHeaders(req);
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_send(req, sameResp, HTTPD_RESP_USE_STRLEN);
+    }
+
     if (!runtimeSettingsSave(&settings)) {
         ESP_LOGW(WEB_TAG, "Settings rejected by runtimeSettingsSave()");
         httpd_resp_set_status(req, "400 Bad Request");
@@ -621,6 +680,8 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
     }
 
     static settingsApplyCtx_t applyCtx;
+    applyCtx.reloadBridge = !bridgeSettingsEqual(&settings, &oldSettings);
+    applyCtx.restartWifi = !wifiSettingsEqual(&settings, &oldSettings);
     applyCtx.restartWeb = (settings.web_port != oldSettings.web_port);
 
     xTaskCreate(

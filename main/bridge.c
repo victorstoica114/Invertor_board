@@ -450,7 +450,6 @@ void bridgeReloadFromRuntimeSettings(void)
 
     canDecoderResetCaches();
     rs485ForwardSnifferResetDecoders();
-    rs485ResetPorts();
     memset(&gBridgeTelemetry, 0, sizeof(gBridgeTelemetry));
     memset(&gUniversalBatteryModel, 0, sizeof(gUniversalBatteryModel));
     gBridgeDecodedLog[0] = '\0';
