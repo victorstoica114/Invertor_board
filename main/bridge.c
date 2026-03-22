@@ -177,6 +177,12 @@ static bool bridgeBuildGenericDecodedLog(const bridgeTelemetrySnapshot_t *snap,
     if (snap->warnings[0] != '\0') {
         pos += snprintf(out + pos, outSize - (uint32_t)pos, "  warns   : %s\n", snap->warnings);
     }
+    if (snap->stateFlags[0] != '\0') {
+        pos += snprintf(out + pos, outSize - (uint32_t)pos,
+                        "  state   : 0x35C=0x%02X  %s\n",
+                        (unsigned)snap->deyeStatus35C,
+                        snap->stateFlags);
+    }
 
     if (snap->cellCount > 0u) {
         for (uint8_t base = 0u; base < snap->cellCount && pos < (int)outSize; base = (uint8_t)(base + 4u)) {
@@ -263,6 +269,8 @@ void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
             snprintf(out->protocol, sizeof(out->protocol), "RS485_PYLON");
         } else if (settings.bms_protocol == PROTOCOL_CAN_PYLON || settings.inverter_protocol == PROTOCOL_CAN_PYLON) {
             snprintf(out->protocol, sizeof(out->protocol), "CAN_PYLON");
+        } else if (settings.bms_protocol == PROTOCOL_CAN_DEYE || settings.inverter_protocol == PROTOCOL_CAN_DEYE) {
+            snprintf(out->protocol, sizeof(out->protocol), "CAN_DEYE");
         } else if (settings.bms_protocol == PROTOCOL_RS485_GROWATT || settings.inverter_protocol == PROTOCOL_RS485_GROWATT) {
             snprintf(out->protocol, sizeof(out->protocol), "RS485_GROWATT");
         } else {

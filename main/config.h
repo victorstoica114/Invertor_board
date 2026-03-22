@@ -74,6 +74,7 @@
 #define PROTOCOL_RS485_GROWATT 2
 #define PROTOCOL_RS485_PYLON 3
 #define PROTOCOL_CAN_PYLON 4
+#define PROTOCOL_CAN_DEYE 5
 
 /* Requested user-facing config macros */
 #define BMS_line LINE_CAN
@@ -103,11 +104,11 @@
 #if ((Inverter_line != LINE_CAN) && (Inverter_line != LINE_RS485))
 #error "Inverter_line must be LINE_CAN or LINE_RS485"
 #endif
-#if ((BMS_protocol != PROTOCOL_CAN_GROWATT) && (BMS_protocol != PROTOCOL_RS485_GROWATT) && (BMS_protocol != PROTOCOL_RS485_PYLON) && (BMS_protocol != PROTOCOL_CAN_PYLON))
-#error "BMS_protocol must be PROTOCOL_CAN_GROWATT, PROTOCOL_RS485_GROWATT, PROTOCOL_RS485_PYLON or PROTOCOL_CAN_PYLON"
+#if ((BMS_protocol != PROTOCOL_CAN_GROWATT) && (BMS_protocol != PROTOCOL_RS485_GROWATT) && (BMS_protocol != PROTOCOL_RS485_PYLON) && (BMS_protocol != PROTOCOL_CAN_PYLON) && (BMS_protocol != PROTOCOL_CAN_DEYE))
+#error "BMS_protocol must be PROTOCOL_CAN_GROWATT, PROTOCOL_RS485_GROWATT, PROTOCOL_RS485_PYLON, PROTOCOL_CAN_PYLON or PROTOCOL_CAN_DEYE"
 #endif
-#if ((Inverter_protocol != PROTOCOL_CAN_GROWATT) && (Inverter_protocol != PROTOCOL_RS485_GROWATT) && (Inverter_protocol != PROTOCOL_RS485_PYLON) && (Inverter_protocol != PROTOCOL_CAN_PYLON))
-#error "Inverter_protocol must be PROTOCOL_CAN_GROWATT, PROTOCOL_RS485_GROWATT, PROTOCOL_RS485_PYLON or PROTOCOL_CAN_PYLON"
+#if ((Inverter_protocol != PROTOCOL_CAN_GROWATT) && (Inverter_protocol != PROTOCOL_RS485_GROWATT) && (Inverter_protocol != PROTOCOL_RS485_PYLON) && (Inverter_protocol != PROTOCOL_CAN_PYLON) && (Inverter_protocol != PROTOCOL_CAN_DEYE))
+#error "Inverter_protocol must be PROTOCOL_CAN_GROWATT, PROTOCOL_RS485_GROWATT, PROTOCOL_RS485_PYLON, PROTOCOL_CAN_PYLON or PROTOCOL_CAN_DEYE"
 #endif
 #if ((BMS_PORT < 1) || (BMS_PORT > 2))
 #error "BMS_PORT must be 1 or 2"
@@ -115,14 +116,14 @@
 #if ((Inverter_PORT < 1) || (Inverter_PORT > 2))
 #error "Inverter_PORT must be 1 or 2"
 #endif
-#if ((BMS_line == LINE_CAN) && (BMS_protocol != PROTOCOL_CAN_GROWATT) && (BMS_protocol != PROTOCOL_CAN_PYLON))
-#error "If BMS_line is LINE_CAN, BMS_protocol must be PROTOCOL_CAN_GROWATT or PROTOCOL_CAN_PYLON"
+#if ((BMS_line == LINE_CAN) && (BMS_protocol != PROTOCOL_CAN_GROWATT) && (BMS_protocol != PROTOCOL_CAN_PYLON) && (BMS_protocol != PROTOCOL_CAN_DEYE))
+#error "If BMS_line is LINE_CAN, BMS_protocol must be PROTOCOL_CAN_GROWATT, PROTOCOL_CAN_PYLON or PROTOCOL_CAN_DEYE"
 #endif
 #if ((BMS_line == LINE_RS485) && (BMS_protocol != PROTOCOL_RS485_GROWATT) && (BMS_protocol != PROTOCOL_RS485_PYLON))
 #error "If BMS_line is LINE_RS485, BMS_protocol must be PROTOCOL_RS485_GROWATT or PROTOCOL_RS485_PYLON"
 #endif
-#if ((Inverter_line == LINE_CAN) && (Inverter_protocol != PROTOCOL_CAN_GROWATT) && (Inverter_protocol != PROTOCOL_CAN_PYLON))
-#error "If Inverter_line is LINE_CAN, Inverter_protocol must be PROTOCOL_CAN_GROWATT or PROTOCOL_CAN_PYLON"
+#if ((Inverter_line == LINE_CAN) && (Inverter_protocol != PROTOCOL_CAN_GROWATT) && (Inverter_protocol != PROTOCOL_CAN_PYLON) && (Inverter_protocol != PROTOCOL_CAN_DEYE))
+#error "If Inverter_line is LINE_CAN, Inverter_protocol must be PROTOCOL_CAN_GROWATT, PROTOCOL_CAN_PYLON or PROTOCOL_CAN_DEYE"
 #endif
 #if ((Inverter_line == LINE_RS485) && (Inverter_protocol != PROTOCOL_RS485_GROWATT) && (Inverter_protocol != PROTOCOL_RS485_PYLON))
 #error "If Inverter_line is LINE_RS485, Inverter_protocol must be PROTOCOL_RS485_GROWATT or PROTOCOL_RS485_PYLON"

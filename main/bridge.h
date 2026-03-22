@@ -28,8 +28,12 @@ typedef struct {
     float tempT4C;
     float tempT5C;
     uint8_t pylonStatus63;
+    uint8_t deyeStatus35C;
+    uint8_t deyeTempMaxSensor;
+    uint8_t deyeTempMinSensor;
     uint8_t cellCount;
     float cellVoltagesV[16];
+    char stateFlags[128];
     char protections[256];
     char alarms[256];
     char warnings[256];
