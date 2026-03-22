@@ -12,6 +12,7 @@
 #include "Operation_Modes/rs485_forward_sniffer.h"
 #include "BMS_Protocols/Pylon/pylon_rs485_bridge.h"
 #include "rs485_can_bridge.h"
+#include "esp_log.h"
 #include "esp_timer.h"
 
 static bridgeTelemetrySnapshot_t gBridgeTelemetry;
