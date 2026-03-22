@@ -2,7 +2,9 @@
 
 #include "config.h"
 #include "BMS_Protocols/Growatt/growatt_modbus_map.h"
+#include "BMS_Protocols/Deye/deye_can_protocol.h"
 #include "BMS_Protocols/Pylon/pylon_can_protocol.h"
+#include "runtime_settings.h"
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -56,6 +58,22 @@ static pylon_can_frame_t *canPylonCacheForIf(const char *ifname)
         return g_can2PylonCache;
     }
     return NULL;
+}
+
+static int canProtocolForIf(const char *ifname)
+{
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+    const char *name = (ifname != NULL) ? ifname : "CAN1";
+
+    if ((settings.bms_line == LINE_CAN) &&
+        (strcmp(name, (settings.bms_port == 1) ? "CAN1" : "CAN2") == 0)) {
+        return settings.bms_protocol;
+    }
+    if ((settings.inverter_line == LINE_CAN) &&
+        (strcmp(name, (settings.inverter_port == 1) ? "CAN1" : "CAN2") == 0)) {
+        return settings.inverter_protocol;
+    }
+    return 0;
 }
 
 static int canBmsCacheIndex(uint32_t id)
@@ -641,7 +659,13 @@ void canDecoderPrintCachedSnapshot(const char *ifname)
 
     anyPylon = pylonCanAnyValid(pylonLocal, PYLON_CAN_CACHE_COUNT);
     if (anyPylon) {
-        pylonCanDecodeSnapshot(name, pylonLocal, PYLON_CAN_CACHE_COUNT);
+        int protocol = canProtocolForIf(name);
+
+        if (protocol == PROTOCOL_CAN_DEYE) {
+            deyeCanDecodeSnapshot(name, pylonLocal, PYLON_CAN_CACHE_COUNT);
+        } else {
+            pylonCanDecodeSnapshot(name, pylonLocal, PYLON_CAN_CACHE_COUNT);
+        }
         return;
     }
 
