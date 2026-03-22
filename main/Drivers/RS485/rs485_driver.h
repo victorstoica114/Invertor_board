@@ -11,6 +11,7 @@ extern "C" {
 #endif
 
 void rs485Init(void);
+void rs485Reinit(void);
 uart_port_t rs485GetUart1(void);
 uart_port_t rs485GetUart2(void);
 gpio_num_t rs485GetDir1(void);
