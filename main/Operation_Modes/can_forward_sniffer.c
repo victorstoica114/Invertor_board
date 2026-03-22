@@ -19,6 +19,7 @@ typedef struct {
     bool          applyExcludeList;
     bool          forwardEnabled;
     bool          rawLogEnabled;
+    const char   *rawLogLabel;
 } canBridgeCtx_t;
 
 static TaskHandle_t s_canTaskA = NULL;
@@ -53,7 +54,17 @@ static twai_handle_t canBusByPort(int port)
     return (port == 1) ? canGetBus0() : canGetBus1();
 }
 
-static void logRawCanFrame(const char *ifname, const twai_message_t *m)
+static const char *canProtocolLabel(int protocol)
+{
+    switch (protocol) {
+        case PROTOCOL_CAN_PYLON: return "PYLON";
+        case PROTOCOL_CAN_DEYE: return "DEYE";
+        case PROTOCOL_CAN_GROWATT: return "GROWATT";
+        default: return "CAN";
+    }
+}
+
+static void logRawCanFrameLabeled(const char *label, const char *ifname, const twai_message_t *m)
 {
     char dataHex[3 * 8 + 1] = {0};
     int pos = 0;
@@ -76,7 +87,8 @@ static void logRawCanFrame(const char *ifname, const twai_message_t *m)
     }
 
     ESP_LOGI(EXAMPLE_TAG,
-             "CAN PYLON RAW on %s: ID=0x%03" PRIX32 " DLC=%d DATA=[%s]",
+             "CAN %s RAW on %s: ID=0x%03" PRIX32 " DLC=%d DATA=[%s]",
+             (label != NULL && label[0] != '\0') ? label : "RAW",
              ifname,
              (uint32_t)m->identifier,
              dlc,
@@ -110,7 +122,7 @@ static void canBridgeTask(void *pv)
 #endif
         canDecoderOnFrame(ctx->rxName, &rx);
         if (ctx->rawLogEnabled) {
-            logRawCanFrame(ctx->rxName, &rx);
+            logRawCanFrameLabeled(ctx->rawLogLabel, ctx->rxName, &rx);
         }
 
         if (!ctx->forwardEnabled) {
@@ -152,6 +164,12 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
     const bool invCanPylon = (settings != NULL) &&
                              (settings->inverter_line == LINE_CAN) &&
                              (settings->inverter_protocol == PROTOCOL_CAN_PYLON);
+    const bool bmsCanDeye = (settings != NULL) &&
+                            (settings->bms_line == LINE_CAN) &&
+                            (settings->bms_protocol == PROTOCOL_CAN_DEYE);
+    const bool invCanDeye = (settings != NULL) &&
+                            (settings->inverter_line == LINE_CAN) &&
+                            (settings->inverter_protocol == PROTOCOL_CAN_DEYE);
     const bool sameCanProtocol = (settings != NULL) &&
                                  bmsOnCan &&
                                  invOnCan &&
@@ -179,7 +197,8 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
         bmsToInv.txBus = canBusByPort(settings->inverter_port);
         bmsToInv.applyExcludeList = CAN_EXCLUDE_LIST_ENABLE;
         bmsToInv.forwardEnabled = canForwardEnabled;
-        bmsToInv.rawLogEnabled = bmsCanPylon;
+        bmsToInv.rawLogEnabled = bmsCanPylon || bmsCanDeye;
+        bmsToInv.rawLogLabel = canProtocolLabel(settings->bms_protocol);
 
         invToBms.rxName = canNameByPort(settings->inverter_port);
         invToBms.txName = canNameByPort(settings->bms_port);
@@ -187,7 +206,8 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
         invToBms.txBus = canBusByPort(settings->bms_port);
         invToBms.applyExcludeList = false;
         invToBms.forwardEnabled = canForwardEnabled;
-        invToBms.rawLogEnabled = invCanPylon;
+        invToBms.rawLogEnabled = invCanPylon || invCanDeye;
+        invToBms.rawLogLabel = canProtocolLabel(settings->inverter_protocol);
 
         xTaskCreate(canBridgeTask, "can_bms_to_inv", 4096, &bmsToInv, 10, &s_canTaskA);
         xTaskCreate(canBridgeTask, "can_inv_to_bms", 4096, &invToBms, 10, &s_canTaskB);
@@ -203,7 +223,8 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
         if ((settings->mode == MODE_BRIDGE) && sameCanProtocol) {
             ESP_LOGI(EXAMPLE_TAG,
                      "CAN bridge mode uses direct pass-through because both sides are %s",
-                     bmsCanPylon ? "CAN_PYLON" : "CAN_GROWATT");
+                     (settings->bms_protocol == PROTOCOL_CAN_PYLON) ? "CAN_PYLON" :
+                     ((settings->bms_protocol == PROTOCOL_CAN_DEYE) ? "CAN_DEYE" : "CAN_GROWATT"));
         }
         return;
     }
@@ -215,11 +236,16 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
         bmsSniff.txBus = canBusByPort(settings->bms_port);
         bmsSniff.applyExcludeList = false;
         bmsSniff.forwardEnabled = false;
-        bmsSniff.rawLogEnabled = bmsCanPylon;
+        bmsSniff.rawLogEnabled = bmsCanPylon || bmsCanDeye;
+        bmsSniff.rawLogLabel = canProtocolLabel(settings->bms_protocol);
         xTaskCreate(canBridgeTask, "can_bms_sniff", 4096, &bmsSniff, 10, &s_canTaskA);
         ESP_LOGI(EXAMPLE_TAG, "CAN sniffer enabled on BMS side (%s[P%d])", bmsSniff.rxName, settings->bms_port);
         if (bmsCanPylon) {
             ESP_LOGI(EXAMPLE_TAG, "CAN Pylon diagnostic logging enabled on BMS side (%s[P%d])",
+                     bmsSniff.rxName,
+                     settings->bms_port);
+        } else if (bmsCanDeye) {
+            ESP_LOGI(EXAMPLE_TAG, "CAN Deye diagnostic logging enabled on BMS side (%s[P%d])",
                      bmsSniff.rxName,
                      settings->bms_port);
         }
@@ -232,11 +258,16 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
         invSniff.txBus = canBusByPort(settings->inverter_port);
         invSniff.applyExcludeList = false;
         invSniff.forwardEnabled = false;
-        invSniff.rawLogEnabled = invCanPylon;
+        invSniff.rawLogEnabled = invCanPylon || invCanDeye;
+        invSniff.rawLogLabel = canProtocolLabel(settings->inverter_protocol);
         xTaskCreate(canBridgeTask, "can_inv_sniff", 4096, &invSniff, 10, &s_canTaskB);
         ESP_LOGI(EXAMPLE_TAG, "CAN sniffer enabled on inverter side (%s[P%d])", invSniff.rxName, settings->inverter_port);
         if (invCanPylon) {
             ESP_LOGI(EXAMPLE_TAG, "CAN Pylon diagnostic logging enabled on inverter side (%s[P%d])",
+                     invSniff.rxName,
+                     settings->inverter_port);
+        } else if (invCanDeye) {
+            ESP_LOGI(EXAMPLE_TAG, "CAN Deye diagnostic logging enabled on inverter side (%s[P%d])",
                      invSniff.rxName,
                      settings->inverter_port);
         }
