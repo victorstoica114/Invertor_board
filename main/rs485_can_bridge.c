@@ -710,6 +710,9 @@ void canRs485GrowattBridgeEnable(uart_port_t inverterUart,
     g_canRsGrowattCtx.slaveId = (uint8_t)CAN_RS485_SOC_SLAVE_ID;
     g_canRsGrowattCtx.fakeSocPct = (uint8_t)((CAN_RS485_SOC_FAKE_PCT > 100u) ? 100u : CAN_RS485_SOC_FAKE_PCT);
 
+    (void)uart_flush_input(g_canRsGrowattCtx.uart);
+    canRsSetTx(g_canRsGrowattCtx.dirPin, false);
+
     xTaskCreate(canRs485GrowattTask,
                 "can_to_rs485_gw",
                 4096,
@@ -728,6 +731,12 @@ void canRs485GrowattBridgeEnable(uart_port_t inverterUart,
 
 void canRs485GrowattBridgeStop(void)
 {
+    if (g_canRsGrowattCtx.uart < UART_NUM_MAX) {
+        (void)uart_flush_input(g_canRsGrowattCtx.uart);
+    }
+    if (g_canRsGrowattCtx.dirPin >= 0) {
+        canRsSetTx(g_canRsGrowattCtx.dirPin, false);
+    }
     if (g_canRsGrowattTaskHandle != NULL) {
         vTaskDelete(g_canRsGrowattTaskHandle);
         g_canRsGrowattTaskHandle = NULL;
