@@ -7,6 +7,26 @@
 
 #include "esp_log.h"
 
+/*
+ * Observed Deye CAN dialect from JK-BMS battery:
+ *
+ * Mapped frames:
+ *   0x351 -> charge/discharge voltage/current limits (Pylon-like)
+ *   0x355 -> SOC / SOH
+ *   0x356 -> pack voltage / current / average temperature
+ *   0x359 -> module count + "PN" tag bytes
+ *   0x35C -> state flags (charge/discharge/balance currently inferred)
+ *   0x35E -> ASCII battery identity ("JK-BMS")
+ *   0x370 -> temp max / temp min / cell max / cell min
+ *   0x371 -> temp max sensor / temp min sensor / cell max index / cell min index
+ *
+ * Not mapped yet / still tentative:
+ *   - exact semantic meaning of all bits in 0x35C (only high-level flags inferred)
+ *   - whether 0x359 trailing bytes mean part number, product family, or vendor tag
+ *   - any additional Deye-specific frames outside the observed 0x351/355/356/359/35C/35E/370/371 set
+ *   - exact official naming/units for 0x370/0x371 fields (current mapping is strongly inferred from live values)
+ */
+
 static const char *TAG = "SNIFFER_BRIDGE";
 static char s_deyeCanLogText[2048];
 
@@ -134,6 +154,9 @@ void deyeCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, s
     bool chargeEnabled = false;
     bool dischargeEnabled = false;
     bool balanceEnabled = false;
+    const char *chargeText = "OFF";
+    const char *dischargeText = "OFF";
+    const char *balanceText = "OFF";
 
     if (f351 && f351->dlc >= 8u) {
         chargeVoltLimit = (float)deyeCanLe16(&f351->data[0]) / 10.0f;
@@ -166,6 +189,9 @@ void deyeCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, s
             chargeEnabled = (status35C & 0x80u) != 0u;
             dischargeEnabled = (status35C & 0x40u) != 0u;
             balanceEnabled = (status35C & 0x20u) != 0u;
+            chargeText = chargeEnabled ? "ON" : "OFF";
+            dischargeText = dischargeEnabled ? "ON" : "OFF";
+            balanceText = balanceEnabled ? "ON" : "OFF";
         }
     }
     if (f35E) {
@@ -201,6 +227,15 @@ void deyeCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, s
     snap.tempT1C = tempMax;
     snap.tempT2C = tempMin;
     snap.pylonStatus63 = status35C;
+    snap.deyeStatus35C = status35C;
+    snap.deyeTempMaxSensor = (tempMaxSensor <= 255u) ? (uint8_t)tempMaxSensor : 0u;
+    snap.deyeTempMinSensor = (tempMinSensor <= 255u) ? (uint8_t)tempMinSensor : 0u;
+    snprintf(snap.stateFlags,
+             sizeof(snap.stateFlags),
+             "charge=%s, discharge=%s, balance=%s",
+             chargeText,
+             dischargeText,
+             balanceText);
     bridgeSetTelemetrySnapshot(&snap);
 
     model.valid = snap.valid;
@@ -259,9 +294,9 @@ void deyeCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, s
              (unsigned)tempMinSensor,
              (double)avgTemp,
              raw35C[0] ? raw35C : "-",
-             chargeEnabled ? "ON" : "OFF",
-             dischargeEnabled ? "ON" : "OFF",
-             balanceEnabled ? "ON" : "OFF",
+             chargeText,
+             dischargeText,
+             balanceText,
              (unsigned)moduleCount,
              tag359[0] ? tag359 : "-",
              raw359[0] ? raw359 : "-",
@@ -303,9 +338,9 @@ void deyeCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, s
     ESP_LOGI(TAG,
              "  state : 0x35C=[%s] charge=%s discharge=%s balance=%s",
              raw35C[0] ? raw35C : "-",
-             chargeEnabled ? "ON" : "OFF",
-             dischargeEnabled ? "ON" : "OFF",
-             balanceEnabled ? "ON" : "OFF");
+             chargeText,
+             dischargeText,
+             balanceText);
     ESP_LOGI(TAG,
              "  info  : modules=%u tag='%s' 0x359=[%s] 0x370=[%s] 0x371=[%s]",
              (unsigned)moduleCount,
