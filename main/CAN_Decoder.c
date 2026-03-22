@@ -34,12 +34,13 @@ static pylon_can_frame_t g_can2PylonCache[PYLON_CAN_CACHE_COUNT];
 
 void canDecoderResetCaches(void)
 {
-    portENTER_CRITICAL(&g_canBmsCacheMux);
+    // Called only after CAN bridge tasks are stopped during runtime reload.
+    // Avoid taking the cache spinlock here because a task can be deleted while
+    // holding it, which would deadlock the reload path until reboot.
     memset(g_can1BmsCache, 0, sizeof(g_can1BmsCache));
     memset(g_can2BmsCache, 0, sizeof(g_can2BmsCache));
     memset(g_can1PylonCache, 0, sizeof(g_can1PylonCache));
     memset(g_can2PylonCache, 0, sizeof(g_can2PylonCache));
-    portEXIT_CRITICAL(&g_canBmsCacheMux);
 }
 
 static canBmsCachedFrame_t *canBmsCacheForIf(const char *ifname)
