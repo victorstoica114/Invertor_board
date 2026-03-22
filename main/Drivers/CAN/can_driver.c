@@ -7,6 +7,45 @@
 static twai_handle_t s_canBus0;
 static twai_handle_t s_canBus1;
 
+static void canResetBus(twai_handle_t handle, const char *name)
+{
+    twai_status_info_t status = {0};
+    bool wasRunning = false;
+
+    if (handle == NULL) {
+        return;
+    }
+
+    if (twai_get_status_info_v2(handle, &status) == ESP_OK) {
+        wasRunning = (status.state == TWAI_STATE_RUNNING);
+    }
+
+    if (wasRunning) {
+        esp_err_t stopErr = twai_stop_v2(handle);
+        if (stopErr != ESP_OK) {
+            ESP_LOGW(EXAMPLE_TAG,
+                     "%s stop during reset failed (err=0x%x)",
+                     name,
+                     (unsigned)stopErr);
+        }
+    }
+
+    (void)twai_clear_transmit_queue_v2(handle);
+    (void)twai_clear_receive_queue_v2(handle);
+
+    if (wasRunning) {
+        esp_err_t startErr = twai_start_v2(handle);
+        if (startErr != ESP_OK) {
+            ESP_LOGW(EXAMPLE_TAG,
+                     "%s start during reset failed (err=0x%x)",
+                     name,
+                     (unsigned)startErr);
+        } else {
+            ESP_LOGI(EXAMPLE_TAG, "%s queues/state reset", name);
+        }
+    }
+}
+
 void canInit(void)
 {
     twai_general_config_t gConfig =
@@ -35,4 +74,10 @@ twai_handle_t canGetBus0(void)
 twai_handle_t canGetBus1(void)
 {
     return s_canBus1;
+}
+
+void canResetBuses(void)
+{
+    canResetBus(s_canBus0, "CAN1");
+    canResetBus(s_canBus1, "CAN2");
 }

@@ -41,6 +41,15 @@ void rs485DriverWriteFrame(uart_port_t uart, gpio_num_t dirPin, const uint8_t *f
     rs485DriverSetTx(dirPin, false);
 }
 
+void rs485ResetPorts(void)
+{
+    (void)uart_flush_input(RS485_1_UART);
+    (void)uart_flush_input(RS485_2_UART);
+    rs485DriverSetTx((gpio_num_t)RS485_1_DIR, false);
+    rs485DriverSetTx((gpio_num_t)RS485_2_DIR, false);
+    ESP_LOGI(EXAMPLE_TAG, "RS485 ports flushed/reset");
+}
+
 void rs485Init(void)
 {
     uart_config_t uartConfig = {

@@ -9,6 +9,7 @@ extern "C" {
 void canInit(void);
 twai_handle_t canGetBus0(void);
 twai_handle_t canGetBus1(void);
+void canResetBuses(void);
 
 #ifdef __cplusplus
 }
