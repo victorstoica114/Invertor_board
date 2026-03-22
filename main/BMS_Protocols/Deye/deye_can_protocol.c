@@ -151,7 +151,7 @@ void deyeCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, s
         avgTemp = (float)deyeCanLe16(&f356->data[4]) / 10.0f;
     }
     if (f359) {
-        formatCanData(f359->data, f359->dlc, raw359, sizeof(raw359));
+        deyeFormatCanData(f359->data, f359->dlc, raw359, sizeof(raw359));
         if (f359->dlc >= 5u) {
             moduleCount = f359->data[4];
         }
@@ -160,7 +160,7 @@ void deyeCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, s
         }
     }
     if (f35C) {
-        formatCanData(f35C->data, f35C->dlc, raw35C, sizeof(raw35C));
+        deyeFormatCanData(f35C->data, f35C->dlc, raw35C, sizeof(raw35C));
         if (f35C->dlc >= 1u) {
             status35C = f35C->data[0];
             chargeEnabled = (status35C & 0x80u) != 0u;
@@ -172,14 +172,14 @@ void deyeCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, s
         deyeFormatCanAscii(f35E->data, f35E->dlc, ascii35E, sizeof(ascii35E));
     }
     if (f370 && f370->dlc >= 8u) {
-        formatCanData(f370->data, f370->dlc, raw370, sizeof(raw370));
+        deyeFormatCanData(f370->data, f370->dlc, raw370, sizeof(raw370));
         tempMax = deyeTempWordToC(deyeCanLe16(&f370->data[0]));
         tempMin = deyeTempWordToC(deyeCanLe16(&f370->data[2]));
         cellMax = (float)deyeCanLe16(&f370->data[4]) / 1000.0f;
         cellMin = (float)deyeCanLe16(&f370->data[6]) / 1000.0f;
     }
     if (f371 && f371->dlc >= 8u) {
-        formatCanData(f371->data, f371->dlc, raw371, sizeof(raw371));
+        deyeFormatCanData(f371->data, f371->dlc, raw371, sizeof(raw371));
         tempMaxSensor = deyeCanLe16(&f371->data[0]);
         tempMinSensor = deyeCanLe16(&f371->data[2]);
         cellMaxIdx = deyeCanLe16(&f371->data[4]);
