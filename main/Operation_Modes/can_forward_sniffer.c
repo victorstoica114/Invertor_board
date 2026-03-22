@@ -144,7 +144,6 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
     static canBridgeCtx_t invToBms;
     static canBridgeCtx_t bmsSniff;
     static canBridgeCtx_t invSniff;
-    const bool canForwardEnabled = (settings != NULL) && (settings->mode == MODE_FORWARD);
     const bool bmsOnCan = (settings != NULL) && (settings->bms_line == LINE_CAN);
     const bool invOnCan = (settings != NULL) && (settings->inverter_line == LINE_CAN);
     const bool bmsCanPylon = (settings != NULL) &&
@@ -153,6 +152,13 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
     const bool invCanPylon = (settings != NULL) &&
                              (settings->inverter_line == LINE_CAN) &&
                              (settings->inverter_protocol == PROTOCOL_CAN_PYLON);
+    const bool sameCanProtocol = (settings != NULL) &&
+                                 bmsOnCan &&
+                                 invOnCan &&
+                                 (settings->bms_protocol == settings->inverter_protocol);
+    const bool canForwardEnabled = (settings != NULL) &&
+                                   ((settings->mode == MODE_FORWARD) ||
+                                    ((settings->mode == MODE_BRIDGE) && sameCanProtocol));
 
     canForwardSnifferStop();
 
@@ -194,6 +200,11 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
                  settings->inverter_port,
                  canForwardEnabled ? "ON" : "OFF",
                  CAN_EXCLUDE_LIST_ENABLE ? "ON" : "OFF");
+        if ((settings->mode == MODE_BRIDGE) && sameCanProtocol) {
+            ESP_LOGI(EXAMPLE_TAG,
+                     "CAN bridge mode uses direct pass-through because both sides are %s",
+                     bmsCanPylon ? "CAN_PYLON" : "CAN_GROWATT");
+        }
         return;
     }
 
