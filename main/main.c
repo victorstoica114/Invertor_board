@@ -4,7 +4,7 @@
 #include "esp_log.h"
 
 #include "config.h"
-#include "bridge.h"
+#include "orchestrator/orchestrator.h"
 
 void app_main(void)
 {
@@ -15,10 +15,12 @@ void app_main(void)
     rs485Init();
     canInit();
 
-    rs485BridgeEnable();
-    canBridgeEnable();
+    esp_err_t err = orchestratorStart(ACTIVE_BMS_PROTOCOL, ACTIVE_INVERTER_PROTOCOL);
+    if (err != ESP_OK) {
+        ESP_LOGE(EXAMPLE_TAG, "Orchestrator failed to start (err=0x%x)", (unsigned)err);
+    }
 
-    ESP_LOGI(EXAMPLE_TAG, "Sniffer/bridge running.");
+    ESP_LOGI(EXAMPLE_TAG, "Task-based protocol bridge running.");
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(10000));

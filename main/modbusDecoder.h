@@ -37,6 +37,7 @@ void modbusDecoderInit(modbusDecoder_t *d, const char *ifName, uint32_t gapUs);
 void modbusDecoderFeed(modbusDecoder_t *d, const uint8_t *data, int len, int64_t rxUs);
 void modbusDecoderFlush(modbusDecoder_t *d);
 void modbusDecoderPrintSnapshot(modbusDecoder_t *d);
+bool modbusDecoderGetCachedReg(const modbusDecoder_t *d, uint16_t addr, uint16_t *valOut);
 
 #ifdef __cplusplus
 }

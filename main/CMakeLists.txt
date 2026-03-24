@@ -2,11 +2,13 @@ idf_component_register(
     SRCS
         "main.c"
         "config.c"
-        "bridge.c"
-        "CAN_Decoder.c"
         "modbusDecoder.c"
-        "rs485_can_bridge.c"
-        # "modbusResp.c"
+        "orchestrator/orchestrator.c"
+        "protocols/growatt/growatt_register_map.c"
+        "protocols/growatt/growatt_bms_task.c"
+        "protocols/growatt/growatt_inverter_task.c"
+        "protocols/pylon/pylon_bms_task.c"
+        "protocols/pylon/pylon_inverter_task.c"
     INCLUDE_DIRS
         "."
     REQUIRES

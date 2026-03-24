@@ -522,7 +522,7 @@ static const char *snapshotIfName(const modbusDecoder_t *d)
     return (d != NULL && d->ifName != NULL) ? d->ifName : "RS485";
 }
 
-static bool cacheGetReg(const modbusDecoder_t *d, uint16_t addr, uint16_t *valOut)
+bool modbusDecoderGetCachedReg(const modbusDecoder_t *d, uint16_t addr, uint16_t *valOut)
 {
     if (d == NULL) {
         return false;
@@ -552,10 +552,10 @@ static void printSnapshotDecoded(modbusDecoder_t *d)
     uint16_t r0002 = 0;
     uint16_t r0003 = 0;
     uint16_t r0004 = 0;
-    if (cacheGetReg(d, GROWATT_MB_REG_INFO_0001, &r0001) &&
-        cacheGetReg(d, GROWATT_MB_REG_INFO_0002, &r0002) &&
-        cacheGetReg(d, GROWATT_MB_REG_INFO_0003, &r0003) &&
-        cacheGetReg(d, GROWATT_MB_REG_INFO_0004, &r0004)) {
+    if (modbusDecoderGetCachedReg(d, GROWATT_MB_REG_INFO_0001, &r0001) &&
+        modbusDecoderGetCachedReg(d, GROWATT_MB_REG_INFO_0002, &r0002) &&
+        modbusDecoderGetCachedReg(d, GROWATT_MB_REG_INFO_0003, &r0003) &&
+        modbusDecoderGetCachedReg(d, GROWATT_MB_REG_INFO_0004, &r0004)) {
         ESP_LOGI(EXAMPLE_TAG,
                  "%s BMS-INFO: r0001..0004 = %04X %04X %04X %04X",
                  ifn,
@@ -581,13 +581,13 @@ static void printSnapshotDecoded(modbusDecoder_t *d)
     uint16_t ichgLimCa = 0;
     uint16_t idisLimCa = 0;
 
-    if (cacheGetReg(d, GROWATT_MB_REG_SOC_PCT, &soc) &&
-        cacheGetReg(d, GROWATT_MB_REG_PACK_V_CV, &packCv) &&
-        cacheGetReg(d, GROWATT_MB_REG_TEMP_C, &temp) &&
-        cacheGetReg(d, GROWATT_MB_REG_CELL_MAX_MV, &cmaxMv) &&
-        cacheGetReg(d, GROWATT_MB_REG_CELL_MIN_MV, &cminMv) &&
-        cacheGetReg(d, GROWATT_MB_REG_CELL_MAX_IDX, &cmaxIdx) &&
-        cacheGetReg(d, GROWATT_MB_REG_CELL_MIN_IDX, &cminIdx)) {
+    if (modbusDecoderGetCachedReg(d, GROWATT_MB_REG_SOC_PCT, &soc) &&
+        modbusDecoderGetCachedReg(d, GROWATT_MB_REG_PACK_V_CV, &packCv) &&
+        modbusDecoderGetCachedReg(d, GROWATT_MB_REG_TEMP_C, &temp) &&
+        modbusDecoderGetCachedReg(d, GROWATT_MB_REG_CELL_MAX_MV, &cmaxMv) &&
+        modbusDecoderGetCachedReg(d, GROWATT_MB_REG_CELL_MIN_MV, &cminMv) &&
+        modbusDecoderGetCachedReg(d, GROWATT_MB_REG_CELL_MAX_IDX, &cmaxIdx) &&
+        modbusDecoderGetCachedReg(d, GROWATT_MB_REG_CELL_MIN_IDX, &cminIdx)) {
         ESP_LOGI(EXAMPLE_TAG,
                  "%s BMS: %.2fV | SOC %u%% | %dC | Cmin %.3fV(C%u) | Cmax %.3fV(C%u) | dV %.3fV",
                  ifn,
@@ -601,8 +601,8 @@ static void printSnapshotDecoded(modbusDecoder_t *d)
                  (double)(cmaxMv - cminMv) / 1000.0);
     }
 
-    if (cacheGetReg(d, GROWATT_MB_REG_REMAIN_CAP_CAH, &remainCapCah) &&
-        cacheGetReg(d, GROWATT_MB_REG_FULL_CAP_CAH, &fullCapCah)) {
+    if (modbusDecoderGetCachedReg(d, GROWATT_MB_REG_REMAIN_CAP_CAH, &remainCapCah) &&
+        modbusDecoderGetCachedReg(d, GROWATT_MB_REG_FULL_CAP_CAH, &fullCapCah)) {
         ESP_LOGI(EXAMPLE_TAG,
                  "%s BMS-CAP: RM %.2fAh | FCC %.2fAh",
                  ifn,
@@ -610,8 +610,8 @@ static void printSnapshotDecoded(modbusDecoder_t *d)
                  (double)fullCapCah / 100.0);
     }
 
-    if (cacheGetReg(d, GROWATT_MB_REG_CV_TARGET_CV, &cvTargetCv) &&
-        cacheGetReg(d, GROWATT_MB_REG_SOH_PCT, &soh)) {
+    if (modbusDecoderGetCachedReg(d, GROWATT_MB_REG_CV_TARGET_CV, &cvTargetCv) &&
+        modbusDecoderGetCachedReg(d, GROWATT_MB_REG_SOH_PCT, &soh)) {
         ESP_LOGI(EXAMPLE_TAG,
                  "%s BMS-EXT: CVtarget %.2fV | SOH %u%%",
                  ifn,
@@ -619,20 +619,20 @@ static void printSnapshotDecoded(modbusDecoder_t *d)
                  (unsigned)soh);
     }
 
-    if (cacheGetReg(d, GROWATT_MB_REG_PACK_I_ABS_CA_TENTATIVE, &packAbsICa)) {
+    if (modbusDecoderGetCachedReg(d, GROWATT_MB_REG_PACK_I_ABS_CA_TENTATIVE, &packAbsICa)) {
         ESP_LOGI(EXAMPLE_TAG,
                  "%s BMS-TENT: |Ipack| %.2fA",
                  ifn,
                  (double)packAbsICa / 100.0);
     }
-    if (cacheGetReg(d, GROWATT_MB_REG_CYCLE_COUNT_TENTATIVE, &cycleCount)) {
+    if (modbusDecoderGetCachedReg(d, GROWATT_MB_REG_CYCLE_COUNT_TENTATIVE, &cycleCount)) {
         ESP_LOGI(EXAMPLE_TAG,
                  "%s BMS-TENT: Cycles %u",
                  ifn,
                  (unsigned)cycleCount);
     }
-    bool hasIchgLim = cacheGetReg(d, GROWATT_MB_REG_ICHG_LIM_CA_TENTATIVE, &ichgLimCa);
-    bool hasIdisLim = cacheGetReg(d, GROWATT_MB_REG_IDIS_LIM_CA_TENTATIVE, &idisLimCa);
+    bool hasIchgLim = modbusDecoderGetCachedReg(d, GROWATT_MB_REG_ICHG_LIM_CA_TENTATIVE, &ichgLimCa);
+    bool hasIdisLim = modbusDecoderGetCachedReg(d, GROWATT_MB_REG_IDIS_LIM_CA_TENTATIVE, &idisLimCa);
     if (hasIchgLim || hasIdisLim) {
         ESP_LOGI(EXAMPLE_TAG,
                  "%s BMS-TENT: IchgLim %.2fA | IdisLim %.2fA",
@@ -644,7 +644,7 @@ static void printSnapshotDecoded(modbusDecoder_t *d)
     for (int i = 0; i < 16; i++) {
         uint16_t addr = (uint16_t)(GROWATT_MB_REG_CELL_BASE + i);
         uint16_t mv = 0;
-        if (!cacheGetReg(d, addr, &mv)) {
+        if (!modbusDecoderGetCachedReg(d, addr, &mv)) {
             continue;
         }
 
@@ -676,7 +676,8 @@ static void printSnapshotDecoded(modbusDecoder_t *d)
     {
         uint16_t r0013 = 0;
         uint16_t cell13 = 0;
-        if (cacheGetReg(d, GROWATT_MB_REG_MAIN_RAW_0013, &r0013) && cacheGetReg(d, GROWATT_MB_REG_CELL_N(13), &cell13)) {
+        if (modbusDecoderGetCachedReg(d, GROWATT_MB_REG_MAIN_RAW_0013, &r0013) &&
+            modbusDecoderGetCachedReg(d, GROWATT_MB_REG_CELL_N(13), &cell13)) {
             ESP_LOGI(EXAMPLE_TAG,
                      "%s reg[0x0013] = 0x%04X (%u)  |  Cell13 @0x007C = %.3f V (%u mV)",
                      ifn,

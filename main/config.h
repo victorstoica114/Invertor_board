@@ -5,6 +5,7 @@
 #include <stdbool.h>
 
 #include "Growatt_regs.h"
+#include "orchestrator/protocol_types.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -55,6 +56,36 @@
 /* --- RS485 -> CAN translator (uses RS485 SOC/TEMP to synthesize CAN 0x322) --- */
 #define RS485_CAN_322_TRANSLATOR_ENABLE 1
 #define RS485_CAN_322_TX_PERIOD_MS 200
+
+/* --- Active protocol selection --- */
+#define ACTIVE_BMS_PROTOCOL      PROTOCOL_ID_GROWATT
+#define ACTIVE_INVERTER_PROTOCOL PROTOCOL_ID_GROWATT
+
+/* --- Orchestrator runtime --- */
+#define ORCHESTRATOR_TASK_STACK        4096
+#define ORCHESTRATOR_TASK_PRIORITY     11
+#define ORCHESTRATOR_BMS_QUEUE_LEN     1
+#define ORCHESTRATOR_INVERTER_QUEUE_LEN 1
+#define ORCHESTRATOR_FORCE_FORWARD_MS  1000
+
+/* --- Growatt tasks --- */
+#define GROWATT_BMS_MODBUS_SLAVE_ADDR  GROWATT_MODBUS_DEFAULT_SLAVE_ADDR
+#define GROWATT_BMS_MODBUS_GAP_US      5000
+#define GROWATT_BMS_QUERY_PERIOD_MS    250
+#define GROWATT_BMS_PUBLISH_PERIOD_MS  250
+#define GROWATT_BMS_TASK_STACK         4096
+#define GROWATT_BMS_TASK_PRIORITY      10
+
+#define GROWATT_INVERTER_TX_PERIOD_MS  200
+#define GROWATT_INVERTER_TASK_STACK    4096
+#define GROWATT_INVERTER_TASK_PRIORITY 9
+
+/* --- Pylon placeholders --- */
+#define PYLON_BMS_TASK_STACK           3072
+#define PYLON_BMS_TASK_PRIORITY        8
+#define PYLON_INVERTER_TASK_STACK      3072
+#define PYLON_INVERTER_TASK_PRIORITY   8
+#define PYLON_PLACEHOLDER_TASK_PERIOD_MS 1000
 
 #ifdef __cplusplus
 extern "C" {
