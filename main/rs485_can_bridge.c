@@ -542,11 +542,11 @@ void rs485Can322BridgeEnable(modbusDecoder_t *srcDecoder, twai_handle_t txBus, c
 #endif
 }
 
-void canRs485GrowattBridgeEnable(uart_port_t inverterUart,
-                                 gpio_num_t inverterDir,
-                                 const char *ifName,
-                                 twai_handle_t srcCanBus,
-                                 const char *srcCanIf)
+esp_err_t canRs485GrowattBridgeEnable(uart_port_t inverterUart,
+                                      gpio_num_t inverterDir,
+                                      const char *ifName,
+                                      twai_handle_t srcCanBus,
+                                      const char *srcCanIf)
 {
 #if !CAN_RS485_SOC_TRANSLATOR_ENABLE
     (void)inverterUart;
@@ -555,15 +555,15 @@ void canRs485GrowattBridgeEnable(uart_port_t inverterUart,
     (void)srcCanBus;
     (void)srcCanIf;
     ESP_LOGI(EXAMPLE_TAG, "CAN->RS485 Growatt translator disabled by config");
-    return;
+    return ESP_ERR_NOT_SUPPORTED;
 #else
     if (g_canRsGrowattTaskHandle != NULL) {
         ESP_LOGI(EXAMPLE_TAG, "CAN->RS485 Growatt translator already running");
-        return;
+        return ESP_OK;
     }
     if (srcCanBus == NULL) {
         ESP_LOGW(EXAMPLE_TAG, "CAN->RS485 Growatt translator not started: source CAN bus is null");
-        return;
+        return ESP_ERR_INVALID_ARG;
     }
 
     memset(&g_canRsGrowattCtx, 0, sizeof(g_canRsGrowattCtx));
@@ -576,14 +576,28 @@ void canRs485GrowattBridgeEnable(uart_port_t inverterUart,
     g_canRsGrowattCtx.fakeSocPct =
         (uint8_t)((CAN_RS485_SOC_FAKE_PCT > 100u) ? 100u : CAN_RS485_SOC_FAKE_PCT);
 
-    (void)uart_flush_input(g_canRsGrowattCtx.uart);
+    rs485SetDirection(g_canRsGrowattCtx.dirPin, false);
 
-    xTaskCreate(canRs485GrowattTask,
-                "can_to_rs485_gw",
-                4096,
-                &g_canRsGrowattCtx,
-                9,
-                &g_canRsGrowattTaskHandle);
+    /* UART0 is also used by the serial monitor/console, so avoid flush deadlocks there. */
+    if (g_canRsGrowattCtx.uart != UART_NUM_0) {
+        (void)uart_flush_input(g_canRsGrowattCtx.uart);
+    } else {
+        ESP_LOGW(EXAMPLE_TAG,
+                 "CAN->RS485 translator on UART0: skip uart_flush_input to avoid console lock");
+    }
+
+    BaseType_t taskOk = xTaskCreate(canRs485GrowattTask,
+                                    "can_to_rs485_gw",
+                                    4096,
+                                    &g_canRsGrowattCtx,
+                                    9,
+                                    &g_canRsGrowattTaskHandle);
+    if (taskOk != pdPASS) {
+        g_canRsGrowattTaskHandle = NULL;
+        memset(&g_canRsGrowattCtx, 0, sizeof(g_canRsGrowattCtx));
+        ESP_LOGE(EXAMPLE_TAG, "CAN->RS485 Growatt translator task create failed");
+        return ESP_ERR_NO_MEM;
+    }
 
     ESP_LOGI(EXAMPLE_TAG,
              "CAN->RS485 Growatt translator enabled (if=%s src=%s slave=%u fallbackSOC=%u%%)",
@@ -591,6 +605,7 @@ void canRs485GrowattBridgeEnable(uart_port_t inverterUart,
              g_canRsGrowattCtx.srcCanIf,
              (unsigned)g_canRsGrowattCtx.slaveId,
              (unsigned)g_canRsGrowattCtx.fakeSocPct);
+    return ESP_OK;
 #endif
 }
 
@@ -599,6 +614,9 @@ void canRs485GrowattBridgeStop(void)
     if (g_canRsGrowattTaskHandle != NULL) {
         vTaskDelete(g_canRsGrowattTaskHandle);
         g_canRsGrowattTaskHandle = NULL;
+    }
+    if ((int)g_canRsGrowattCtx.dirPin >= 0) {
+        rs485SetDirection(g_canRsGrowattCtx.dirPin, false);
     }
     memset(&g_canRsGrowattCtx, 0, sizeof(g_canRsGrowattCtx));
 }

@@ -281,11 +281,17 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
         ESP_LOGW(EXAMPLE_TAG, "CAN->RS485 Growatt route requested, but translator is disabled");
         return ESP_ERR_NOT_SUPPORTED;
 #else
-        canRs485GrowattBridgeEnable(rsUartByPort(settings->inverter_port),
-                                    rsDirByPort(settings->inverter_port),
-                                    rsNameByPort(settings->inverter_port),
-                                    canBusByPort(settings->bms_port),
-                                    canNameByPort(settings->bms_port));
+        esp_err_t startErr = canRs485GrowattBridgeEnable(rsUartByPort(settings->inverter_port),
+                                                         rsDirByPort(settings->inverter_port),
+                                                         rsNameByPort(settings->inverter_port),
+                                                         canBusByPort(settings->bms_port),
+                                                         canNameByPort(settings->bms_port));
+        if (startErr != ESP_OK) {
+            ESP_LOGW(EXAMPLE_TAG,
+                     "CAN->RS485 Growatt route failed to start translator (err=0x%x)",
+                     (unsigned)startErr);
+            return startErr;
+        }
         g_orchestratorCtx.canRs485TranslatorActive = true;
         g_orchestratorCtx.bmsProtocol = PROTOCOL_ID_GROWATT;
         g_orchestratorCtx.inverterProtocol = PROTOCOL_ID_GROWATT;
