@@ -2,11 +2,14 @@
 
 #include <string.h>
 
+#include "Drivers/can_driver.h"
+#include "Drivers/rs485_driver.h"
 #include "config.h"
 #include "protocols/growatt/growatt_bms_task.h"
 #include "protocols/growatt/growatt_inverter_task.h"
 #include "protocols/pylon/pylon_bms_task.h"
 #include "protocols/pylon/pylon_inverter_task.h"
+#include "rs485_can_bridge.h"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -27,6 +30,7 @@ typedef struct {
     QueueHandle_t inverterQueue;
     protocol_id_t bmsProtocol;
     protocol_id_t inverterProtocol;
+    bool canRs485TranslatorActive;
 
     bool haveLastForwarded;
     bms_decoded_packet_t lastForwarded;
@@ -92,6 +96,57 @@ static esp_err_t startInverterTask(protocol_id_t protocol, QueueHandle_t inQueue
     }
 }
 
+static protocol_id_t protocolIdFromUiProtocol(uint8_t protocol)
+{
+    switch (protocol) {
+        case PROTOCOL_CAN_GROWATT:
+        case PROTOCOL_RS485_GROWATT:
+            return PROTOCOL_ID_GROWATT;
+        case PROTOCOL_CAN_PYLON:
+        case PROTOCOL_RS485_PYLON:
+            return PROTOCOL_ID_PYLON;
+        default:
+            return PROTOCOL_ID_GROWATT;
+    }
+}
+
+static const char *canNameByPort(uint8_t port)
+{
+    return (port == 2u) ? "CAN2" : "CAN1";
+}
+
+static twai_handle_t canBusByPort(uint8_t port)
+{
+    return (port == 2u) ? canGetBus1() : canGetBus0();
+}
+
+static const char *rsNameByPort(uint8_t port)
+{
+    return (port == 2u) ? "RS485_2" : "RS485_1";
+}
+
+static uart_port_t rsUartByPort(uint8_t port)
+{
+    return (port == 2u) ? rs485GetUart2() : rs485GetUart1();
+}
+
+static gpio_num_t rsDirByPort(uint8_t port)
+{
+    return (port == 2u) ? rs485GetDir2() : rs485GetDir1();
+}
+
+static bool isCanToRsGrowattRoute(const bridge_runtime_settings_t *settings)
+{
+    if (settings == NULL) {
+        return false;
+    }
+
+    return (settings->bms_line == LINE_CAN) &&
+           (settings->inverter_line == LINE_RS485) &&
+           (settings->bms_protocol == PROTOCOL_CAN_GROWATT) &&
+           (settings->inverter_protocol == PROTOCOL_RS485_GROWATT);
+}
+
 static void orchestratorTask(void *pv)
 {
     orchestratorCtx_t *ctx = (orchestratorCtx_t *)pv;
@@ -140,7 +195,7 @@ static void orchestratorReset(orchestratorCtx_t *ctx)
 
 esp_err_t orchestratorStart(protocol_id_t bmsProtocol, protocol_id_t inverterProtocol)
 {
-    if (g_orchestratorTaskHandle != NULL) {
+    if (g_orchestratorTaskHandle != NULL || g_orchestratorCtx.canRs485TranslatorActive) {
         ESP_LOGW(EXAMPLE_TAG, "Orchestrator already running");
         return ESP_ERR_INVALID_STATE;
     }
@@ -200,12 +255,64 @@ esp_err_t orchestratorStart(protocol_id_t bmsProtocol, protocol_id_t inverterPro
     return ESP_OK;
 }
 
+esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings)
+{
+    if (settings == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const bool canToRsGrowatt = isCanToRsGrowattRoute(settings);
+    ESP_LOGI(EXAMPLE_TAG,
+             "Orchestrator runtime start: bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) canToRsGrowatt=%s",
+             (unsigned)settings->bms_line,
+             (unsigned)settings->bms_protocol,
+             (unsigned)settings->bms_port,
+             (unsigned)settings->inverter_line,
+             (unsigned)settings->inverter_protocol,
+             (unsigned)settings->inverter_port,
+             canToRsGrowatt ? "YES" : "NO");
+
+    if (canToRsGrowatt) {
+        if (g_orchestratorTaskHandle != NULL || g_orchestratorCtx.canRs485TranslatorActive) {
+            ESP_LOGW(EXAMPLE_TAG, "Orchestrator already running");
+            return ESP_ERR_INVALID_STATE;
+        }
+#if !CAN_RS485_SOC_TRANSLATOR_ENABLE
+        ESP_LOGW(EXAMPLE_TAG, "CAN->RS485 Growatt route requested, but translator is disabled");
+        return ESP_ERR_NOT_SUPPORTED;
+#else
+        canRs485GrowattBridgeEnable(rsUartByPort(settings->inverter_port),
+                                    rsDirByPort(settings->inverter_port),
+                                    rsNameByPort(settings->inverter_port),
+                                    canBusByPort(settings->bms_port),
+                                    canNameByPort(settings->bms_port));
+        g_orchestratorCtx.canRs485TranslatorActive = true;
+        g_orchestratorCtx.bmsProtocol = PROTOCOL_ID_GROWATT;
+        g_orchestratorCtx.inverterProtocol = PROTOCOL_ID_GROWATT;
+
+        ESP_LOGI(EXAMPLE_TAG,
+                 "Orchestrator started CAN->RS485 Growatt route: CAN(%s:%u) -> RS485(%s:%u)",
+                 canNameByPort(settings->bms_port),
+                 (unsigned)settings->bms_port,
+                 rsNameByPort(settings->inverter_port),
+                 (unsigned)settings->inverter_port);
+        return ESP_OK;
+#endif
+    }
+
+    return orchestratorStart(protocolIdFromUiProtocol(settings->bms_protocol),
+                             protocolIdFromUiProtocol(settings->inverter_protocol));
+}
+
 esp_err_t orchestratorStop(void)
 {
     if (g_orchestratorTaskHandle != NULL) {
         vTaskDelete(g_orchestratorTaskHandle);
         g_orchestratorTaskHandle = NULL;
     }
+
+    canRs485GrowattBridgeStop();
+    g_orchestratorCtx.canRs485TranslatorActive = false;
 
     (void)growattBmsTaskStop();
     (void)growattInverterTaskStop();
