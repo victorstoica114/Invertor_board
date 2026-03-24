@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "main.c"
         "Working_modes.c"
+        "Web_interface/web_interface.c"
         "config.c"
         "Drivers/can_driver.c"
         "Drivers/rs485_driver.c"
@@ -18,4 +19,8 @@ idf_component_register(
     REQUIRES
         driver
         esp_timer
+        esp_http_server
+        esp_wifi
+        esp_event
+        esp_netif
 )

@@ -26,6 +26,21 @@ typedef struct {
 
 static growattBmsTaskCtx_t g_growattBmsCtx;
 static TaskHandle_t g_growattBmsTaskHandle;
+static portMUX_TYPE g_latestPacketMux = portMUX_INITIALIZER_UNLOCKED;
+static bool g_haveLatestPacket;
+static bms_decoded_packet_t g_latestPacket;
+
+static void growattStoreLatestPacket(const bms_decoded_packet_t *packet)
+{
+    if (packet == NULL) {
+        return;
+    }
+
+    portENTER_CRITICAL(&g_latestPacketMux);
+    g_latestPacket = *packet;
+    g_haveLatestPacket = true;
+    portEXIT_CRITICAL(&g_latestPacketMux);
+}
 
 static uint16_t modbusCrc16(const uint8_t *data, int len)
 {
@@ -178,6 +193,7 @@ static void growattBmsTask(void *pv)
         if ((nowUs - ctx->lastPublishUs) >= ((int64_t)GROWATT_BMS_PUBLISH_PERIOD_MS * 1000LL)) {
             bms_decoded_packet_t packet = {0};
             if (buildDecodedPacket(&ctx->decoder, ++ctx->sequence, &packet)) {
+                growattStoreLatestPacket(&packet);
                 if (xQueueOverwrite(ctx->outQueue, &packet) != pdPASS) {
                     ESP_LOGW(EXAMPLE_TAG, "Growatt BMS output queue overwrite failed");
                 }
@@ -216,4 +232,22 @@ esp_err_t growattBmsTaskStart(QueueHandle_t outQueue)
              GROWATT_BMS_QUERY_PERIOD_MS,
              GROWATT_BMS_PUBLISH_PERIOD_MS);
     return ESP_OK;
+}
+
+bool growattBmsTaskGetLatestPacket(bms_decoded_packet_t *outPacket)
+{
+    bool hasPacket = false;
+
+    if (outPacket == NULL) {
+        return false;
+    }
+
+    portENTER_CRITICAL(&g_latestPacketMux);
+    hasPacket = g_haveLatestPacket;
+    if (hasPacket) {
+        *outPacket = g_latestPacket;
+    }
+    portEXIT_CRITICAL(&g_latestPacketMux);
+
+    return hasPacket;
 }

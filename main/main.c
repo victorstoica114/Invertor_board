@@ -6,6 +6,7 @@
 #include "Working_modes.h"
 #include "Drivers/can_driver.h"
 #include "Drivers/rs485_driver.h"
+#include "Web_interface/web_interface.h"
 #include "config.h"
 
 void app_main(void)
@@ -27,6 +28,8 @@ void app_main(void)
     } else {
         ESP_LOGI(EXAMPLE_TAG, "Working mode started: %s", workingModeToStr(mode));
     }
+
+    webInterfaceStartTask();
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(10000));

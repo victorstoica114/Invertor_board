@@ -104,6 +104,16 @@
 #define WORKING_MODE_SNAPSHOT_TASK_STACK 4096
 #define WORKING_MODE_SNAPSHOT_TASK_PRIORITY 7
 
+/* --- Web interface --- */
+#define WEB_INTERFACE_ENABLE            1
+#define WEB_INTERFACE_PORT              80
+#define WEB_INTERFACE_TASK_STACK        8192
+#define WEB_INTERFACE_TASK_PRIO         5
+#define WIFI_STA_SSID                   "YOUR_WIFI_SSID"
+#define WIFI_STA_PASSWORD               "YOUR_WIFI_PASSWORD"
+#define WIFI_STA_MAX_RETRY              10
+#define WIFI_STA_HOSTNAME               "esp32-bridge"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
