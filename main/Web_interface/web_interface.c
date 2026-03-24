@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "bridge.h"
+#include "Web_interface/web_bridge_api.h"
 #include "config.h"
 #include "runtime_settings.h"
 
