@@ -335,6 +335,49 @@ static bool sendGrowattResponse(canRs485GrowattCtx_t *ctx, uint8_t func, uint16_
     return written == respLen;
 }
 
+static void logDecodedRegisterSnapshot(const canRs485GrowattCtx_t *ctx,
+                                       uint16_t reqStart,
+                                       uint16_t reqCount,
+                                       bool sent)
+{
+    if (ctx == NULL) {
+        return;
+    }
+
+    const uint16_t soc = synthReg(ctx, GROWATT_MB_REG_SOC_PCT);
+    const uint16_t soh = synthReg(ctx, GROWATT_MB_REG_SOH_PCT);
+    const int16_t tempC = (int16_t)synthReg(ctx, GROWATT_MB_REG_TEMP_C);
+    const uint16_t packCv = synthReg(ctx, GROWATT_MB_REG_PACK_V_CV);
+    const uint16_t cycles = synthReg(ctx, GROWATT_MB_REG_CYCLE_COUNT_TENTATIVE);
+    const uint16_t remCap = synthReg(ctx, GROWATT_MB_REG_REMAIN_CAP_CAH);
+    const uint16_t fullCap = synthReg(ctx, GROWATT_MB_REG_FULL_CAP_CAH);
+    const uint16_t cMaxMv = synthReg(ctx, GROWATT_MB_REG_CELL_MAX_MV);
+    const uint16_t cMinMv = synthReg(ctx, GROWATT_MB_REG_CELL_MIN_MV);
+    const uint16_t cMaxIdx = synthReg(ctx, GROWATT_MB_REG_CELL_MAX_IDX);
+    const uint16_t cMinIdx = synthReg(ctx, GROWATT_MB_REG_CELL_MIN_IDX);
+
+    ESP_LOGI(EXAMPLE_TAG,
+             "CAN->RS485 req#%u on %s start=0x%04X count=%u sent=%s | "
+             "SOC=%u%% SOH=%u%% T=%dC Vpack=%.2fV Cycles=%u Rem/FCC=%.2f/%.2fAh "
+             "Cmax=%.3fV(#%u) Cmin=%.3fV(#%u)",
+             (unsigned)ctx->reqCount,
+             ctx->ifName,
+             (unsigned)reqStart,
+             (unsigned)reqCount,
+             sent ? "Y" : "N",
+             (unsigned)soc,
+             (unsigned)soh,
+             (int)tempC,
+             (double)packCv / 100.0,
+             (unsigned)cycles,
+             (double)remCap / 100.0,
+             (double)fullCap / 100.0,
+             (double)cMaxMv / 1000.0,
+             (unsigned)cMaxIdx,
+             (double)cMinMv / 1000.0,
+             (unsigned)cMinIdx);
+}
+
 static void canRs485GrowattTask(void *pv)
 {
     canRs485GrowattCtx_t *ctx = (canRs485GrowattCtx_t *)pv;
@@ -391,14 +434,7 @@ static void canRs485GrowattTask(void *pv)
                     ctx->rspCount++;
                 }
                 if (ctx->reqCount <= 3u || (ctx->reqCount % 25u) == 0u) {
-                    ESP_LOGI(EXAMPLE_TAG,
-                             "CAN->RS485 Growatt req#%u on %s start=0x%04X count=%u sent=%s SOC=%u",
-                             (unsigned)ctx->reqCount,
-                             ctx->ifName,
-                             (unsigned)start,
-                             (unsigned)count,
-                             sent ? "Y" : "N",
-                             (unsigned)(ctx->cache.hasSoc ? ctx->cache.socPct : ctx->fakeSocPct));
+                    logDecodedRegisterSnapshot(ctx, start, count, sent);
                 }
             }
 

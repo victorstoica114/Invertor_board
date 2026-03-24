@@ -52,6 +52,7 @@ typedef struct {
 static TaskHandle_t s_modeTaskHandles[8];
 static size_t s_modeTaskCount;
 static bool s_modeStarted;
+static working_mode_t s_runningMode = WORKING_MODE_BRIDGE;
 
 static canForwardCtx_t s_canForward12;
 static rs485ForwardCtx_t s_rsForward12;
@@ -86,6 +87,20 @@ static gpio_num_t rsDirByPort(uint8_t port)
     return (port == 2u) ? rs485GetDir2() : rs485GetDir1();
 }
 
+static working_mode_t runtimeModeToWorkingMode(uint8_t runtimeMode)
+{
+    switch (runtimeMode) {
+        case MODE_SNIFFER:
+            return WORKING_MODE_SNIFFER;
+        case MODE_FORWARD:
+            return WORKING_MODE_FORWARD;
+        case MODE_BRIDGE:
+            return WORKING_MODE_BRIDGE;
+        default:
+            return s_runningMode;
+    }
+}
+
 static protocol_id_t protocolIdFromUiProtocol(uint8_t protocol)
 {
     switch (protocol) {
@@ -98,6 +113,49 @@ static protocol_id_t protocolIdFromUiProtocol(uint8_t protocol)
         default:
             return PROTOCOL_ID_GROWATT;
     }
+}
+
+static esp_err_t applyBridgeRuntimeSettings(void)
+{
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+
+    const bool canToRsGrowatt =
+        (settings.bms_line == LINE_CAN) &&
+        (settings.inverter_line == LINE_RS485) &&
+        (settings.bms_protocol == PROTOCOL_CAN_GROWATT) &&
+        (settings.inverter_protocol == PROTOCOL_RS485_GROWATT);
+
+    if (canToRsGrowatt) {
+        canRs485GrowattBridgeStop();
+        canRs485GrowattBridgeEnable(rsUartByPort(settings.inverter_port),
+                                    rsDirByPort(settings.inverter_port),
+                                    rsNameByPort(settings.inverter_port),
+                                    canBusByPort(settings.bms_port),
+                                    canNameByPort(settings.bms_port));
+        ESP_LOGI(EXAMPLE_TAG,
+                 "Bridge runtime applied: CAN(%s:%u) -> RS485(%s:%u) Growatt translator",
+                 canNameByPort(settings.bms_port),
+                 (unsigned)settings.bms_port,
+                 rsNameByPort(settings.inverter_port),
+                 (unsigned)settings.inverter_port);
+        return ESP_OK;
+    }
+
+    canRs485GrowattBridgeStop();
+
+    esp_err_t err = orchestratorStart(protocolIdFromUiProtocol(settings.bms_protocol),
+                                      protocolIdFromUiProtocol(settings.inverter_protocol));
+    if (err == ESP_ERR_INVALID_STATE) {
+        ESP_LOGI(EXAMPLE_TAG,
+                 "Bridge runtime updated: orchestrator already active, keeping running tasks");
+        return ESP_OK;
+    }
+    if (err != ESP_OK) {
+        ESP_LOGW(EXAMPLE_TAG,
+                 "Bridge runtime apply failed to start orchestrator (err=0x%x)",
+                 (unsigned)err);
+    }
+    return err;
 }
 
 static void pushTaskHandle(TaskHandle_t handle)
@@ -341,31 +399,7 @@ static void rs485SnapshotTask(void *pv)
 
 static esp_err_t startBridgeMode(void)
 {
-    bridge_runtime_settings_t settings = runtimeSettingsGet();
-
-    const bool canToRsGrowatt =
-        (settings.bms_line == LINE_CAN) &&
-        (settings.inverter_line == LINE_RS485) &&
-        (settings.bms_protocol == PROTOCOL_CAN_GROWATT) &&
-        (settings.inverter_protocol == PROTOCOL_RS485_GROWATT);
-
-    if (canToRsGrowatt) {
-        canRs485GrowattBridgeEnable(rsUartByPort(settings.inverter_port),
-                                    rsDirByPort(settings.inverter_port),
-                                    rsNameByPort(settings.inverter_port),
-                                    canBusByPort(settings.bms_port),
-                                    canNameByPort(settings.bms_port));
-        ESP_LOGI(EXAMPLE_TAG,
-                 "Working mode BRIDGE active: CAN(%s:%u) -> RS485(%s:%u) Growatt translator",
-                 canNameByPort(settings.bms_port),
-                 (unsigned)settings.bms_port,
-                 rsNameByPort(settings.inverter_port),
-                 (unsigned)settings.inverter_port);
-        return ESP_OK;
-    }
-
-    return orchestratorStart(protocolIdFromUiProtocol(settings.bms_protocol),
-                             protocolIdFromUiProtocol(settings.inverter_protocol));
+    return applyBridgeRuntimeSettings();
 }
 
 static esp_err_t startForwardMode(void)
@@ -589,6 +623,37 @@ esp_err_t workingModesStart(working_mode_t mode)
 
     if (err == ESP_OK) {
         s_modeStarted = true;
+        s_runningMode = mode;
     }
     return err;
+}
+
+esp_err_t workingModesApplyRuntimeSettings(void)
+{
+    if (!s_modeStarted) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+    const working_mode_t targetMode = runtimeModeToWorkingMode(settings.mode);
+
+    if (targetMode != s_runningMode) {
+        ESP_LOGW(EXAMPLE_TAG,
+                 "Runtime mode change requested (%s -> %s), hot switch not available in current build",
+                 workingModeToStr(s_runningMode),
+                 workingModeToStr(targetMode));
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
+    switch (s_runningMode) {
+        case WORKING_MODE_BRIDGE:
+            return applyBridgeRuntimeSettings();
+        case WORKING_MODE_FORWARD:
+        case WORKING_MODE_SNIFFER:
+            ESP_LOGI(EXAMPLE_TAG, "Runtime settings applied for %s (no task restart needed)",
+                     workingModeToStr(s_runningMode));
+            return ESP_OK;
+        default:
+            return ESP_ERR_INVALID_STATE;
+    }
 }

@@ -12,7 +12,6 @@
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_netif.h"
-#include "esp_system.h"
 #include "esp_wifi.h"
 #include "nvs_flash.h"
 
@@ -30,6 +29,10 @@ static httpd_handle_t s_httpd = NULL;
 static esp_netif_t *s_wifiStaNetif = NULL;
 static TaskHandle_t s_settingsApplyTask = NULL;
 static char s_logsResponse[2048];
+
+typedef struct {
+    bool restartWeb;
+} settingsApplyCtx_t;
 
 static void startHttpServer(void);
 
@@ -176,16 +179,30 @@ static void wifiApplyRuntimeSettings(void)
     esp_wifi_connect();
 }
 
+static void stopHttpServer(void)
+{
+    if (s_httpd != NULL) {
+        httpd_stop(s_httpd);
+        s_httpd = NULL;
+    }
+}
+
 static void settingsApplyTask(void *pv)
 {
-    (void)pv;
+    settingsApplyCtx_t ctx = *(settingsApplyCtx_t *)pv;
 
     vTaskDelay(pdMS_TO_TICKS(300));
     bridgeReloadFromRuntimeSettings();
     wifiApplyRuntimeSettings();
-    ESP_LOGI(WEB_TAG, "Runtime settings saved, restarting device to apply mode/protocol changes");
-    vTaskDelay(pdMS_TO_TICKS(200));
-    esp_restart();
+
+    if (ctx.restartWeb) {
+        stopHttpServer();
+        startHttpServer();
+    }
+
+    ESP_LOGI(WEB_TAG, "Runtime settings saved and applied without restart");
+    s_settingsApplyTask = NULL;
+    vTaskDelete(NULL);
 }
 
 static void wifiEventHandler(void *arg,
@@ -547,8 +564,9 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
     char buf[256];
     int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
     bridge_runtime_settings_t settings = runtimeSettingsGet();
+    bridge_runtime_settings_t oldSettings = settings;
     int v = 0;
-    const char *okResp = "{\"ok\":true,\"message\":\"Saved. Restarting...\"}";
+    const char *okResp = "{\"ok\":true,\"message\":\"Saved and applied\"}";
     const char *errResp = "{\"ok\":false,\"message\":\"Invalid settings\"}";
 
     if (received <= 0) {
@@ -587,13 +605,15 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
         s_settingsApplyTask = NULL;
     }
 
-    xTaskCreate(
-        settingsApplyTask,
-        "settings_apply",
-        4096,
-        NULL,
-        5,
-        &s_settingsApplyTask);
+    static settingsApplyCtx_t applyCtx;
+    applyCtx.restartWeb = (settings.web_port != oldSettings.web_port);
+
+    xTaskCreate(settingsApplyTask,
+                "settings_apply",
+                4096,
+                &applyCtx,
+                5,
+                &s_settingsApplyTask);
 
     return ESP_OK;
 }

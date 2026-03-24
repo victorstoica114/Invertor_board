@@ -14,6 +14,7 @@ typedef enum {
 
 const char *workingModeToStr(working_mode_t mode);
 esp_err_t workingModesStart(working_mode_t mode);
+esp_err_t workingModesApplyRuntimeSettings(void);
 
 #ifdef __cplusplus
 }

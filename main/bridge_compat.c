@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "Working_modes.h"
 #include "config.h"
 #include "orchestrator/protocol_types.h"
 #include "protocols/growatt/growatt_bms_task.h"
@@ -134,11 +135,13 @@ void canBridgeEnable(void)
 void bridgeReloadFromRuntimeSettings(void)
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
+    esp_err_t err = workingModesApplyRuntimeSettings();
     ESP_LOGW(BRIDGE_TAG,
-             "Runtime settings updated (mode=%s, bms=%s, inverter=%s).",
+             "Runtime settings updated (mode=%s, bms=%s, inverter=%s, apply=0x%x).",
              modeToStr(settings.mode),
              protocolToStr(settings.bms_protocol),
-             protocolToStr(settings.inverter_protocol));
+             protocolToStr(settings.inverter_protocol),
+             (unsigned)err);
 }
 
 void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
