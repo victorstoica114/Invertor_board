@@ -407,10 +407,8 @@ static void canRs485GrowattTask(void *pv)
 {
     canRs485GrowattCtx_t *ctx = (canRs485GrowattCtx_t *)pv;
     uint8_t rxChunk[64];
-    uint8_t frameBuf[256];
-    uint16_t frameLen = 0u;
-    bool frameHaveLastByte = false;
-    int64_t frameLastByteUs = 0;
+    uint8_t streamBuf[256];
+    uint16_t streamLen = 0u;
 
     while (1) {
         twai_message_t canMsg = {0};
@@ -425,46 +423,57 @@ static void canRs485GrowattTask(void *pv)
         }
 
         int len = uart_read_bytes(ctx->uart, rxChunk, sizeof(rxChunk), pdMS_TO_TICKS(2));
-        int64_t nowUs = esp_timer_get_time();
+        if (len <= 0) {
+            continue;
+        }
 
-        if (len > 0) {
-            if (frameHaveLastByte &&
-                ((nowUs - frameLastByteUs) > (int64_t)CAN_RS485_SOC_RX_GAP_US)) {
-                frameLen = 0u;
-                frameHaveLastByte = false;
-            }
-
-            if ((size_t)frameLen + (size_t)len > sizeof(frameBuf)) {
-                frameLen = 0u;
-                frameHaveLastByte = false;
-            } else {
-                memcpy(&frameBuf[frameLen], rxChunk, (size_t)len);
-                frameLen = (uint16_t)(frameLen + len);
-                frameLastByteUs = nowUs;
-                frameHaveLastByte = true;
+        if ((size_t)streamLen + (size_t)len > sizeof(streamBuf)) {
+            if (streamLen > 7u) {
+                const uint16_t keep = 7u;
+                memmove(streamBuf, &streamBuf[streamLen - keep], keep);
+                streamLen = keep;
             }
         }
 
-        if (frameHaveLastByte &&
-            ((nowUs - frameLastByteUs) > (int64_t)CAN_RS485_SOC_RX_GAP_US)) {
-            uint8_t func = 0u;
-            uint16_t start = 0u;
-            uint16_t count = 0u;
-            bool sent = false;
+        if ((size_t)streamLen + (size_t)len <= sizeof(streamBuf)) {
+            memcpy(&streamBuf[streamLen], rxChunk, (size_t)len);
+            streamLen = (uint16_t)(streamLen + len);
+        }
 
-            if (parseReadReq(frameBuf, frameLen, ctx->slaveId, &func, &start, &count)) {
-                ctx->reqCount++;
-                sent = sendGrowattResponse(ctx, func, start, count);
-                if (sent) {
-                    ctx->rspCount++;
-                }
-                if (ctx->reqCount <= 3u || (ctx->reqCount % 25u) == 0u) {
-                    logDecodedRegisterSnapshot(ctx, start, count, sent);
+        while (streamLen >= 8u) {
+            bool found = false;
+            for (uint16_t off = 0; off + 8u <= streamLen; off++) {
+                uint8_t func = 0u;
+                uint16_t start = 0u;
+                uint16_t count = 0u;
+                if (parseReadReq(&streamBuf[off], 8, ctx->slaveId, &func, &start, &count)) {
+                    ctx->reqCount++;
+                    bool sent = sendGrowattResponse(ctx, func, start, count);
+                    if (sent) {
+                        ctx->rspCount++;
+                    }
+                    if (ctx->reqCount <= 3u || (ctx->reqCount % 25u) == 0u) {
+                        logDecodedRegisterSnapshot(ctx, start, count, sent);
+                    }
+
+                    const uint16_t consume = (uint16_t)(off + 8u);
+                    if (consume < streamLen) {
+                        memmove(streamBuf, &streamBuf[consume], streamLen - consume);
+                    }
+                    streamLen = (uint16_t)(streamLen - consume);
+                    found = true;
+                    break;
                 }
             }
 
-            frameLen = 0u;
-            frameHaveLastByte = false;
+            if (!found) {
+                if (streamLen > 7u) {
+                    const uint16_t drop = (uint16_t)(streamLen - 7u);
+                    memmove(streamBuf, &streamBuf[drop], 7u);
+                    streamLen = 7u;
+                }
+                break;
+            }
         }
     }
 }
