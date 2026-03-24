@@ -17,6 +17,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/queue.h"
 #include "freertos/task.h"
 
 #define WEB_TAG "WEB_INTERFACE"
@@ -28,11 +29,12 @@ static int s_wifiRetryCount = 0;
 static httpd_handle_t s_httpd = NULL;
 static esp_netif_t *s_wifiStaNetif = NULL;
 static TaskHandle_t s_settingsApplyTask = NULL;
+static QueueHandle_t s_settingsApplyQueue = NULL;
 static char s_logsResponse[2048];
 
 typedef struct {
     bool restartWeb;
-} settingsApplyCtx_t;
+} settingsApplyReq_t;
 
 static void startHttpServer(void);
 
@@ -187,22 +189,33 @@ static void stopHttpServer(void)
     }
 }
 
-static void settingsApplyTask(void *pv)
+static void applyRuntimeSettings(bool restartWeb)
 {
-    settingsApplyCtx_t ctx = *(settingsApplyCtx_t *)pv;
-
-    vTaskDelay(pdMS_TO_TICKS(300));
     bridgeReloadFromRuntimeSettings();
     wifiApplyRuntimeSettings();
 
-    if (ctx.restartWeb) {
+    if (restartWeb) {
         stopHttpServer();
         startHttpServer();
     }
+}
 
-    ESP_LOGI(WEB_TAG, "Runtime settings saved and applied without restart");
-    s_settingsApplyTask = NULL;
-    vTaskDelete(NULL);
+static void settingsApplyTask(void *pv)
+{
+    (void)pv;
+
+    while (1) {
+        settingsApplyReq_t req = {0};
+        if (xQueueReceive(s_settingsApplyQueue, &req, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(80));
+        applyRuntimeSettings(req.restartWeb);
+        ESP_LOGI(WEB_TAG,
+                 "Runtime settings saved and applied (restartWeb=%s)",
+                 req.restartWeb ? "YES" : "NO");
+    }
 }
 
 static void wifiEventHandler(void *arg,
@@ -611,26 +624,29 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
              (unsigned)settings.inverter_port,
              (unsigned)settings.web_port);
 
-    if (s_settingsApplyTask != NULL) {
-        vTaskDelete(s_settingsApplyTask);
-        s_settingsApplyTask = NULL;
+    settingsApplyReq_t applyReq = {
+        .restartWeb = (settings.web_port != oldSettings.web_port),
+    };
+
+    if (s_settingsApplyQueue != NULL) {
+        if (xQueueOverwrite(s_settingsApplyQueue, &applyReq) != pdPASS) {
+            ESP_LOGW(WEB_TAG, "settings_apply queue overwrite failed, applying inline");
+            applyRuntimeSettings(applyReq.restartWeb);
+        }
+    } else {
+        ESP_LOGW(WEB_TAG, "settings_apply queue not ready, applying inline");
+        applyRuntimeSettings(applyReq.restartWeb);
     }
 
-    static settingsApplyCtx_t applyCtx;
-    applyCtx.restartWeb = (settings.web_port != oldSettings.web_port);
-
-    if (xTaskCreate(settingsApplyTask,
-                    "settings_apply",
-                    4096,
-                    &applyCtx,
-                    5,
-                    &s_settingsApplyTask) != pdPASS) {
-        ESP_LOGW(WEB_TAG, "settings_apply task create failed, applying inline");
-        bridgeReloadFromRuntimeSettings();
-        wifiApplyRuntimeSettings();
-        if (applyCtx.restartWeb) {
-            stopHttpServer();
-            startHttpServer();
+    if (s_settingsApplyTask == NULL) {
+        if (xTaskCreate(settingsApplyTask,
+                        "settings_apply",
+                        4096,
+                        NULL,
+                        5,
+                        &s_settingsApplyTask) != pdPASS) {
+            ESP_LOGW(WEB_TAG, "settings_apply task create failed, applying inline");
+            applyRuntimeSettings(applyReq.restartWeb);
         }
     }
 
@@ -725,6 +741,18 @@ static void webInterfaceTask(void *pv)
 
     configureWebLogLevels();
     s_wifiEventGroup = xEventGroupCreate();
+    s_settingsApplyQueue = xQueueCreate(1, sizeof(settingsApplyReq_t));
+    if (s_settingsApplyQueue == NULL) {
+        ESP_LOGW(WEB_TAG, "settings_apply queue create failed");
+    } else if (xTaskCreate(settingsApplyTask,
+                           "settings_apply",
+                           4096,
+                           NULL,
+                           5,
+                           &s_settingsApplyTask) != pdPASS) {
+        ESP_LOGW(WEB_TAG, "settings_apply task create failed");
+        s_settingsApplyTask = NULL;
+    }
     initWifiSta();
     startHttpServer();
 
