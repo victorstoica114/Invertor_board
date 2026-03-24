@@ -56,6 +56,30 @@
 #define ACTIVE_BMS_PROTOCOL      0 /* 0=Growatt, 1=Pylon */
 #define ACTIVE_INVERTER_PROTOCOL 0 /* 0=Growatt, 1=Pylon */
 
+/* --- Runtime/web compatibility IDs --- */
+#define MODE_SNIFFER 1
+#define MODE_FORWARD 2
+#define MODE_BRIDGE 3
+
+#define SYSTEM_MODE (((ACTIVE_WORKING_MODE) == 2) ? MODE_SNIFFER : \
+                     (((ACTIVE_WORKING_MODE) == 1) ? MODE_FORWARD : MODE_BRIDGE))
+
+#define LINE_CAN 1
+#define LINE_RS485 2
+
+#define PROTOCOL_CAN_GROWATT 1
+#define PROTOCOL_RS485_GROWATT 2
+#define PROTOCOL_RS485_PYLON 3
+#define PROTOCOL_CAN_PYLON 4
+#define PROTOCOL_CAN_DEYE 5
+
+#define BMS_line LINE_RS485
+#define Inverter_line LINE_CAN
+#define BMS_protocol PROTOCOL_RS485_GROWATT
+#define Inverter_protocol PROTOCOL_CAN_GROWATT
+#define BMS_PORT 1
+#define Inverter_PORT 2
+
 /* --- Orchestrator runtime --- */
 #define ORCHESTRATOR_TASK_STACK        4096
 #define ORCHESTRATOR_TASK_PRIORITY     11

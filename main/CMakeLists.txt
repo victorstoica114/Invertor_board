@@ -2,6 +2,8 @@ idf_component_register(
     SRCS
         "main.c"
         "Working_modes.c"
+        "bridge_compat.c"
+        "runtime_settings.c"
         "Web_interface/web_interface.c"
         "config.c"
         "Drivers/can_driver.c"
