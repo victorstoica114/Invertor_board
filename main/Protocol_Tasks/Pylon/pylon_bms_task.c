@@ -1,0 +1,1 @@
+Pylon BMS protocol task implementation including initialization, data processing and register publishing functions
