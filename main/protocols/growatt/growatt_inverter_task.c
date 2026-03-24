@@ -3,6 +3,7 @@
 #include <limits.h>
 #include <string.h>
 
+#include "Drivers/can_driver.h"
 #include "config.h"
 #include "orchestrator/protocol_types.h"
 #include "protocols/growatt/growatt_register_map.h"

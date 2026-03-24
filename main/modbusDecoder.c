@@ -1,6 +1,6 @@
 #include "modbusDecoder.h"
 #include "config.h"
-#include "Growatt_regs.h"
+#include "protocols/growatt/growatt_register_map.h"
 
 #include <inttypes.h>
 #include <stdbool.h>

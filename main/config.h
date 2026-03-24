@@ -4,15 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#include "Growatt_regs.h"
-#include "orchestrator/protocol_types.h"
-
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-
-#include "driver/twai.h"
-#include "driver/uart.h"
-#include "driver/gpio.h"
+#include "protocols/growatt/growatt_register_map.h"
 
 /* Common log tag */
 #define EXAMPLE_TAG "SNIFFER_BRIDGE"
@@ -57,9 +49,12 @@
 #define RS485_CAN_322_TRANSLATOR_ENABLE 1
 #define RS485_CAN_322_TX_PERIOD_MS 200
 
+/* --- Global working mode --- */
+#define ACTIVE_WORKING_MODE 0 /* 0=bridge, 1=forward, 2=sniffer */
+
 /* --- Active protocol selection --- */
-#define ACTIVE_BMS_PROTOCOL      PROTOCOL_ID_GROWATT
-#define ACTIVE_INVERTER_PROTOCOL PROTOCOL_ID_GROWATT
+#define ACTIVE_BMS_PROTOCOL      0 /* 0=Growatt, 1=Pylon */
+#define ACTIVE_INVERTER_PROTOCOL 0 /* 0=Growatt, 1=Pylon */
 
 /* --- Orchestrator runtime --- */
 #define ORCHESTRATOR_TASK_STACK        4096
@@ -87,23 +82,31 @@
 #define PYLON_INVERTER_TASK_PRIORITY   8
 #define PYLON_PLACEHOLDER_TASK_PERIOD_MS 1000
 
+/* --- Working mode task settings --- */
+#define FORWARD_CAN_DECODE_ENABLE      1
+#define FORWARD_RS485_DECODE_ENABLE    1
+#define FORWARD_CAN_TASK_STACK         4096
+#define FORWARD_CAN_TASK_PRIORITY      10
+#define FORWARD_RS485_TASK_STACK       4096
+#define FORWARD_RS485_TASK_PRIORITY    9
+#define FORWARD_RS485_GAP_US           5000
+
+#define SNIFFER_CAN_DECODE_ENABLE      1
+#define SNIFFER_RS485_DECODE_ENABLE    1
+#define SNIFFER_CAN_TASK_STACK         4096
+#define SNIFFER_CAN_TASK_PRIORITY      9
+#define SNIFFER_RS485_TASK_STACK       4096
+#define SNIFFER_RS485_TASK_PRIORITY    9
+#define SNIFFER_RS485_GAP_US           5000
+
+#define WORKING_MODE_HEX_PRINT_LIMIT   64
+#define WORKING_MODE_SNAPSHOT_PERIOD_MS 5000
+#define WORKING_MODE_SNAPSHOT_TASK_STACK 4096
+#define WORKING_MODE_SNAPSHOT_TASK_PRIORITY 7
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/* Init/config */
-void rs485Init(void);
-void canInit(void);
-
-/* Resource accessors */
-twai_handle_t canGetBus0(void);   /* CAN1 */
-twai_handle_t canGetBus1(void);   /* CAN2 */
-
-uart_port_t rs485GetUart1(void);  /* RS485_1_UART */
-uart_port_t rs485GetUart2(void);  /* RS485_2_UART */
-
-gpio_num_t rs485GetDir1(void);    /* RS485_1_DIR */
-gpio_num_t rs485GetDir2(void);    /* RS485_2_DIR */
 
 /* Bridge filtering lists (configuration) */
 extern const uint32_t g_can1ToCan2ExcludeIds[];

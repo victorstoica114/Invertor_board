@@ -1,7 +1,7 @@
 #include "rs485_can_bridge.h"
 
 #include "config.h"
-#include "Growatt_regs.h"
+#include "protocols/growatt/growatt_register_map.h"
 
 #include <stdbool.h>
 #include <stdint.h>

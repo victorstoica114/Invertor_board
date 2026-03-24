@@ -4,11 +4,11 @@
 #include <string.h>
 
 #include "config.h"
+#include "Drivers/rs485_driver.h"
 #include "modbusDecoder.h"
 #include "orchestrator/protocol_types.h"
 #include "protocols/growatt/growatt_register_map.h"
 
-#include "driver/gpio.h"
 #include "driver/uart.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -26,11 +26,6 @@ typedef struct {
 
 static growattBmsTaskCtx_t g_growattBmsCtx;
 static TaskHandle_t g_growattBmsTaskHandle;
-
-static void rs485SetTx(bool txEnabled)
-{
-    gpio_set_level(rs485GetDir1(), txEnabled ? 1 : 0);
-}
 
 static uint16_t modbusCrc16(const uint8_t *data, int len)
 {
@@ -87,11 +82,14 @@ static void sendPollRequest(const growatt_modbus_poll_block_t *block)
         return;
     }
 
-    const uart_port_t uart = rs485GetUart1();
-    rs485SetTx(true);
-    uart_write_bytes(uart, (const char *)req, reqLen);
-    uart_wait_tx_done(uart, pdMS_TO_TICKS(30));
-    rs485SetTx(false);
+    esp_err_t err = rs485WriteBytes(rs485GetUart1(),
+                                    rs485GetDir1(),
+                                    req,
+                                    reqLen,
+                                    pdMS_TO_TICKS(30));
+    if (err != ESP_OK) {
+        ESP_LOGW(EXAMPLE_TAG, "Growatt BMS Modbus request TX failed (err=0x%x)", (unsigned)err);
+    }
 }
 
 static uint8_t clampU8(uint16_t v, uint8_t vmax)

@@ -1,7 +1,11 @@
 idf_component_register(
     SRCS
         "main.c"
+        "Working_modes.c"
         "config.c"
+        "Drivers/can_driver.c"
+        "Drivers/rs485_driver.c"
+        "CAN_Decoder.c"
         "modbusDecoder.c"
         "orchestrator/orchestrator.c"
         "protocols/growatt/growatt_register_map.c"
