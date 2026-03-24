@@ -57,6 +57,31 @@ typedef struct {
 static canRs485GrowattCtx_t g_canRsGrowattCtx;
 static TaskHandle_t g_canRsGrowattTaskHandle;
 
+static int drainUartRx(uart_port_t uart, int maxBytes)
+{
+    uint8_t tmp[64];
+    int drained = 0;
+
+    if (maxBytes <= 0) {
+        return 0;
+    }
+
+    while (drained < maxBytes) {
+        int toRead = (int)sizeof(tmp);
+        if ((maxBytes - drained) < toRead) {
+            toRead = maxBytes - drained;
+        }
+
+        int got = uart_read_bytes(uart, tmp, (uint32_t)toRead, 0);
+        if (got <= 0) {
+            break;
+        }
+        drained += got;
+    }
+
+    return drained;
+}
+
 static inline void putBe16(uint8_t *p, uint16_t v)
 {
     p[0] = (uint8_t)((v >> 8) & 0xFFu);
@@ -578,12 +603,12 @@ esp_err_t canRs485GrowattBridgeEnable(uart_port_t inverterUart,
 
     rs485SetDirection(g_canRsGrowattCtx.dirPin, false);
 
-    /* UART0 is also used by the serial monitor/console, so avoid flush deadlocks there. */
-    if (g_canRsGrowattCtx.uart != UART_NUM_0) {
-        (void)uart_flush_input(g_canRsGrowattCtx.uart);
-    } else {
-        ESP_LOGW(EXAMPLE_TAG,
-                 "CAN->RS485 translator on UART0: skip uart_flush_input to avoid console lock");
+    const int drained = drainUartRx(g_canRsGrowattCtx.uart, 4096);
+    if (drained > 0) {
+        ESP_LOGI(EXAMPLE_TAG,
+                 "CAN->RS485 translator drained %d stale RX bytes on %s before start",
+                 drained,
+                 g_canRsGrowattCtx.ifName);
     }
 
     BaseType_t taskOk = xTaskCreate(canRs485GrowattTask,
