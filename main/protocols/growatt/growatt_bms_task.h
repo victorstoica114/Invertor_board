@@ -10,6 +10,7 @@ extern "C" {
 #endif
 
 esp_err_t growattBmsTaskStart(QueueHandle_t outQueue);
+esp_err_t growattBmsTaskStop(void);
 bool growattBmsTaskGetLatestPacket(bms_decoded_packet_t *outPacket);
 
 #ifdef __cplusplus

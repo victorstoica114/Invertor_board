@@ -600,6 +600,17 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, okResp, HTTPD_RESP_USE_STRLEN);
 
+    ESP_LOGI(WEB_TAG,
+             "Settings POST accepted: mode=%u bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) web_port=%u",
+             (unsigned)settings.mode,
+             (unsigned)settings.bms_line,
+             (unsigned)settings.bms_protocol,
+             (unsigned)settings.bms_port,
+             (unsigned)settings.inverter_line,
+             (unsigned)settings.inverter_protocol,
+             (unsigned)settings.inverter_port,
+             (unsigned)settings.web_port);
+
     if (s_settingsApplyTask != NULL) {
         vTaskDelete(s_settingsApplyTask);
         s_settingsApplyTask = NULL;
@@ -608,12 +619,20 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
     static settingsApplyCtx_t applyCtx;
     applyCtx.restartWeb = (settings.web_port != oldSettings.web_port);
 
-    xTaskCreate(settingsApplyTask,
-                "settings_apply",
-                4096,
-                &applyCtx,
-                5,
-                &s_settingsApplyTask);
+    if (xTaskCreate(settingsApplyTask,
+                    "settings_apply",
+                    4096,
+                    &applyCtx,
+                    5,
+                    &s_settingsApplyTask) != pdPASS) {
+        ESP_LOGW(WEB_TAG, "settings_apply task create failed, applying inline");
+        bridgeReloadFromRuntimeSettings();
+        wifiApplyRuntimeSettings();
+        if (applyCtx.restartWeb) {
+            stopHttpServer();
+            startHttpServer();
+        }
+    }
 
     return ESP_OK;
 }

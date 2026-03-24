@@ -60,3 +60,15 @@ esp_err_t pylonBmsTaskStart(QueueHandle_t outQueue)
     ESP_LOGI(EXAMPLE_TAG, "Pylon BMS task started (scaffold mode)");
     return ESP_OK;
 }
+
+esp_err_t pylonBmsTaskStop(void)
+{
+    if (g_pylonBmsTaskHandle == NULL) {
+        return ESP_OK;
+    }
+
+    vTaskDelete(g_pylonBmsTaskHandle);
+    g_pylonBmsTaskHandle = NULL;
+    memset(&g_pylonBmsCtx, 0, sizeof(g_pylonBmsCtx));
+    return ESP_OK;
+}

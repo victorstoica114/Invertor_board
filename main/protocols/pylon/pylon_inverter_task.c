@@ -62,3 +62,15 @@ esp_err_t pylonInverterTaskStart(QueueHandle_t inQueue)
     ESP_LOGI(EXAMPLE_TAG, "Pylon inverter task started (scaffold mode)");
     return ESP_OK;
 }
+
+esp_err_t pylonInverterTaskStop(void)
+{
+    if (g_pylonInverterTaskHandle == NULL) {
+        return ESP_OK;
+    }
+
+    vTaskDelete(g_pylonInverterTaskHandle);
+    g_pylonInverterTaskHandle = NULL;
+    memset(&g_pylonInverterCtx, 0, sizeof(g_pylonInverterCtx));
+    return ESP_OK;
+}

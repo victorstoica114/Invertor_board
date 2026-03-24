@@ -9,6 +9,7 @@ extern "C" {
 #endif
 
 esp_err_t orchestratorStart(protocol_id_t bmsProtocol, protocol_id_t inverterProtocol);
+esp_err_t orchestratorStop(void);
 
 #ifdef __cplusplus
 }

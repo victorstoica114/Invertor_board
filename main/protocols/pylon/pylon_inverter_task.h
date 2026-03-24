@@ -9,6 +9,7 @@ extern "C" {
 #endif
 
 esp_err_t pylonInverterTaskStart(QueueHandle_t inQueue);
+esp_err_t pylonInverterTaskStop(void);
 
 #ifdef __cplusplus
 }

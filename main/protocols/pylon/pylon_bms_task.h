@@ -9,6 +9,7 @@ extern "C" {
 #endif
 
 esp_err_t pylonBmsTaskStart(QueueHandle_t outQueue);
+esp_err_t pylonBmsTaskStop(void);
 
 #ifdef __cplusplus
 }

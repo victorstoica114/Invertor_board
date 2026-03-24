@@ -133,3 +133,15 @@ esp_err_t growattInverterTaskStart(QueueHandle_t inQueue)
              GROWATT_INVERTER_TX_PERIOD_MS);
     return ESP_OK;
 }
+
+esp_err_t growattInverterTaskStop(void)
+{
+    if (g_growattInverterTaskHandle == NULL) {
+        return ESP_OK;
+    }
+
+    vTaskDelete(g_growattInverterTaskHandle);
+    g_growattInverterTaskHandle = NULL;
+    memset(&g_growattInverterCtx, 0, sizeof(g_growattInverterCtx));
+    return ESP_OK;
+}

@@ -199,3 +199,21 @@ esp_err_t orchestratorStart(protocol_id_t bmsProtocol, protocol_id_t inverterPro
              protocolIdToStr(g_orchestratorCtx.inverterProtocol));
     return ESP_OK;
 }
+
+esp_err_t orchestratorStop(void)
+{
+    if (g_orchestratorTaskHandle != NULL) {
+        vTaskDelete(g_orchestratorTaskHandle);
+        g_orchestratorTaskHandle = NULL;
+    }
+
+    (void)growattBmsTaskStop();
+    (void)growattInverterTaskStop();
+    (void)pylonBmsTaskStop();
+    (void)pylonInverterTaskStop();
+
+    orchestratorReset(&g_orchestratorCtx);
+    memset(&g_orchestratorCtx, 0, sizeof(g_orchestratorCtx));
+
+    return ESP_OK;
+}

@@ -251,3 +251,21 @@ bool growattBmsTaskGetLatestPacket(bms_decoded_packet_t *outPacket)
 
     return hasPacket;
 }
+
+esp_err_t growattBmsTaskStop(void)
+{
+    if (g_growattBmsTaskHandle == NULL) {
+        return ESP_OK;
+    }
+
+    vTaskDelete(g_growattBmsTaskHandle);
+    g_growattBmsTaskHandle = NULL;
+    memset(&g_growattBmsCtx, 0, sizeof(g_growattBmsCtx));
+
+    portENTER_CRITICAL(&g_latestPacketMux);
+    g_haveLatestPacket = false;
+    memset(&g_latestPacket, 0, sizeof(g_latestPacket));
+    portEXIT_CRITICAL(&g_latestPacketMux);
+
+    return ESP_OK;
+}

@@ -125,8 +125,21 @@ static esp_err_t applyBridgeRuntimeSettings(void)
         (settings.bms_protocol == PROTOCOL_CAN_GROWATT) &&
         (settings.inverter_protocol == PROTOCOL_RS485_GROWATT);
 
+    ESP_LOGI(EXAMPLE_TAG,
+             "Applying bridge settings: mode=%u bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) canToRsGrowatt=%s",
+             (unsigned)settings.mode,
+             (unsigned)settings.bms_line,
+             (unsigned)settings.bms_protocol,
+             (unsigned)settings.bms_port,
+             (unsigned)settings.inverter_line,
+             (unsigned)settings.inverter_protocol,
+             (unsigned)settings.inverter_port,
+             canToRsGrowatt ? "YES" : "NO");
+
+    (void)orchestratorStop();
+    canRs485GrowattBridgeStop();
+
     if (canToRsGrowatt) {
-        canRs485GrowattBridgeStop();
         canRs485GrowattBridgeEnable(rsUartByPort(settings.inverter_port),
                                     rsDirByPort(settings.inverter_port),
                                     rsNameByPort(settings.inverter_port),
@@ -141,15 +154,8 @@ static esp_err_t applyBridgeRuntimeSettings(void)
         return ESP_OK;
     }
 
-    canRs485GrowattBridgeStop();
-
     esp_err_t err = orchestratorStart(protocolIdFromUiProtocol(settings.bms_protocol),
                                       protocolIdFromUiProtocol(settings.inverter_protocol));
-    if (err == ESP_ERR_INVALID_STATE) {
-        ESP_LOGI(EXAMPLE_TAG,
-                 "Bridge runtime updated: orchestrator already active, keeping running tasks");
-        return ESP_OK;
-    }
     if (err != ESP_OK) {
         ESP_LOGW(EXAMPLE_TAG,
                  "Bridge runtime apply failed to start orchestrator (err=0x%x)",

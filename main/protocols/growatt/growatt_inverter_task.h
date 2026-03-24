@@ -9,6 +9,7 @@ extern "C" {
 #endif
 
 esp_err_t growattInverterTaskStart(QueueHandle_t inQueue);
+esp_err_t growattInverterTaskStop(void);
 
 #ifdef __cplusplus
 }
