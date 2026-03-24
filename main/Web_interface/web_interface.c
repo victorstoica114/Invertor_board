@@ -190,27 +190,6 @@ static void stopHttpServer(void)
     }
 }
 
-static bool isSupportedBridgeRoute(const bridge_runtime_settings_t *s)
-{
-    if (s == NULL) {
-        return false;
-    }
-
-    const bool canToRsGrowatt =
-        (s->bms_line == LINE_CAN) &&
-        (s->inverter_line == LINE_RS485) &&
-        (s->bms_protocol == PROTOCOL_CAN_GROWATT) &&
-        (s->inverter_protocol == PROTOCOL_RS485_GROWATT);
-
-    const bool rsToCanGrowatt =
-        (s->bms_line == LINE_RS485) &&
-        (s->inverter_line == LINE_CAN) &&
-        (s->bms_protocol == PROTOCOL_RS485_GROWATT) &&
-        (s->inverter_protocol == PROTOCOL_CAN_GROWATT);
-
-    return canToRsGrowatt || rsToCanGrowatt;
-}
-
 static void applyRuntimeSettings(bool restartWeb, bool reconfigureWifi)
 {
     bridgeReloadFromRuntimeSettings();
@@ -606,8 +585,6 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
     int v = 0;
     const char *okResp = "{\"ok\":true,\"message\":\"Saved and applied\"}";
     const char *errResp = "{\"ok\":false,\"message\":\"Invalid settings\"}";
-    const char *unsupportedResp =
-        "{\"ok\":false,\"message\":\"Unsupported bridge route. Supported now: CAN_GROWATT->RS485_GROWATT and RS485_GROWATT->CAN_GROWATT\"}";
 
     if (received <= 0) {
         httpd_resp_set_status(req, "400 Bad Request");
@@ -628,21 +605,6 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
     (void)extractJsonString(buf, "wifi_ssid", settings.wifi_ssid, sizeof(settings.wifi_ssid));
     (void)extractJsonString(buf, "wifi_password", settings.wifi_password, sizeof(settings.wifi_password));
     if (extractJsonInt(buf, "web_port", &v)) settings.web_port = (uint16_t)v;
-
-    if (settings.mode == MODE_BRIDGE && !isSupportedBridgeRoute(&settings)) {
-        ESP_LOGW(WEB_TAG,
-                 "Rejected unsupported bridge route: bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u)",
-                 (unsigned)settings.bms_line,
-                 (unsigned)settings.bms_protocol,
-                 (unsigned)settings.bms_port,
-                 (unsigned)settings.inverter_line,
-                 (unsigned)settings.inverter_protocol,
-                 (unsigned)settings.inverter_port);
-        httpd_resp_set_status(req, "400 Bad Request");
-        setNoCacheHeaders(req);
-        httpd_resp_set_type(req, "application/json");
-        return httpd_resp_send(req, unsupportedResp, HTTPD_RESP_USE_STRLEN);
-    }
 
     if (!runtimeSettingsSave(&settings)) {
         httpd_resp_set_status(req, "400 Bad Request");
