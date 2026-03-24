@@ -13,6 +13,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
+#include "nvs_flash.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -217,8 +218,16 @@ static void initWifiSta(void)
 {
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     wifi_config_t wifiConfig = { 0 };
+    esp_err_t err;
     size_t ssidLen = strlen(WIFI_STA_SSID);
     size_t passLen = strlen(WIFI_STA_PASSWORD);
+
+    err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(err);
 
     if (ssidLen >= sizeof(wifiConfig.sta.ssid)) {
         ssidLen = sizeof(wifiConfig.sta.ssid) - 1u;

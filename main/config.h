@@ -109,8 +109,8 @@
 #define WEB_INTERFACE_PORT              80
 #define WEB_INTERFACE_TASK_STACK        8192
 #define WEB_INTERFACE_TASK_PRIO         5
-#define WIFI_STA_SSID                   "YOUR_WIFI_SSID"
-#define WIFI_STA_PASSWORD               "YOUR_WIFI_PASSWORD"
+#define WIFI_STA_SSID                   "ED423"
+#define WIFI_STA_PASSWORD               "electr0n!ca"
 #define WIFI_STA_MAX_RETRY              10
 #define WIFI_STA_HOSTNAME               "esp32-bridge"
 
