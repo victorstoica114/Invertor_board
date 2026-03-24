@@ -49,6 +49,12 @@
 #define RS485_CAN_322_TRANSLATOR_ENABLE 1
 #define RS485_CAN_322_TX_PERIOD_MS 200
 
+/* --- CAN -> RS485 Growatt translator (answers inverter Modbus polls from CAN cache) --- */
+#define CAN_RS485_SOC_TRANSLATOR_ENABLE 1
+#define CAN_RS485_SOC_SLAVE_ID 1u
+#define CAN_RS485_SOC_FAKE_PCT 99u
+#define CAN_RS485_SOC_RX_GAP_US 5000u
+
 /* --- Global working mode --- */
 #define ACTIVE_WORKING_MODE 0 /* 0=bridge, 1=forward, 2=sniffer */
 

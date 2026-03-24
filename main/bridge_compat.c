@@ -135,8 +135,7 @@ void bridgeReloadFromRuntimeSettings(void)
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
     ESP_LOGW(BRIDGE_TAG,
-             "Runtime settings updated (mode=%s, bms=%s, inverter=%s). "
-             "Dynamic task restart is not enabled in current architecture.",
+             "Runtime settings updated (mode=%s, bms=%s, inverter=%s).",
              modeToStr(settings.mode),
              protocolToStr(settings.bms_protocol),
              protocolToStr(settings.inverter_protocol));

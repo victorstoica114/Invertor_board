@@ -12,6 +12,7 @@
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_system.h"
 #include "esp_wifi.h"
 #include "nvs_flash.h"
 
@@ -29,10 +30,6 @@ static httpd_handle_t s_httpd = NULL;
 static esp_netif_t *s_wifiStaNetif = NULL;
 static TaskHandle_t s_settingsApplyTask = NULL;
 static char s_logsResponse[2048];
-
-typedef struct {
-    bool restartWeb;
-} settingsApplyCtx_t;
 
 static void startHttpServer(void);
 
@@ -179,29 +176,16 @@ static void wifiApplyRuntimeSettings(void)
     esp_wifi_connect();
 }
 
-static void stopHttpServer(void)
-{
-    if (s_httpd != NULL) {
-        httpd_stop(s_httpd);
-        s_httpd = NULL;
-    }
-}
-
 static void settingsApplyTask(void *pv)
 {
-    settingsApplyCtx_t ctx = *(settingsApplyCtx_t *)pv;
+    (void)pv;
 
     vTaskDelay(pdMS_TO_TICKS(300));
     bridgeReloadFromRuntimeSettings();
     wifiApplyRuntimeSettings();
-
-    if (ctx.restartWeb) {
-        stopHttpServer();
-        startHttpServer();
-    }
-
-    s_settingsApplyTask = NULL;
-    vTaskDelete(NULL);
+    ESP_LOGI(WEB_TAG, "Runtime settings saved, restarting device to apply mode/protocol changes");
+    vTaskDelay(pdMS_TO_TICKS(200));
+    esp_restart();
 }
 
 static void wifiEventHandler(void *arg,
@@ -340,14 +324,15 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "function sel(id,val,opts){return '<select id=\"'+id+'\">'+opts.map(o=>'<option value=\"'+o.value+'\"'+(String(o.value)===String(val)?' selected':'')+'>'+o.label+'</option>').join('')+'</select>';}"
         "const modeOpts=[{value:1,label:'sniffer'},{value:2,label:'forward'},{value:3,label:'bridge'}];"
         "const lineOpts=[{value:1,label:'CAN'},{value:2,label:'RS485'}];"
-        "const protoOpts=[{value:1,label:'CAN_GROWATT'},{value:2,label:'RS485_GROWATT'},{value:3,label:'RS485_PYLON'},{value:4,label:'CAN_PYLON'},{value:5,label:'CAN_DEYE'}];"
+        "const canProtoOpts=[{value:1,label:'CAN_GROWATT'},{value:4,label:'CAN_PYLON'},{value:5,label:'CAN_DEYE'}];"
+        "const rsProtoOpts=[{value:2,label:'RS485_GROWATT'},{value:3,label:'RS485_PYLON'}];"
         "const portOpts=[{value:1,label:'1'},{value:2,label:'2'}];"
         "const rows=["
         "row('Mode',sel('mode',s.mode_id,modeOpts)),"
         "row('BMS line',sel('bms_line',s.bms_line_id,lineOpts)),"
         "row('Inverter line',sel('inverter_line',s.inverter_line_id,lineOpts)),"
-        "row('BMS protocol',sel('bms_protocol',s.bms_protocol_id,protoOpts)),"
-        "row('Inverter protocol',sel('inverter_protocol',s.inverter_protocol_id,protoOpts)),"
+        "row('BMS protocol','<select id=\"bms_protocol\"></select>'),"
+        "row('Inverter protocol','<select id=\"inverter_protocol\"></select>'),"
         "row('BMS port',sel('bms_port',s.bms_port,portOpts)),"
         "row('Inverter port',sel('inverter_port',s.inverter_port,portOpts)),"
         "row('Wi-Fi SSID','<input id=\"wifi_ssid\" value=\"'+s.wifi_ssid+'\" />'),"
@@ -356,6 +341,22 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "];"
         "const actions='<div class=\"actions\"><button onclick=\"saveSettings()\">Save</button><span id=\"settingsStatus\" class=\"mono\"></span></div>';"
         "document.getElementById('settingsForm').innerHTML='<table>'+rows.join('')+'</table>'+actions;"
+        "function applyProtoFilter(lineId,protoId,wanted){"
+        "const line=parseInt(document.getElementById(lineId).value,10);"
+        "const opts=(line===1)?canProtoOpts:rsProtoOpts;"
+        "const selEl=document.getElementById(protoId);"
+        "const wantedStr=String(wanted);"
+        "selEl.innerHTML=opts.map(o=>'<option value=\"'+o.value+'\"'+(String(o.value)===wantedStr?' selected':'')+'>'+o.label+'</option>').join('');"
+        "if(!opts.some(o=>String(o.value)===wantedStr)){selEl.value=String(opts[0].value);}"
+        "}"
+        "applyProtoFilter('bms_line','bms_protocol',s.bms_protocol_id);"
+        "applyProtoFilter('inverter_line','inverter_protocol',s.inverter_protocol_id);"
+        "document.getElementById('bms_line').addEventListener('change',function(){"
+        "applyProtoFilter('bms_line','bms_protocol',document.getElementById('bms_protocol').value);"
+        "});"
+        "document.getElementById('inverter_line').addEventListener('change',function(){"
+        "applyProtoFilter('inverter_line','inverter_protocol',document.getElementById('inverter_protocol').value);"
+        "});"
         "}"
         "async function saveSettings(){"
         "const payload={"
@@ -546,9 +547,8 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
     char buf[256];
     int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
     bridge_runtime_settings_t settings = runtimeSettingsGet();
-    bridge_runtime_settings_t oldSettings = settings;
     int v = 0;
-    const char *okResp = "{\"ok\":true,\"message\":\"Saved and applied\"}";
+    const char *okResp = "{\"ok\":true,\"message\":\"Saved. Restarting...\"}";
     const char *errResp = "{\"ok\":false,\"message\":\"Invalid settings\"}";
 
     if (received <= 0) {
@@ -587,14 +587,11 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
         s_settingsApplyTask = NULL;
     }
 
-    static settingsApplyCtx_t applyCtx;
-    applyCtx.restartWeb = (settings.web_port != oldSettings.web_port);
-
     xTaskCreate(
         settingsApplyTask,
         "settings_apply",
         4096,
-        &applyCtx,
+        NULL,
         5,
         &s_settingsApplyTask);
 

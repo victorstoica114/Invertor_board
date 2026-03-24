@@ -8,6 +8,21 @@
 #include "Drivers/rs485_driver.h"
 #include "Web_interface/web_interface.h"
 #include "config.h"
+#include "runtime_settings.h"
+
+static working_mode_t runtimeModeToWorkingMode(uint8_t runtimeMode)
+{
+    switch (runtimeMode) {
+        case MODE_SNIFFER:
+            return WORKING_MODE_SNIFFER;
+        case MODE_FORWARD:
+            return WORKING_MODE_FORWARD;
+        case MODE_BRIDGE:
+            return WORKING_MODE_BRIDGE;
+        default:
+            return (working_mode_t)ACTIVE_WORKING_MODE;
+    }
+}
 
 void app_main(void)
 {
@@ -18,7 +33,8 @@ void app_main(void)
     rs485Init();
     canInit();
 
-    const working_mode_t mode = (working_mode_t)ACTIVE_WORKING_MODE;
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+    const working_mode_t mode = runtimeModeToWorkingMode(settings.mode);
     esp_err_t err = workingModesStart(mode);
     if (err != ESP_OK) {
         ESP_LOGE(EXAMPLE_TAG,

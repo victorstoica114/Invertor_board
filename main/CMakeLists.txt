@@ -4,6 +4,7 @@ idf_component_register(
         "Working_modes.c"
         "bridge_compat.c"
         "runtime_settings.c"
+        "rs485_can_bridge.c"
         "Web_interface/web_interface.c"
         "config.c"
         "Drivers/can_driver.c"

@@ -10,6 +10,8 @@
 #include "config.h"
 #include "modbusDecoder.h"
 #include "orchestrator/orchestrator.h"
+#include "rs485_can_bridge.h"
+#include "runtime_settings.h"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -58,6 +60,45 @@ static canSnifferCtx_t s_canSniffer1;
 static canSnifferCtx_t s_canSniffer2;
 static rs485SnifferCtx_t s_rsSniffer1;
 static rs485SnifferCtx_t s_rsSniffer2;
+
+static const char *canNameByPort(uint8_t port)
+{
+    return (port == 2u) ? "CAN2" : "CAN1";
+}
+
+static twai_handle_t canBusByPort(uint8_t port)
+{
+    return (port == 2u) ? canGetBus1() : canGetBus0();
+}
+
+static const char *rsNameByPort(uint8_t port)
+{
+    return (port == 2u) ? "RS485_2" : "RS485_1";
+}
+
+static uart_port_t rsUartByPort(uint8_t port)
+{
+    return (port == 2u) ? rs485GetUart2() : rs485GetUart1();
+}
+
+static gpio_num_t rsDirByPort(uint8_t port)
+{
+    return (port == 2u) ? rs485GetDir2() : rs485GetDir1();
+}
+
+static protocol_id_t protocolIdFromUiProtocol(uint8_t protocol)
+{
+    switch (protocol) {
+        case PROTOCOL_CAN_GROWATT:
+        case PROTOCOL_RS485_GROWATT:
+            return PROTOCOL_ID_GROWATT;
+        case PROTOCOL_CAN_PYLON:
+        case PROTOCOL_RS485_PYLON:
+            return PROTOCOL_ID_PYLON;
+        default:
+            return PROTOCOL_ID_GROWATT;
+    }
+}
 
 static void pushTaskHandle(TaskHandle_t handle)
 {
@@ -300,8 +341,31 @@ static void rs485SnapshotTask(void *pv)
 
 static esp_err_t startBridgeMode(void)
 {
-    return orchestratorStart((protocol_id_t)ACTIVE_BMS_PROTOCOL,
-                             (protocol_id_t)ACTIVE_INVERTER_PROTOCOL);
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+
+    const bool canToRsGrowatt =
+        (settings.bms_line == LINE_CAN) &&
+        (settings.inverter_line == LINE_RS485) &&
+        (settings.bms_protocol == PROTOCOL_CAN_GROWATT) &&
+        (settings.inverter_protocol == PROTOCOL_RS485_GROWATT);
+
+    if (canToRsGrowatt) {
+        canRs485GrowattBridgeEnable(rsUartByPort(settings.inverter_port),
+                                    rsDirByPort(settings.inverter_port),
+                                    rsNameByPort(settings.inverter_port),
+                                    canBusByPort(settings.bms_port),
+                                    canNameByPort(settings.bms_port));
+        ESP_LOGI(EXAMPLE_TAG,
+                 "Working mode BRIDGE active: CAN(%s:%u) -> RS485(%s:%u) Growatt translator",
+                 canNameByPort(settings.bms_port),
+                 (unsigned)settings.bms_port,
+                 rsNameByPort(settings.inverter_port),
+                 (unsigned)settings.inverter_port);
+        return ESP_OK;
+    }
+
+    return orchestratorStart(protocolIdFromUiProtocol(settings.bms_protocol),
+                             protocolIdFromUiProtocol(settings.inverter_protocol));
 }
 
 static esp_err_t startForwardMode(void)
