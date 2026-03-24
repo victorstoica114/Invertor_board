@@ -34,6 +34,7 @@ static char s_logsResponse[2048];
 
 typedef struct {
     bool restartWeb;
+    bool reconfigureWifi;
 } settingsApplyReq_t;
 
 static void startHttpServer(void);
@@ -189,10 +190,33 @@ static void stopHttpServer(void)
     }
 }
 
-static void applyRuntimeSettings(bool restartWeb)
+static bool isSupportedBridgeRoute(const bridge_runtime_settings_t *s)
+{
+    if (s == NULL) {
+        return false;
+    }
+
+    const bool canToRsGrowatt =
+        (s->bms_line == LINE_CAN) &&
+        (s->inverter_line == LINE_RS485) &&
+        (s->bms_protocol == PROTOCOL_CAN_GROWATT) &&
+        (s->inverter_protocol == PROTOCOL_RS485_GROWATT);
+
+    const bool rsToCanGrowatt =
+        (s->bms_line == LINE_RS485) &&
+        (s->inverter_line == LINE_CAN) &&
+        (s->bms_protocol == PROTOCOL_RS485_GROWATT) &&
+        (s->inverter_protocol == PROTOCOL_CAN_GROWATT);
+
+    return canToRsGrowatt || rsToCanGrowatt;
+}
+
+static void applyRuntimeSettings(bool restartWeb, bool reconfigureWifi)
 {
     bridgeReloadFromRuntimeSettings();
-    wifiApplyRuntimeSettings();
+    if (reconfigureWifi) {
+        wifiApplyRuntimeSettings();
+    }
 
     if (restartWeb) {
         stopHttpServer();
@@ -211,10 +235,11 @@ static void settingsApplyTask(void *pv)
         }
 
         vTaskDelay(pdMS_TO_TICKS(80));
-        applyRuntimeSettings(req.restartWeb);
+        applyRuntimeSettings(req.restartWeb, req.reconfigureWifi);
         ESP_LOGI(WEB_TAG,
-                 "Runtime settings saved and applied (restartWeb=%s)",
-                 req.restartWeb ? "YES" : "NO");
+                 "Runtime settings saved and applied (restartWeb=%s reconfigureWifi=%s)",
+                 req.restartWeb ? "YES" : "NO",
+                 req.reconfigureWifi ? "YES" : "NO");
     }
 }
 
@@ -581,6 +606,8 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
     int v = 0;
     const char *okResp = "{\"ok\":true,\"message\":\"Saved and applied\"}";
     const char *errResp = "{\"ok\":false,\"message\":\"Invalid settings\"}";
+    const char *unsupportedResp =
+        "{\"ok\":false,\"message\":\"Unsupported bridge route. Supported now: CAN_GROWATT->RS485_GROWATT and RS485_GROWATT->CAN_GROWATT\"}";
 
     if (received <= 0) {
         httpd_resp_set_status(req, "400 Bad Request");
@@ -601,6 +628,21 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
     (void)extractJsonString(buf, "wifi_ssid", settings.wifi_ssid, sizeof(settings.wifi_ssid));
     (void)extractJsonString(buf, "wifi_password", settings.wifi_password, sizeof(settings.wifi_password));
     if (extractJsonInt(buf, "web_port", &v)) settings.web_port = (uint16_t)v;
+
+    if (settings.mode == MODE_BRIDGE && !isSupportedBridgeRoute(&settings)) {
+        ESP_LOGW(WEB_TAG,
+                 "Rejected unsupported bridge route: bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u)",
+                 (unsigned)settings.bms_line,
+                 (unsigned)settings.bms_protocol,
+                 (unsigned)settings.bms_port,
+                 (unsigned)settings.inverter_line,
+                 (unsigned)settings.inverter_protocol,
+                 (unsigned)settings.inverter_port);
+        httpd_resp_set_status(req, "400 Bad Request");
+        setNoCacheHeaders(req);
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_send(req, unsupportedResp, HTTPD_RESP_USE_STRLEN);
+    }
 
     if (!runtimeSettingsSave(&settings)) {
         httpd_resp_set_status(req, "400 Bad Request");
@@ -626,16 +668,19 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
 
     settingsApplyReq_t applyReq = {
         .restartWeb = (settings.web_port != oldSettings.web_port),
+        .reconfigureWifi =
+            (strcmp(settings.wifi_ssid, oldSettings.wifi_ssid) != 0) ||
+            (strcmp(settings.wifi_password, oldSettings.wifi_password) != 0),
     };
 
     if (s_settingsApplyQueue != NULL) {
         if (xQueueOverwrite(s_settingsApplyQueue, &applyReq) != pdPASS) {
             ESP_LOGW(WEB_TAG, "settings_apply queue overwrite failed, applying inline");
-            applyRuntimeSettings(applyReq.restartWeb);
+            applyRuntimeSettings(applyReq.restartWeb, applyReq.reconfigureWifi);
         }
     } else {
         ESP_LOGW(WEB_TAG, "settings_apply queue not ready, applying inline");
-        applyRuntimeSettings(applyReq.restartWeb);
+        applyRuntimeSettings(applyReq.restartWeb, applyReq.reconfigureWifi);
     }
 
     if (s_settingsApplyTask == NULL) {
@@ -646,7 +691,7 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
                         5,
                         &s_settingsApplyTask) != pdPASS) {
             ESP_LOGW(WEB_TAG, "settings_apply task create failed, applying inline");
-            applyRuntimeSettings(applyReq.restartWeb);
+            applyRuntimeSettings(applyReq.restartWeb, applyReq.reconfigureWifi);
         }
     }
 
