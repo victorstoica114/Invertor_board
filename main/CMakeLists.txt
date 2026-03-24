@@ -2,7 +2,7 @@ idf_component_register(
     SRCS
         "main.c"
         "Working_modes.c"
-        "bridge_compat.c"
+        "Web_interface/bridge_compat.c"
         "runtime_settings.c"
         "rs485_can_bridge.c"
         "Web_interface/web_interface.c"
