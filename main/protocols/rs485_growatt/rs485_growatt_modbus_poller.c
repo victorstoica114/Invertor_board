@@ -90,6 +90,12 @@ esp_err_t rs485GrowattModbusPollerTick(rs485_growatt_modbus_poller_t *poller,
                                     reqLen,
                                     pdMS_TO_TICKS(30));
     if (err == ESP_OK) {
+        poller->lastReqValid = true;
+        poller->lastReqSlave = poller->slaveAddr;
+        poller->lastReqFunc = 0x03u;
+        poller->lastReqStart = block->start;
+        poller->lastReqCount = block->count;
+        poller->lastReqUs = nowUs;
         poller->pollIndex = (poller->pollIndex + 1u) % g_rs485GrowattPollBlocksCount;
         poller->lastPollUs = nowUs;
     }

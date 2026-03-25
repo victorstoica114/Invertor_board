@@ -18,6 +18,12 @@ typedef struct {
     uint8_t slaveAddr;
     size_t pollIndex;
     int64_t lastPollUs;
+    bool lastReqValid;
+    uint8_t lastReqSlave;
+    uint8_t lastReqFunc;
+    uint16_t lastReqStart;
+    uint16_t lastReqCount;
+    int64_t lastReqUs;
 } jkbms_modbus_poller_t;
 
 void jkbmsModbusPollerInit(jkbms_modbus_poller_t *poller,

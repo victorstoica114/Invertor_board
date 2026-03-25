@@ -125,6 +125,13 @@ static void rs485GrowattBmsTask(void *pv)
                                                          GROWATT_BMS_QUERY_PERIOD_MS);
         if (pollErr != ESP_OK && pollErr != ESP_ERR_INVALID_STATE) {
             ESP_LOGW(EXAMPLE_TAG, "RS485 Growatt poll TX failed (err=0x%x)", (unsigned)pollErr);
+        } else if (ctx->poller.lastReqValid) {
+            ctx->decoder.lastReqValid = true;
+            ctx->decoder.lastReqSlave = ctx->poller.lastReqSlave;
+            ctx->decoder.lastReqFunc = ctx->poller.lastReqFunc;
+            ctx->decoder.lastReqStart = ctx->poller.lastReqStart;
+            ctx->decoder.lastReqCount = ctx->poller.lastReqCount;
+            ctx->decoder.lastReqUs = ctx->poller.lastReqUs;
         }
 
         if ((nowUs - ctx->lastPublishUs) >= ((int64_t)GROWATT_BMS_PUBLISH_PERIOD_MS * 1000LL)) {

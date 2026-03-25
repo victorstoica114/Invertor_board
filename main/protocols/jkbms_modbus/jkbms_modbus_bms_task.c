@@ -452,6 +452,14 @@ static void jkbmsModbusBmsTask(void *pv)
                                                   JKBMS_BMS_QUERY_PERIOD_MS);
         if (pollErr != ESP_OK && pollErr != ESP_ERR_INVALID_STATE) {
             ESP_LOGW(EXAMPLE_TAG, "JKBMS Modbus poll TX failed (err=0x%x)", (unsigned)pollErr);
+        } else if (ctx->poller.lastReqValid) {
+            /* On some RS485 transceivers TX bytes are not looped into RX. Seed decoder request context. */
+            ctx->decoder.lastReqValid = true;
+            ctx->decoder.lastReqSlave = ctx->poller.lastReqSlave;
+            ctx->decoder.lastReqFunc = ctx->poller.lastReqFunc;
+            ctx->decoder.lastReqStart = ctx->poller.lastReqStart;
+            ctx->decoder.lastReqCount = ctx->poller.lastReqCount;
+            ctx->decoder.lastReqUs = ctx->poller.lastReqUs;
         }
 
         if ((nowUs - ctx->lastPublishUs) >= ((int64_t)JKBMS_BMS_PUBLISH_PERIOD_MS * 1000LL)) {
