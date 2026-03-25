@@ -37,7 +37,7 @@ esp_err_t rs485WriteBytes(uart_port_t uart,
     return waitErr;
 }
 
-void rs485Init(void)
+static void rs485SetupOne(uart_port_t uart, int txPin, int rxPin, int dirPin)
 {
     uart_config_t uartConfig = {
         .baud_rate = RS485_BAUDRATE,
@@ -48,27 +48,33 @@ void rs485Init(void)
         .source_clk = UART_SCLK_DEFAULT,
     };
 
-    /* RS485_1 */
-    ESP_ERROR_CHECK(uart_param_config(RS485_1_UART, &uartConfig));
-    ESP_ERROR_CHECK(uart_set_pin(RS485_1_UART, RS485_1_TX, RS485_1_RX,
+    ESP_ERROR_CHECK(uart_param_config(uart, &uartConfig));
+    ESP_ERROR_CHECK(uart_set_pin(uart, txPin, rxPin,
                                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-    ESP_ERROR_CHECK(uart_driver_install(RS485_1_UART,
+    ESP_ERROR_CHECK(uart_driver_install(uart,
                                         RS485_BUF_SIZE, RS485_BUF_SIZE,
                                         0, NULL, 0));
-    gpio_reset_pin(RS485_1_DIR);
-    gpio_set_direction(RS485_1_DIR, GPIO_MODE_OUTPUT);
-    gpio_set_level(RS485_1_DIR, 0); /* RX default */
+    gpio_reset_pin((gpio_num_t)dirPin);
+    gpio_set_direction((gpio_num_t)dirPin, GPIO_MODE_OUTPUT);
+    gpio_set_level((gpio_num_t)dirPin, 0); /* RX default */
+}
 
-    /* RS485_2 */
-    ESP_ERROR_CHECK(uart_param_config(RS485_2_UART, &uartConfig));
-    ESP_ERROR_CHECK(uart_set_pin(RS485_2_UART, RS485_2_TX, RS485_2_RX,
-                                 UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-    ESP_ERROR_CHECK(uart_driver_install(RS485_2_UART,
-                                        RS485_BUF_SIZE, RS485_BUF_SIZE,
-                                        0, NULL, 0));
-    gpio_reset_pin(RS485_2_DIR);
-    gpio_set_direction(RS485_2_DIR, GPIO_MODE_OUTPUT);
-    gpio_set_level(RS485_2_DIR, 0); /* RX default */
+void rs485Reinit(void)
+{
+    if (uart_is_driver_installed(RS485_1_UART)) {
+        (void)uart_driver_delete(RS485_1_UART);
+    }
+    if (uart_is_driver_installed(RS485_2_UART)) {
+        (void)uart_driver_delete(RS485_2_UART);
+    }
 
-    ESP_LOGI(EXAMPLE_TAG, "RS485_1 & RS485_2 initialized (%d 8N1)", RS485_BAUDRATE);
+    rs485SetupOne(RS485_1_UART, RS485_1_TX, RS485_1_RX, RS485_1_DIR);
+    rs485SetupOne(RS485_2_UART, RS485_2_TX, RS485_2_RX, RS485_2_DIR);
+
+    ESP_LOGI(EXAMPLE_TAG, "RS485 interfaces reinitialized (%d 8N1)", RS485_BAUDRATE);
+}
+
+void rs485Init(void)
+{
+    rs485Reinit();
 }

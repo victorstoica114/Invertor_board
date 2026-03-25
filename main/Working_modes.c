@@ -91,6 +91,8 @@ static esp_err_t applyBridgeRuntimeSettings(void)
 
     ESP_LOGI(EXAMPLE_TAG, "Applying bridge settings: stopping previous route");
     (void)orchestratorStop();
+    ESP_LOGI(EXAMPLE_TAG, "Applying bridge settings: reinitializing RS485 interfaces");
+    rs485Reinit();
     ESP_LOGI(EXAMPLE_TAG, "Applying bridge settings: starting new route");
     esp_err_t err = orchestratorStartFromRuntime(&settings);
     if (err != ESP_OK) {
