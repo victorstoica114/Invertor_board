@@ -147,6 +147,21 @@ static bool isCanToRsGrowattRoute(const bridge_runtime_settings_t *settings)
            (settings->inverter_protocol == PROTOCOL_RS485_GROWATT);
 }
 
+static void clearTransportBuffers(void)
+{
+    (void)uart_flush_input(rs485GetUart1());
+    (void)uart_flush_input(rs485GetUart2());
+
+    twai_handle_t can1 = canGetBus0();
+    twai_handle_t can2 = canGetBus1();
+    if (can1 != NULL) {
+        (void)twai_clear_receive_queue_v2(can1);
+    }
+    if (can2 != NULL) {
+        (void)twai_clear_receive_queue_v2(can2);
+    }
+}
+
 static void orchestratorTask(void *pv)
 {
     orchestratorCtx_t *ctx = (orchestratorCtx_t *)pv;
@@ -324,6 +339,7 @@ esp_err_t orchestratorStop(void)
     (void)growattInverterTaskStop();
     (void)pylonBmsTaskStop();
     (void)pylonInverterTaskStop();
+    clearTransportBuffers();
 
     orchestratorReset(&g_orchestratorCtx);
     memset(&g_orchestratorCtx, 0, sizeof(g_orchestratorCtx));

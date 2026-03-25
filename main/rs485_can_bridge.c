@@ -52,6 +52,8 @@ typedef struct {
     canGrowattCache_t cache;
     uint32_t reqCount;
     uint32_t rspCount;
+    uint32_t rxBytesSinceStats;
+    int64_t lastStatsUs;
 } canRs485GrowattCtx_t;
 
 static canRs485GrowattCtx_t g_canRsGrowattCtx;
@@ -424,8 +426,20 @@ static void canRs485GrowattTask(void *pv)
 
         int len = uart_read_bytes(ctx->uart, rxChunk, sizeof(rxChunk), pdMS_TO_TICKS(2));
         if (len <= 0) {
+            int64_t nowUs = esp_timer_get_time();
+            if ((nowUs - ctx->lastStatsUs) >= 5000000LL) {
+                ESP_LOGI(EXAMPLE_TAG,
+                         "CAN->RS485 %s stats: rxBytes=%u req=%u rsp=%u",
+                         ctx->ifName,
+                         (unsigned)ctx->rxBytesSinceStats,
+                         (unsigned)ctx->reqCount,
+                         (unsigned)ctx->rspCount);
+                ctx->rxBytesSinceStats = 0u;
+                ctx->lastStatsUs = nowUs;
+            }
             continue;
         }
+        ctx->rxBytesSinceStats += (uint32_t)len;
 
         if ((size_t)streamLen + (size_t)len > sizeof(streamBuf)) {
             if (streamLen > 7u) {
@@ -474,6 +488,18 @@ static void canRs485GrowattTask(void *pv)
                 }
                 break;
             }
+        }
+
+        int64_t nowUs = esp_timer_get_time();
+        if ((nowUs - ctx->lastStatsUs) >= 5000000LL) {
+            ESP_LOGI(EXAMPLE_TAG,
+                     "CAN->RS485 %s stats: rxBytes=%u req=%u rsp=%u",
+                     ctx->ifName,
+                     (unsigned)ctx->rxBytesSinceStats,
+                     (unsigned)ctx->reqCount,
+                     (unsigned)ctx->rspCount);
+            ctx->rxBytesSinceStats = 0u;
+            ctx->lastStatsUs = nowUs;
         }
     }
 }
@@ -609,8 +635,17 @@ esp_err_t canRs485GrowattBridgeEnable(uart_port_t inverterUart,
     g_canRsGrowattCtx.slaveId = (uint8_t)CAN_RS485_SOC_SLAVE_ID;
     g_canRsGrowattCtx.fakeSocPct =
         (uint8_t)((CAN_RS485_SOC_FAKE_PCT > 100u) ? 100u : CAN_RS485_SOC_FAKE_PCT);
+    g_canRsGrowattCtx.lastStatsUs = esp_timer_get_time();
 
     rs485SetDirection(g_canRsGrowattCtx.dirPin, false);
+
+    esp_err_t flushErr = uart_flush_input(g_canRsGrowattCtx.uart);
+    if (flushErr != ESP_OK) {
+        ESP_LOGW(EXAMPLE_TAG,
+                 "CAN->RS485 translator uart_flush_input failed on %s (err=0x%x)",
+                 g_canRsGrowattCtx.ifName,
+                 (unsigned)flushErr);
+    }
 
     const int drained = drainUartRx(g_canRsGrowattCtx.uart, 4096);
     if (drained > 0) {
@@ -651,6 +686,10 @@ void canRs485GrowattBridgeStop(void)
     }
     if ((int)g_canRsGrowattCtx.dirPin >= 0) {
         rs485SetDirection(g_canRsGrowattCtx.dirPin, false);
+    }
+    if ((int)g_canRsGrowattCtx.uart >= 0) {
+        (void)uart_flush_input(g_canRsGrowattCtx.uart);
+        (void)drainUartRx(g_canRsGrowattCtx.uart, 4096);
     }
     memset(&g_canRsGrowattCtx, 0, sizeof(g_canRsGrowattCtx));
 }
