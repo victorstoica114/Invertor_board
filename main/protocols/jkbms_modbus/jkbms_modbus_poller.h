@@ -1,0 +1,34 @@
+#pragma once
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "driver/gpio.h"
+#include "driver/uart.h"
+#include "esp_err.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct {
+    uart_port_t uart;
+    gpio_num_t dirPin;
+    uint8_t slaveAddr;
+    size_t pollIndex;
+    int64_t lastPollUs;
+} jkbms_modbus_poller_t;
+
+void jkbmsModbusPollerInit(jkbms_modbus_poller_t *poller,
+                           uart_port_t uart,
+                           gpio_num_t dirPin,
+                           uint8_t slaveAddr);
+
+esp_err_t jkbmsModbusPollerTick(jkbms_modbus_poller_t *poller,
+                                int64_t nowUs,
+                                uint32_t periodMs);
+
+#ifdef __cplusplus
+}
+#endif

@@ -7,6 +7,7 @@
 #include "config.h"
 #include "protocols/growatt/growatt_bms_task.h"
 #include "protocols/growatt/growatt_inverter_task.h"
+#include "protocols/jkbms_modbus/jkbms_modbus_bms_task.h"
 #include "protocols/pylon/pylon_bms_task.h"
 #include "protocols/pylon/pylon_inverter_task.h"
 #include "rs485_can_bridge.h"
@@ -47,6 +48,8 @@ const char *protocolIdToStr(protocol_id_t id)
             return "GROWATT";
         case PROTOCOL_ID_PYLON:
             return "PYLON";
+        case PROTOCOL_ID_JKBMS:
+            return "JKBMS_MODBUS";
         default:
             return "UNKNOWN";
     }
@@ -79,6 +82,8 @@ static esp_err_t startBmsTask(protocol_id_t protocol, QueueHandle_t outQueue)
             return growattBmsTaskStart(outQueue);
         case PROTOCOL_ID_PYLON:
             return pylonBmsTaskStart(outQueue);
+        case PROTOCOL_ID_JKBMS:
+            return jkbmsModbusBmsTaskStart(outQueue);
         default:
             return ESP_ERR_NOT_SUPPORTED;
     }
@@ -105,6 +110,8 @@ static protocol_id_t protocolIdFromUiProtocol(uint8_t protocol)
         case PROTOCOL_CAN_PYLON:
         case PROTOCOL_RS485_PYLON:
             return PROTOCOL_ID_PYLON;
+        case PROTOCOL_RS485_JKBMS:
+            return PROTOCOL_ID_JKBMS;
         default:
             return PROTOCOL_ID_GROWATT;
     }
@@ -345,6 +352,7 @@ esp_err_t orchestratorStop(void)
 
     (void)growattBmsTaskStop();
     (void)growattInverterTaskStop();
+    (void)jkbmsModbusBmsTaskStop();
     (void)pylonBmsTaskStop();
     (void)pylonInverterTaskStop();
     clearTransportBuffers();

@@ -10,6 +10,7 @@ extern "C" {
 typedef enum {
     PROTOCOL_ID_GROWATT = 0,
     PROTOCOL_ID_PYLON = 1,
+    PROTOCOL_ID_JKBMS = 2,
 } protocol_id_t;
 
 typedef struct {

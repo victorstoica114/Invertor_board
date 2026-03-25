@@ -7,6 +7,7 @@
 #include "config.h"
 #include "orchestrator/protocol_types.h"
 #include "protocols/growatt/growatt_bms_task.h"
+#include "protocols/jkbms_modbus/jkbms_modbus_bms_task.h"
 #include "runtime_settings.h"
 
 #include "esp_log.h"
@@ -46,6 +47,8 @@ static const char *protocolToStr(uint8_t protocol)
             return "CAN_PYLON";
         case PROTOCOL_CAN_DEYE:
             return "CAN_DEYE";
+        case PROTOCOL_RS485_JKBMS:
+            return "JKBMS_MODBUS";
         default:
             return "UNKNOWN";
     }
@@ -56,12 +59,22 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out)
     bms_decoded_packet_t packet = {0};
     bridge_runtime_settings_t settings = runtimeSettingsGet();
 
-    if (!growattBmsTaskGetLatestPacket(&packet)) {
+    bool hasPacket = false;
+    if (settings.bms_protocol == PROTOCOL_RS485_JKBMS) {
+        hasPacket = jkbmsModbusBmsTaskGetLatestPacket(&packet);
+    } else {
+        hasPacket = growattBmsTaskGetLatestPacket(&packet);
+    }
+
+    if (!hasPacket) {
         return;
     }
 
     out->valid = true;
-    snprintf(out->source, sizeof(out->source), "GROWATT_BMS_TASK");
+    snprintf(out->source,
+             sizeof(out->source),
+             "%s",
+             (settings.bms_protocol == PROTOCOL_RS485_JKBMS) ? "JKBMS_BMS_TASK" : "GROWATT_BMS_TASK");
     snprintf(out->protocol, sizeof(out->protocol), "%s", protocolToStr(settings.bms_protocol));
 
     if (packet.hasSoc) {

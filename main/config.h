@@ -5,6 +5,7 @@
 #include <stdbool.h>
 
 #include "protocols/growatt/growatt_register_map.h"
+#include "protocols/jkbms_modbus/jkbms_modbus_register_map.h"
 
 /* Common log tag */
 #define EXAMPLE_TAG "SNIFFER_BRIDGE"
@@ -78,6 +79,7 @@
 #define PROTOCOL_RS485_PYLON 3
 #define PROTOCOL_CAN_PYLON 4
 #define PROTOCOL_CAN_DEYE 5
+#define PROTOCOL_RS485_JKBMS 6
 
 #define BMS_line LINE_RS485
 #define Inverter_line LINE_CAN
@@ -104,6 +106,14 @@
 #define GROWATT_INVERTER_TX_PERIOD_MS  200
 #define GROWATT_INVERTER_TASK_STACK    4096
 #define GROWATT_INVERTER_TASK_PRIORITY 9
+
+/* --- JKBMS Modbus task --- */
+#define JKBMS_BMS_MODBUS_SLAVE_ADDR    JKBMS_MODBUS_DEFAULT_SLAVE_ADDR
+#define JKBMS_BMS_MODBUS_GAP_US        5000
+#define JKBMS_BMS_QUERY_PERIOD_MS      250
+#define JKBMS_BMS_PUBLISH_PERIOD_MS    250
+#define JKBMS_BMS_TASK_STACK           4096
+#define JKBMS_BMS_TASK_PRIORITY        10
 
 /* --- Pylon placeholders --- */
 #define PYLON_BMS_TASK_STACK           3072
