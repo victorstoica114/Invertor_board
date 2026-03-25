@@ -101,6 +101,7 @@ static void rs485GrowattBmsTask(void *pv)
     rs485GrowattBmsTaskCtx_t *ctx = (rs485GrowattBmsTaskCtx_t *)pv;
     uint8_t rxChunk[RS485_BUF_SIZE];
     const uart_port_t rxUart = rs485GetUart1();
+    int64_t lastRecordedReqUs = 0;
 
     modbusDecoderInit(&ctx->decoder, "GROWATT_BMS_RS485", GROWATT_BMS_MODBUS_GAP_US);
     rs485GrowattModbusPollerInit(&ctx->poller,
@@ -125,13 +126,14 @@ static void rs485GrowattBmsTask(void *pv)
                                                          GROWATT_BMS_QUERY_PERIOD_MS);
         if (pollErr != ESP_OK && pollErr != ESP_ERR_INVALID_STATE) {
             ESP_LOGW(EXAMPLE_TAG, "RS485 Growatt poll TX failed (err=0x%x)", (unsigned)pollErr);
-        } else if (ctx->poller.lastReqValid) {
-            ctx->decoder.lastReqValid = true;
-            ctx->decoder.lastReqSlave = ctx->poller.lastReqSlave;
-            ctx->decoder.lastReqFunc = ctx->poller.lastReqFunc;
-            ctx->decoder.lastReqStart = ctx->poller.lastReqStart;
-            ctx->decoder.lastReqCount = ctx->poller.lastReqCount;
-            ctx->decoder.lastReqUs = ctx->poller.lastReqUs;
+        } else if (ctx->poller.lastReqValid && ctx->poller.lastReqUs != lastRecordedReqUs) {
+            modbusDecoderRecordRequest(&ctx->decoder,
+                                       ctx->poller.lastReqSlave,
+                                       ctx->poller.lastReqFunc,
+                                       ctx->poller.lastReqStart,
+                                       ctx->poller.lastReqCount,
+                                       ctx->poller.lastReqUs);
+            lastRecordedReqUs = ctx->poller.lastReqUs;
         }
 
         if ((nowUs - ctx->lastPublishUs) >= ((int64_t)GROWATT_BMS_PUBLISH_PERIOD_MS * 1000LL)) {

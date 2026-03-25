@@ -102,6 +102,80 @@ static void cacheStoreReg(modbusDecoder_t *d, uint16_t addr, uint16_t val, int64
     d->cacheValid[idx] = 1;
 }
 
+static void reqQueuePush(modbusDecoder_t *d,
+                         uint8_t slave,
+                         uint8_t func,
+                         uint16_t start,
+                         uint16_t count,
+                         int64_t tsUs)
+{
+    if (d == NULL || count == 0u) {
+        return;
+    }
+
+    if (d->reqQSize >= MODBUS_DECODER_REQ_QUEUE_LEN) {
+        d->reqQHead = (uint8_t)((d->reqQHead + 1u) % MODBUS_DECODER_REQ_QUEUE_LEN);
+        d->reqQSize--;
+    }
+
+    const uint8_t tail = (uint8_t)((d->reqQHead + d->reqQSize) % MODBUS_DECODER_REQ_QUEUE_LEN);
+    d->reqQSlave[tail] = slave;
+    d->reqQFunc[tail] = func;
+    d->reqQStart[tail] = start;
+    d->reqQCount[tail] = count;
+    d->reqQTsUs[tail] = tsUs;
+    d->reqQSize++;
+}
+
+static bool reqQueuePopForResp(modbusDecoder_t *d,
+                               uint8_t slave,
+                               uint8_t func,
+                               uint16_t respRegCount,
+                               uint16_t *startOut)
+{
+    if (d == NULL || d->reqQSize == 0u) {
+        return false;
+    }
+
+    for (uint8_t i = 0u; i < d->reqQSize; i++) {
+        const uint8_t idx = (uint8_t)((d->reqQHead + i) % MODBUS_DECODER_REQ_QUEUE_LEN);
+        if (d->reqQSlave[idx] != slave || d->reqQFunc[idx] != func) {
+            continue;
+        }
+
+        const uint16_t reqCount = d->reqQCount[idx];
+        if (reqCount > 0u && respRegCount > reqCount) {
+            continue;
+        }
+
+        if (startOut != NULL) {
+            *startOut = d->reqQStart[idx];
+        }
+
+        if (i == 0u) {
+            d->reqQHead = (uint8_t)((d->reqQHead + 1u) % MODBUS_DECODER_REQ_QUEUE_LEN);
+            d->reqQSize--;
+            return true;
+        }
+
+        while (i + 1u < d->reqQSize) {
+            const uint8_t from = (uint8_t)((d->reqQHead + i + 1u) % MODBUS_DECODER_REQ_QUEUE_LEN);
+            const uint8_t to = (uint8_t)((d->reqQHead + i) % MODBUS_DECODER_REQ_QUEUE_LEN);
+            d->reqQSlave[to] = d->reqQSlave[from];
+            d->reqQFunc[to] = d->reqQFunc[from];
+            d->reqQStart[to] = d->reqQStart[from];
+            d->reqQCount[to] = d->reqQCount[from];
+            d->reqQTsUs[to] = d->reqQTsUs[from];
+            i++;
+        }
+
+        d->reqQSize--;
+        return true;
+    }
+
+    return false;
+}
+
 static void printReq03(modbusDecoder_t *d, const uint8_t *f, int len, bool crcOk)
 {
     if (len < 8) {
@@ -128,6 +202,7 @@ static void printReq03(modbusDecoder_t *d, const uint8_t *f, int len, bool crcOk
     d->lastReqStart = start;
     d->lastReqCount = count;
     d->lastReqUs = d->lastByteUs;
+    reqQueuePush(d, slave, func, start, count, d->lastByteUs);
 }
 
 static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool crcOk)
@@ -161,7 +236,16 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
     const uint8_t *data = &frame[3];
 
     uint16_t startBase = 0xFFFF;
-    if (d->lastReqValid && d->lastReqSlave == slave && d->lastReqFunc == func) {
+    if (reqQueuePopForResp(d, slave, func, (uint16_t)regCount, &startBase)) {
+        MODBUS_RUNTIME_LOGI(
+                 "RESP on %s: slave=%u func=0x%02X start=0x%04X regs=%d crc=%s",
+                 d->ifName,
+                 (unsigned)slave,
+                 (unsigned)func,
+                 (unsigned)startBase,
+                 regCount,
+                 crcOk ? "OK" : "BAD");
+    } else if (d->lastReqValid && d->lastReqSlave == slave && d->lastReqFunc == func) {
         startBase = d->lastReqStart;
         MODBUS_RUNTIME_LOGI(
                  "RESP on %s: slave=%u func=0x%02X start=0x%04X regs=%d crc=%s",
@@ -533,6 +617,27 @@ void modbusDecoderInit(modbusDecoder_t *d, const char *ifName, uint32_t gapUs)
     memset(d, 0, sizeof(*d));
     d->ifName = ifName;
     d->gapUs = gapUs;
+}
+
+void modbusDecoderRecordRequest(modbusDecoder_t *d,
+                                uint8_t slave,
+                                uint8_t func,
+                                uint16_t start,
+                                uint16_t count,
+                                int64_t tsUs)
+{
+    if (d == NULL || count == 0u) {
+        return;
+    }
+
+    d->lastReqValid = true;
+    d->lastReqSlave = slave;
+    d->lastReqFunc = func;
+    d->lastReqStart = start;
+    d->lastReqCount = count;
+    d->lastReqUs = tsUs;
+
+    reqQueuePush(d, slave, func, start, count, tsUs);
 }
 
 static void finalizeIfAny(modbusDecoder_t *d)

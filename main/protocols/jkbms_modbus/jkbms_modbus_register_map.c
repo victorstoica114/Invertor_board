@@ -1,17 +1,18 @@
 #include "protocols/jkbms_modbus/jkbms_modbus_register_map.h"
 
 /*
- * Poll window #1:
- *   0x1200..0x1249 includes:
- *   - cell voltage area (0x0000..0x003E)
- *   - cell avg / max diff / min-max index pair (0x0044..0x0048)
- *
- * Poll window #2:
- *   0x128A..0x12B9 includes temp/pack voltage/current/alarm/SOC/cycles/SOH area.
+ * Keep poll blocks compact and explicit. Some JK firmwares are sensitive to large
+ * ranges that include sparse/undocumented addresses.
  */
 const jkbms_modbus_poll_block_t g_jkbmsModbusPollBlocks[] = {
-    { .start = JKBMS_RT_REG_CELL0_MV,       .count = 0x004Au },
-    { .start = JKBMS_RT_REG_TEMP_MOS_DECIC, .count = 0x0030u },
+    /* Cell table: 0x1200..0x123F (contains 0x1200,0x1202,...,0x123E) */
+    { .start = JKBMS_RT_REG_CELL0_MV,              .count = 0x0040u },
+    /* Cell summary area: avg/diff/max-min indexes */
+    { .start = JKBMS_RT_REG_CELL_AVG_MV,           .count = 0x0006u },
+    /* Runtime electrical + thermal + alarm + capacity + cycles */
+    { .start = JKBMS_RT_REG_TEMP_MOS_DECIC,        .count = 0x0028u },
+    /* SOC/SOH/precharge pair explicitly */
+    { .start = JKBMS_RT_REG_SOH_PRECHARGE_U8X2,    .count = 0x0002u },
 };
 
 const size_t g_jkbmsModbusPollBlocksCount =

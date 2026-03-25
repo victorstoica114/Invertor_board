@@ -92,56 +92,200 @@ static bool decoderGetU32(const modbusDecoder_t *decoder, uint16_t reg, uint32_t
     return true;
 }
 
-static bool decoderGetI32(const modbusDecoder_t *decoder, uint16_t reg, int32_t *out)
+static uint16_t bswap16(uint16_t v)
 {
-    uint32_t raw = 0u;
-    if (!decoderGetU32(decoder, reg, &raw)) {
+    return (uint16_t)((v >> 8) | (v << 8));
+}
+
+static bool normalizeCellMv(uint16_t raw, uint16_t *mvOut)
+{
+    uint16_t candidates[3];
+    candidates[0] = raw;
+    candidates[1] = bswap16(raw);
+    candidates[2] = (raw > 5000u) ? (uint16_t)(raw / 10u) : raw;
+
+    for (size_t i = 0u; i < (sizeof(candidates) / sizeof(candidates[0])); i++) {
+        uint16_t mv = candidates[i];
+        if (mv >= 1000u && mv <= 5000u) {
+            if (mvOut != NULL) {
+                *mvOut = mv;
+            }
+            return true;
+        }
+    }
+
+    if (raw >= 100u && raw <= 600u) {
+        uint16_t mv = (uint16_t)(raw * 10u);
+        if (mvOut != NULL) {
+            *mvOut = mv;
+        }
+        return true;
+    }
+
+    return false;
+}
+
+static bool normalizeSignedDeciC(int16_t raw, int16_t *outC)
+{
+    if (raw < -1000 || raw > 1500) {
         return false;
     }
 
-    if (out != NULL) {
-        *out = (int32_t)raw;
+    if (outC != NULL) {
+        *outC = (int16_t)(raw / 10);
     }
     return true;
 }
 
-static bool decodePctFromU8x2(uint16_t raw, uint8_t *pctOut)
+static bool decodePctBytePair(uint16_t raw, bool preferHigh, uint8_t *pctOut)
 {
     const uint8_t hi = (uint8_t)((raw >> 8) & 0xFFu);
     const uint8_t lo = (uint8_t)(raw & 0xFFu);
+    const bool hiOk = (hi <= 100u);
+    const bool loOk = (lo <= 100u);
 
-    if (lo <= 100u) {
+    if (!hiOk && !loOk) {
+        return false;
+    }
+
+    if (hiOk && loOk) {
+        if (hi == 0u && lo > 0u) {
+            if (pctOut != NULL) {
+                *pctOut = lo;
+            }
+            return true;
+        }
+        if (lo == 0u && hi > 0u) {
+            if (pctOut != NULL) {
+                *pctOut = hi;
+            }
+            return true;
+        }
         if (pctOut != NULL) {
-            *pctOut = lo;
+            *pctOut = preferHigh ? hi : lo;
         }
         return true;
     }
-    if (hi <= 100u) {
-        if (pctOut != NULL) {
-            *pctOut = hi;
-        }
-        return true;
+
+    if (pctOut != NULL) {
+        *pctOut = hiOk ? hi : lo;
     }
-    return false;
+    return true;
+}
+
+static bool decodeU32Best(const modbusDecoder_t *decoder,
+                          uint16_t reg,
+                          uint32_t minVal,
+                          uint32_t maxVal,
+                          uint32_t *out)
+{
+    uint16_t a = 0u;
+    uint16_t b = 0u;
+    if (!decoderGetU16(decoder, reg, &a) || !decoderGetU16(decoder, (uint16_t)(reg + 1u), &b)) {
+        return false;
+    }
+
+    const uint32_t vAB = (((uint32_t)a) << 16) | (uint32_t)b;
+    const uint32_t vBA = (((uint32_t)b) << 16) | (uint32_t)a;
+    const bool abOk = (vAB >= minVal && vAB <= maxVal);
+    const bool baOk = (vBA >= minVal && vBA <= maxVal);
+
+    if (!abOk && !baOk) {
+        return false;
+    }
+
+    if (out != NULL) {
+        if (abOk && baOk) {
+            *out = (vAB <= vBA) ? vAB : vBA;
+        } else {
+            *out = abOk ? vAB : vBA;
+        }
+    }
+
+    return true;
+}
+
+static bool decodeI32Best(const modbusDecoder_t *decoder,
+                          uint16_t reg,
+                          int32_t absLimit,
+                          int32_t *out)
+{
+    uint16_t a = 0u;
+    uint16_t b = 0u;
+    if (!decoderGetU16(decoder, reg, &a) || !decoderGetU16(decoder, (uint16_t)(reg + 1u), &b)) {
+        return false;
+    }
+
+    const int32_t vAB = (int32_t)((((uint32_t)a) << 16) | (uint32_t)b);
+    const int32_t vBA = (int32_t)((((uint32_t)b) << 16) | (uint32_t)a);
+    const bool abOk = (vAB <= absLimit && vAB >= -absLimit);
+    const bool baOk = (vBA <= absLimit && vBA >= -absLimit);
+
+    if (!abOk && !baOk) {
+        return false;
+    }
+
+    if (out != NULL) {
+        if (abOk && baOk) {
+            int64_t aAbs = (vAB >= 0) ? (int64_t)vAB : -(int64_t)vAB;
+            int64_t bAbs = (vBA >= 0) ? (int64_t)vBA : -(int64_t)vBA;
+            *out = (aAbs <= bAbs) ? vAB : vBA;
+        } else {
+            *out = abOk ? vAB : vBA;
+        }
+    }
+
+    return true;
 }
 
 static bool decodeSocPct(const modbusDecoder_t *decoder, uint8_t *socOut)
 {
     uint16_t raw = 0u;
+    uint8_t chosen = 0u;
+    bool have = false;
+    uint8_t cand = 0u;
 
     if (decoderGetU16(decoder, JKBMS_RT_REG_BALAN_SOC_U8X2, &raw) &&
-        decodePctFromU8x2(raw, socOut)) {
-        return true;
+        decodePctBytePair(raw, false, &cand)) {
+        chosen = cand;
+        have = true;
+        if (cand > 0u) {
+            if (socOut != NULL) {
+                *socOut = cand;
+            }
+            return true;
+        }
     }
 
     if (decoderGetU16(decoder, (uint16_t)(JKBMS_RT_REG_BALAN_SOC_U8X2 + 1u), &raw) &&
-        decodePctFromU8x2(raw, socOut)) {
-        return true;
+        decodePctBytePair(raw, false, &cand)) {
+        chosen = cand;
+        have = true;
+        if (cand > 0u) {
+            if (socOut != NULL) {
+                *socOut = cand;
+            }
+            return true;
+        }
     }
 
-    /* Some JK firmwares expose SOC in the SOH/PRECHARGE word as fallback. */
+    /* Some JK firmwares expose SOC in high byte of SOH/PRECHARGE word. */
     if (decoderGetU16(decoder, JKBMS_RT_REG_SOH_PRECHARGE_U8X2, &raw) &&
-        decodePctFromU8x2(raw, socOut)) {
+        decodePctBytePair(raw, true, &cand)) {
+        chosen = cand;
+        have = true;
+        if (cand > 0u) {
+            if (socOut != NULL) {
+                *socOut = cand;
+            }
+            return true;
+        }
+    }
+
+    if (have) {
+        if (socOut != NULL) {
+            *socOut = chosen;
+        }
         return true;
     }
 
@@ -194,7 +338,11 @@ static bool decodeSohPrecharge(const modbusDecoder_t *decoder,
     }
 
     if (prechargeOut != NULL) {
-        *prechargeOut = lo;
+        if (lo <= 1u) {
+            *prechargeOut = lo;
+        } else if (hi <= 1u) {
+            *prechargeOut = hi;
+        }
     }
 
     return hasSoh;
@@ -209,24 +357,37 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
     memset(out, 0, sizeof(*out));
 
     uint8_t validCells = 0u;
+    uint8_t highestCellIdx = 0u;
     uint16_t minMv = UINT16_MAX;
     uint16_t maxMv = 0u;
     uint8_t minIdx = 0u;
     uint8_t maxIdx = 0u;
 
     for (uint8_t i = 0; i < JKBMS_MAX_CELLS; i++) {
-        const uint16_t reg = (uint16_t)(JKBMS_RT_REG_CELL0_MV + ((uint16_t)i * JKBMS_RT_CELL_STEP));
+        const uint16_t regPrimary = (uint16_t)(JKBMS_RT_REG_CELL0_MV + ((uint16_t)i * JKBMS_RT_CELL_STEP));
+        const uint16_t regCompact = (uint16_t)(JKBMS_RT_REG_CELL0_MV + (uint16_t)i);
+        const uint16_t regOdd = (uint16_t)(regPrimary + 1u);
+        uint16_t raw = 0u;
         uint16_t mv = 0u;
-        if (!decoderGetU16(decoder, reg, &mv)) {
-            continue;
+        bool ok = false;
+
+        if (decoderGetU16(decoder, regPrimary, &raw) && normalizeCellMv(raw, &mv)) {
+            ok = true;
+        } else if (decoderGetU16(decoder, regCompact, &raw) && normalizeCellMv(raw, &mv)) {
+            ok = true;
+        } else if (decoderGetU16(decoder, regOdd, &raw) && normalizeCellMv(raw, &mv)) {
+            ok = true;
         }
 
-        if (mv < 1000u || mv > 5000u) {
+        if (!ok) {
             continue;
         }
 
         out->cellMv[i] = mv;
         validCells++;
+        if ((uint8_t)(i + 1u) > highestCellIdx) {
+            highestCellIdx = (uint8_t)(i + 1u);
+        }
 
         if (mv < minMv) {
             minMv = mv;
@@ -238,7 +399,7 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
         }
     }
 
-    out->cellCount = validCells;
+    out->cellCount = (validCells > 0u) ? highestCellIdx : 0u;
     if (validCells > 0u) {
         out->hasCellExtremes = true;
         out->minCellMv = minMv;
@@ -248,11 +409,14 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
     }
 
     uint16_t u16 = 0u;
-    if (decoderGetU16(decoder, JKBMS_RT_REG_CELL_AVG_MV, &u16)) {
+    if (decoderGetU16(decoder, JKBMS_RT_REG_CELL_AVG_MV, &u16) && normalizeCellMv(u16, &u16)) {
         out->hasCellAvgMv = true;
         out->cellAvgMv = u16;
     }
     if (decoderGetU16(decoder, JKBMS_RT_REG_CELL_VDIFF_MAX_MV, &u16)) {
+        if (u16 > 5000u) {
+            u16 = (uint16_t)(u16 / 10u);
+        }
         out->hasCellDiffMaxMv = true;
         out->cellDiffMaxMv = u16;
     }
@@ -279,32 +443,32 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
     }
 
     int16_t i16 = 0;
-    if (decoderGetI16(decoder, JKBMS_RT_REG_TEMP_MOS_DECIC, &i16)) {
+    if (decoderGetI16(decoder, JKBMS_RT_REG_TEMP_MOS_DECIC, &i16) && normalizeSignedDeciC(i16, &i16)) {
         out->hasTempMosC = true;
-        out->tempMosC = (int16_t)(i16 / 10);
+        out->tempMosC = i16;
     }
-    if (decoderGetI16(decoder, JKBMS_RT_REG_TEMP_BAT1_DECIC, &i16)) {
+    if (decoderGetI16(decoder, JKBMS_RT_REG_TEMP_BAT1_DECIC, &i16) && normalizeSignedDeciC(i16, &i16)) {
         out->hasTempBat1C = true;
-        out->tempBat1C = (int16_t)(i16 / 10);
+        out->tempBat1C = i16;
     }
-    if (decoderGetI16(decoder, JKBMS_RT_REG_TEMP_BAT2_DECIC, &i16)) {
+    if (decoderGetI16(decoder, JKBMS_RT_REG_TEMP_BAT2_DECIC, &i16) && normalizeSignedDeciC(i16, &i16)) {
         out->hasTempBat2C = true;
-        out->tempBat2C = (int16_t)(i16 / 10);
+        out->tempBat2C = i16;
     }
 
     uint32_t u32 = 0u;
-    if (decoderGetU32(decoder, JKBMS_RT_REG_PACK_VOLT_MV_U32, &u32)) {
+    if (decodeU32Best(decoder, JKBMS_RT_REG_PACK_VOLT_MV_U32, 1000u, 200000u, &u32)) {
         out->hasPackVoltageMv = true;
         out->packVoltageMv = u32;
     }
 
     int32_t i32 = 0;
-    if (decoderGetI32(decoder, JKBMS_RT_REG_PACK_CURRENT_MA_I32, &i32)) {
+    if (decodeI32Best(decoder, JKBMS_RT_REG_PACK_CURRENT_MA_I32, 1000000, &i32)) {
         out->hasPackCurrentMa = true;
         out->packCurrentMa = i32;
     }
 
-    if (decoderGetI32(decoder, JKBMS_RT_REG_PACK_WATT_MW_U32, &i32)) {
+    if (decodeI32Best(decoder, JKBMS_RT_REG_PACK_WATT_MW_U32, 200000000, &i32)) {
         out->hasPackPowerMw = true;
         out->packPowerMw = i32;
     } else if (out->hasPackVoltageMv && out->hasPackCurrentMa) {
@@ -319,7 +483,8 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
         out->packPowerMw = (int32_t)mw;
     }
 
-    if (decoderGetI16(decoder, JKBMS_RT_REG_BALAN_CURRENT_MA_I16, &i16)) {
+    if (decoderGetI16(decoder, JKBMS_RT_REG_BALAN_CURRENT_MA_I16, &i16) &&
+        i16 >= -30000 && i16 <= 30000) {
         out->hasBalanceCurrentMa = true;
         out->balanceCurrentMa = i16;
     }
@@ -333,17 +498,17 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
         out->hasPrecharge = true;
     }
 
-    if (decoderGetI32(decoder, JKBMS_RT_REG_SOC_REMAIN_MAH_I32, &i32)) {
+    if (decodeI32Best(decoder, JKBMS_RT_REG_SOC_REMAIN_MAH_I32, 500000000, &i32)) {
         out->hasRemainMah = true;
         out->remainMah = i32;
     }
 
-    if (decoderGetU32(decoder, JKBMS_RT_REG_SOC_FULL_MAH_U32, &u32)) {
+    if (decodeU32Best(decoder, JKBMS_RT_REG_SOC_FULL_MAH_U32, 0u, 500000000u, &u32)) {
         out->hasFullMah = true;
         out->fullMah = u32;
     }
 
-    if (decoderGetU32(decoder, JKBMS_RT_REG_CYCLE_COUNT_U32, &u32)) {
+    if (decodeU32Best(decoder, JKBMS_RT_REG_CYCLE_COUNT_U32, 0u, 1000000u, &u32)) {
         out->hasCycles = true;
         out->cycles = u32;
     }
@@ -428,6 +593,7 @@ static void jkbmsModbusBmsTask(void *pv)
     const uart_port_t rxUart = (bmsPort == 2u) ? rs485GetUart2() : rs485GetUart1();
     const gpio_num_t dirPin = (bmsPort == 2u) ? rs485GetDir2() : rs485GetDir1();
     const char *ifName = (bmsPort == 2u) ? "JKBMS_RS485_2" : "JKBMS_RS485_1";
+    int64_t lastRecordedReqUs = 0;
 
     modbusDecoderInit(&ctx->decoder, ifName, JKBMS_BMS_MODBUS_GAP_US);
     jkbmsModbusPollerInit(&ctx->poller,
@@ -452,14 +618,15 @@ static void jkbmsModbusBmsTask(void *pv)
                                                   JKBMS_BMS_QUERY_PERIOD_MS);
         if (pollErr != ESP_OK && pollErr != ESP_ERR_INVALID_STATE) {
             ESP_LOGW(EXAMPLE_TAG, "JKBMS Modbus poll TX failed (err=0x%x)", (unsigned)pollErr);
-        } else if (ctx->poller.lastReqValid) {
-            /* On some RS485 transceivers TX bytes are not looped into RX. Seed decoder request context. */
-            ctx->decoder.lastReqValid = true;
-            ctx->decoder.lastReqSlave = ctx->poller.lastReqSlave;
-            ctx->decoder.lastReqFunc = ctx->poller.lastReqFunc;
-            ctx->decoder.lastReqStart = ctx->poller.lastReqStart;
-            ctx->decoder.lastReqCount = ctx->poller.lastReqCount;
-            ctx->decoder.lastReqUs = ctx->poller.lastReqUs;
+        } else if (ctx->poller.lastReqValid && ctx->poller.lastReqUs != lastRecordedReqUs) {
+            /* On some RS485 transceivers TX bytes are not looped into RX. Seed decoder request queue. */
+            modbusDecoderRecordRequest(&ctx->decoder,
+                                       ctx->poller.lastReqSlave,
+                                       ctx->poller.lastReqFunc,
+                                       ctx->poller.lastReqStart,
+                                       ctx->poller.lastReqCount,
+                                       ctx->poller.lastReqUs);
+            lastRecordedReqUs = ctx->poller.lastReqUs;
         }
 
         if ((nowUs - ctx->lastPublishUs) >= ((int64_t)JKBMS_BMS_PUBLISH_PERIOD_MS * 1000LL)) {
@@ -491,6 +658,13 @@ esp_err_t jkbmsModbusBmsTaskStart(QueueHandle_t outQueue)
 
     memset(&g_jkbmsModbusBmsCtx, 0, sizeof(g_jkbmsModbusBmsCtx));
     g_jkbmsModbusBmsCtx.outQueue = outQueue;
+
+    portENTER_CRITICAL(&g_latestPacketMux);
+    g_haveLatestPacket = false;
+    memset(&g_latestPacket, 0, sizeof(g_latestPacket));
+    g_haveLatestSnapshot = false;
+    memset(&g_latestSnapshot, 0, sizeof(g_latestSnapshot));
+    portEXIT_CRITICAL(&g_latestPacketMux);
 
     BaseType_t taskOk =
         xTaskCreate(jkbmsModbusBmsTask,
