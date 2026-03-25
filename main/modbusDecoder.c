@@ -448,10 +448,71 @@ static void printFrameGeneric(modbusDecoder_t *d, const uint8_t *f, int len, boo
              (len > 64) ? " ..." : "");
 }
 
+static bool isReq03Frame(const uint8_t *f, int len)
+{
+    if (f == NULL || len != 8) {
+        return false;
+    }
+    if (f[1] != 0x03u) {
+        return false;
+    }
+    const uint16_t count = be16(&f[4]);
+    if (count == 0u || count > 125u) {
+        return false;
+    }
+    return modbusCheckCrc(f, len);
+}
+
+static bool isResp03Frame(const uint8_t *f, int len)
+{
+    if (f == NULL || len < 5) {
+        return false;
+    }
+    if (f[1] != 0x03u) {
+        return false;
+    }
+    const int expLen = (int)f[2] + 5;
+    if (len != expLen) {
+        return false;
+    }
+    return modbusCheckCrc(f, len);
+}
+
 static void decodeFrame(modbusDecoder_t *d, const uint8_t *f, int len)
 {
     if (len < 4) {
         printFrameGeneric(d, f, len, false);
+        return;
+    }
+
+    /* Handle concatenated RTU frames (e.g. echoed request + response in one buffer). */
+    int off = 0;
+    bool decodedAny = false;
+    while ((len - off) >= 4) {
+        const uint8_t *cur = &f[off];
+        const int rem = len - off;
+
+        if (rem >= 8 && isReq03Frame(cur, 8)) {
+            printReq03(d, cur, 8, true);
+            off += 8;
+            decodedAny = true;
+            continue;
+        }
+
+        if (rem >= 5) {
+            const int respLen = (int)cur[2] + 5;
+            if (respLen >= 5 && respLen <= rem && isResp03Frame(cur, respLen)) {
+                printResp03(d, cur, respLen, true);
+                off += respLen;
+                decodedAny = true;
+                continue;
+            }
+        }
+
+        break;
+    }
+
+    if (decodedAny && off == len) {
         return;
     }
 
@@ -460,15 +521,11 @@ static void decodeFrame(modbusDecoder_t *d, const uint8_t *f, int len)
 
     if (func == 0x03 && len == 8) {
         printReq03(d, f, len, crcOk);
-        return;
-    }
-
-    if (func == 0x03 && len >= 5) {
+    } else if (func == 0x03 && len >= 5) {
         printResp03(d, f, len, crcOk);
-        return;
+    } else {
+        printFrameGeneric(d, f, len, crcOk);
     }
-
-    printFrameGeneric(d, f, len, crcOk);
 }
 
 void modbusDecoderInit(modbusDecoder_t *d, const char *ifName, uint32_t gapUs)
