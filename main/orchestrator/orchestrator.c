@@ -335,8 +335,6 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
 
 esp_err_t orchestratorStop(void)
 {
-    ESP_LOGI(EXAMPLE_TAG, "Orchestrator stop: begin");
-
     if (g_orchestratorTaskHandle != NULL) {
         vTaskDelete(g_orchestratorTaskHandle);
         g_orchestratorTaskHandle = NULL;
@@ -353,7 +351,5 @@ esp_err_t orchestratorStop(void)
 
     orchestratorReset(&g_orchestratorCtx);
     memset(&g_orchestratorCtx, 0, sizeof(g_orchestratorCtx));
-
-    ESP_LOGI(EXAMPLE_TAG, "Orchestrator stop: done");
     return ESP_OK;
 }

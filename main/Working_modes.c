@@ -89,16 +89,11 @@ static esp_err_t applyBridgeRuntimeSettings(void)
              (unsigned)settings.inverter_protocol,
              (unsigned)settings.inverter_port);
 
-    ESP_LOGI(EXAMPLE_TAG, "Applying bridge settings: stopping previous route");
     (void)orchestratorStop();
-    ESP_LOGI(EXAMPLE_TAG, "Applying bridge settings: reinitializing RS485 interfaces");
     rs485Reinit();
-    ESP_LOGI(EXAMPLE_TAG, "Applying bridge settings: starting new route");
     esp_err_t err = orchestratorStartFromRuntime(&settings);
     if (err != ESP_OK) {
         ESP_LOGW(EXAMPLE_TAG, "Bridge runtime apply failed (err=0x%x)", (unsigned)err);
-    } else {
-        ESP_LOGI(EXAMPLE_TAG, "Applying bridge settings: done");
     }
     return err;
 }
