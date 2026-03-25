@@ -4,6 +4,7 @@
 #include "Drivers/rs485_driver.h"
 #include "config.h"
 #include "protocols/growatt/growatt_register_map.h"
+#include "protocols/jkbms_modbus/jkbms_modbus_bms_task.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -49,12 +50,27 @@ typedef struct {
     uint8_t slaveId;
     uint8_t fakeSocPct;
     canGrowattCache_t cache;
+    uint32_t rxBytes;
     uint32_t reqCount;
     uint32_t rspCount;
 } canRs485GrowattCtx_t;
 
 static canRs485GrowattCtx_t g_canRsGrowattCtx;
 static TaskHandle_t g_canRsGrowattTaskHandle;
+
+typedef struct {
+    uart_port_t uart;
+    gpio_num_t dirPin;
+    const char *ifName;
+    uint8_t slaveId;
+    uint8_t fakeSocPct;
+    uint32_t rxBytes;
+    uint32_t reqCount;
+    uint32_t rspCount;
+} jkbmsRs485GrowattCtx_t;
+
+static jkbmsRs485GrowattCtx_t g_jkbmsRsGrowattCtx;
+static TaskHandle_t g_jkbmsRsGrowattTaskHandle;
 
 static int drainUartRx(uart_port_t uart, int maxBytes)
 {
@@ -240,6 +256,144 @@ static uint16_t fallbackCell(uint8_t idx)
     return k_cells[idx];
 }
 
+typedef struct {
+    uint16_t soc;
+    uint16_t soh;
+    uint16_t packCv;
+    int16_t tempC;
+    uint16_t cycles;
+    uint16_t cellMaxMv;
+    uint16_t cellMinMv;
+    uint8_t cellMaxIdx;
+    uint8_t cellMinIdx;
+} growattSynthSnapshot_t;
+
+static void fillSnapshotFromJkbms(growattSynthSnapshot_t *snap, uint8_t fallbackSocPct)
+{
+    if (snap == NULL) {
+        return;
+    }
+
+    snap->soc = fallbackSocPct;
+    snap->soh = 100u;
+    snap->packCv = 5120u;
+    snap->tempC = 25;
+    snap->cycles = 0u;
+    snap->cellMaxMv = 3452u;
+    snap->cellMinMv = 3448u;
+    snap->cellMaxIdx = 4u;
+    snap->cellMinIdx = 10u;
+
+    bms_decoded_packet_t pkt = {0};
+    if (!jkbmsModbusBmsTaskGetLatestPacket(&pkt)) {
+        return;
+    }
+
+    if (pkt.hasSoc) {
+        snap->soc = (pkt.socPct > 100u) ? 100u : pkt.socPct;
+    }
+    if (pkt.hasTemperatureC) {
+        snap->tempC = pkt.temperatureC;
+    }
+    if (pkt.hasPackVoltageCv) {
+        snap->packCv = pkt.packVoltageCv;
+    }
+    if (pkt.hasCellExtremes) {
+        snap->cellMaxMv = pkt.maxCellMv;
+        snap->cellMinMv = pkt.minCellMv;
+        snap->cellMaxIdx = pkt.maxCellIndex;
+        snap->cellMinIdx = pkt.minCellIndex;
+    }
+}
+
+static uint16_t synthRegFromSnapshot(const growattSynthSnapshot_t *snap, uint16_t addr)
+{
+    if (snap == NULL) {
+        return 0u;
+    }
+
+    const uint16_t soc = snap->soc;
+    const uint16_t soh = snap->soh;
+    const uint16_t packCv = snap->packCv;
+    const uint16_t tempC = (uint16_t)snap->tempC;
+    const uint16_t cycles = snap->cycles;
+    const uint16_t fullCap = 4000u; /* 40.00Ah in 0.01Ah units */
+    const uint16_t remCap = (uint16_t)(((uint32_t)fullCap * (uint32_t)soc) / 100u);
+    uint16_t cellMaxMv = snap->cellMaxMv;
+    uint16_t cellMinMv = snap->cellMinMv;
+    uint8_t cellMaxIdx = snap->cellMaxIdx;
+    uint8_t cellMinIdx = snap->cellMinIdx;
+
+    if (cellMaxIdx < 1u || cellMaxIdx > 16u) {
+        cellMaxIdx = 4u;
+    }
+    if (cellMinIdx < 1u || cellMinIdx > 16u) {
+        cellMinIdx = 10u;
+    }
+    if (cellMaxMv < cellMinMv) {
+        uint16_t t = cellMaxMv;
+        cellMaxMv = cellMinMv;
+        cellMinMv = t;
+    }
+
+    switch (addr) {
+        case GROWATT_MB_REG_INFO_0001:
+            return 0x0001u;
+        case GROWATT_MB_REG_INFO_0002:
+            return 0x0010u;
+        case GROWATT_MB_REG_INFO_0003:
+            return 0x0001u;
+        case GROWATT_MB_REG_INFO_0004:
+            return 0x0000u;
+        case GROWATT_MB_REG_STATUS_FLAGS:
+            return 0x0000u;
+        case GROWATT_MB_REG_SOC_PCT:
+            return soc;
+        case GROWATT_MB_REG_PACK_V_CV:
+            return packCv;
+        case GROWATT_MB_REG_PACK_I_ABS_CA_TENTATIVE:
+            return 0u;
+        case GROWATT_MB_REG_TEMP_C:
+            return tempC;
+        case GROWATT_MB_REG_CYCLE_COUNT_TENTATIVE:
+            return cycles;
+        case GROWATT_MB_REG_REMAIN_CAP_CAH:
+            return remCap;
+        case GROWATT_MB_REG_FULL_CAP_CAH:
+            return fullCap;
+        case GROWATT_MB_REG_SOH_PCT:
+            return soh;
+        case GROWATT_MB_REG_CV_TARGET_CV:
+            return packCv;
+        case GROWATT_MB_REG_ICHG_LIM_CA_TENTATIVE:
+            return 0u;
+        case GROWATT_MB_REG_IDIS_LIM_CA_TENTATIVE:
+            return 0u;
+        case GROWATT_MB_REG_CELL_MAX_MV:
+            return cellMaxMv;
+        case GROWATT_MB_REG_CELL_MIN_MV:
+            return cellMinMv;
+        case GROWATT_MB_REG_CELL_MAX_IDX:
+            return cellMaxIdx;
+        case GROWATT_MB_REG_CELL_MIN_IDX:
+            return cellMinIdx;
+        case GROWATT_MB_REG_CELL_EXTRA:
+            return 0u;
+        default:
+            if (addr >= GROWATT_MB_REG_CELL_BASE && addr <= GROWATT_MB_REG_CELL_LAST) {
+                uint8_t idx = (uint8_t)(addr - GROWATT_MB_REG_CELL_BASE);
+                if (idx == (uint8_t)(cellMaxIdx - 1u)) {
+                    return cellMaxMv;
+                }
+                if (idx == (uint8_t)(cellMinIdx - 1u)) {
+                    return cellMinMv;
+                }
+                return fallbackCell(idx);
+            }
+            return 0u;
+    }
+}
+
 static uint16_t synthReg(const canRs485GrowattCtx_t *ctx, uint16_t addr)
 {
     const uint16_t soc = ctx->cache.hasSoc ? ctx->cache.socPct : (uint16_t)ctx->fakeSocPct;
@@ -408,6 +562,7 @@ static void canRs485GrowattTask(void *pv)
     uint8_t rxChunk[64];
     uint8_t streamBuf[256];
     uint16_t streamLen = 0u;
+    TickType_t lastStatsTick = xTaskGetTickCount();
 
     while (1) {
         twai_message_t canMsg = {0};
@@ -422,62 +577,204 @@ static void canRs485GrowattTask(void *pv)
         }
 
         int len = uart_read_bytes(ctx->uart, rxChunk, sizeof(rxChunk), pdMS_TO_TICKS(2));
-        if (len <= 0) {
-            continue;
-        }
+        if (len > 0) {
+            ctx->rxBytes += (uint32_t)len;
 
-        if ((size_t)streamLen + (size_t)len > sizeof(streamBuf)) {
-            if (streamLen > 7u) {
-                const uint16_t keep = 7u;
-                memmove(streamBuf, &streamBuf[streamLen - keep], keep);
-                streamLen = keep;
+            if ((size_t)streamLen + (size_t)len > sizeof(streamBuf)) {
+                if (streamLen > 7u) {
+                    const uint16_t keep = 7u;
+                    memmove(streamBuf, &streamBuf[streamLen - keep], keep);
+                    streamLen = keep;
+                }
             }
-        }
 
-        if ((size_t)streamLen + (size_t)len <= sizeof(streamBuf)) {
-            memcpy(&streamBuf[streamLen], rxChunk, (size_t)len);
-            streamLen = (uint16_t)(streamLen + len);
-        }
+            if ((size_t)streamLen + (size_t)len <= sizeof(streamBuf)) {
+                memcpy(&streamBuf[streamLen], rxChunk, (size_t)len);
+                streamLen = (uint16_t)(streamLen + len);
+            }
 
-        while (streamLen >= 8u) {
-            bool found = false;
-            for (uint16_t off = 0; off + 8u <= streamLen; off++) {
-                uint8_t func = 0u;
-                uint16_t start = 0u;
-                uint16_t count = 0u;
-                if (parseReadReq(&streamBuf[off], 8, ctx->slaveId, &func, &start, &count)) {
-                    ctx->reqCount++;
-                    bool sent = sendGrowattResponse(ctx, func, start, count);
-                    if (sent) {
-                        ctx->rspCount++;
-                    }
-                    if (ctx->reqCount <= 3u || (ctx->reqCount % 25u) == 0u) {
-                        logDecodedRegisterSnapshot(ctx, start, count, sent);
-                    }
+            while (streamLen >= 8u) {
+                bool found = false;
+                for (uint16_t off = 0; off + 8u <= streamLen; off++) {
+                    uint8_t func = 0u;
+                    uint16_t start = 0u;
+                    uint16_t count = 0u;
+                    if (parseReadReq(&streamBuf[off], 8, ctx->slaveId, &func, &start, &count)) {
+                        ctx->reqCount++;
+                        bool sent = sendGrowattResponse(ctx, func, start, count);
+                        if (sent) {
+                            ctx->rspCount++;
+                        }
+                        if (ctx->reqCount <= 3u || (ctx->reqCount % 25u) == 0u) {
+                            logDecodedRegisterSnapshot(ctx, start, count, sent);
+                        }
 
-                    const uint16_t consume = (uint16_t)(off + 8u);
-                    if (consume < streamLen) {
-                        memmove(streamBuf, &streamBuf[consume], streamLen - consume);
+                        const uint16_t consume = (uint16_t)(off + 8u);
+                        if (consume < streamLen) {
+                            memmove(streamBuf, &streamBuf[consume], streamLen - consume);
+                        }
+                        streamLen = (uint16_t)(streamLen - consume);
+                        found = true;
+                        break;
                     }
-                    streamLen = (uint16_t)(streamLen - consume);
-                    found = true;
+                }
+
+                if (!found) {
+                    if (streamLen > 7u) {
+                        const uint16_t drop = (uint16_t)(streamLen - 7u);
+                        memmove(streamBuf, &streamBuf[drop], 7u);
+                        streamLen = 7u;
+                    }
                     break;
                 }
             }
-
-            if (!found) {
-                if (streamLen > 7u) {
-                    const uint16_t drop = (uint16_t)(streamLen - 7u);
-                    memmove(streamBuf, &streamBuf[drop], 7u);
-                    streamLen = 7u;
-                }
-                break;
-            }
         }
 
+        if ((xTaskGetTickCount() - lastStatsTick) >= pdMS_TO_TICKS(5000)) {
+            ESP_LOGI(EXAMPLE_TAG,
+                     "CAN->RS485 %s stats: rxBytes=%u req=%u rsp=%u",
+                     ctx->ifName,
+                     (unsigned)ctx->rxBytes,
+                     (unsigned)ctx->reqCount,
+                     (unsigned)ctx->rspCount);
+            ctx->rxBytes = 0u;
+            lastStatsTick = xTaskGetTickCount();
+        }
     }
 }
 
+static bool sendGrowattResponseFromSnapshot(const jkbmsRs485GrowattCtx_t *ctx,
+                                            const growattSynthSnapshot_t *snap,
+                                            uint8_t func,
+                                            uint16_t start,
+                                            uint16_t count)
+{
+    if (ctx == NULL || snap == NULL) {
+        return false;
+    }
+
+    const int respLen = (int)(3u + (count * 2u) + 2u);
+    if (respLen <= 0 || respLen > 256) {
+        return false;
+    }
+
+    uint8_t resp[256] = {0};
+    resp[0] = ctx->slaveId;
+    resp[1] = func;
+    resp[2] = (uint8_t)(count * 2u);
+
+    for (uint16_t i = 0; i < count; i++) {
+        uint16_t addr = (uint16_t)(start + i);
+        uint16_t val = synthRegFromSnapshot(snap, addr);
+        putBe16(&resp[3 + (i * 2u)], val);
+    }
+
+    uint16_t crc = crc16(resp, respLen - 2);
+    putLe16(&resp[respLen - 2], crc);
+
+    rs485SetDirection(ctx->dirPin, true);
+    int written = uart_write_bytes(ctx->uart, (const char *)resp, respLen);
+    if (written == respLen) {
+        (void)uart_wait_tx_done(ctx->uart, pdMS_TO_TICKS(100));
+    }
+    rs485SetDirection(ctx->dirPin, false);
+    return written == respLen;
+}
+
+static void jkbmsRs485GrowattTask(void *pv)
+{
+    jkbmsRs485GrowattCtx_t *ctx = (jkbmsRs485GrowattCtx_t *)pv;
+    uint8_t rxChunk[64];
+    uint8_t streamBuf[256];
+    uint16_t streamLen = 0u;
+    TickType_t lastStatsTick = xTaskGetTickCount();
+
+    while (1) {
+        int len = uart_read_bytes(ctx->uart, rxChunk, sizeof(rxChunk), pdMS_TO_TICKS(2));
+        if (len > 0) {
+            ctx->rxBytes += (uint32_t)len;
+
+            if ((size_t)streamLen + (size_t)len > sizeof(streamBuf)) {
+                if (streamLen > 7u) {
+                    const uint16_t keep = 7u;
+                    memmove(streamBuf, &streamBuf[streamLen - keep], keep);
+                    streamLen = keep;
+                }
+            }
+
+            if ((size_t)streamLen + (size_t)len <= sizeof(streamBuf)) {
+                memcpy(&streamBuf[streamLen], rxChunk, (size_t)len);
+                streamLen = (uint16_t)(streamLen + len);
+            }
+
+            while (streamLen >= 8u) {
+                bool found = false;
+                for (uint16_t off = 0; off + 8u <= streamLen; off++) {
+                    uint8_t func = 0u;
+                    uint16_t start = 0u;
+                    uint16_t count = 0u;
+                    if (parseReadReq(&streamBuf[off], 8, ctx->slaveId, &func, &start, &count)) {
+                        ctx->reqCount++;
+
+                        growattSynthSnapshot_t snap = {0};
+                        fillSnapshotFromJkbms(&snap, ctx->fakeSocPct);
+
+                        bool sent = sendGrowattResponseFromSnapshot(ctx, &snap, func, start, count);
+                        if (sent) {
+                            ctx->rspCount++;
+                        }
+
+                        if (ctx->reqCount <= 3u || (ctx->reqCount % 25u) == 0u) {
+                            ESP_LOGI(EXAMPLE_TAG,
+                                     "JKBMS->RS485 req#%u on %s start=0x%04X count=%u sent=%s | "
+                                     "SOC=%u%% T=%dC Vpack=%.2fV Cmax=%.3fV(#%u) Cmin=%.3fV(#%u)",
+                                     (unsigned)ctx->reqCount,
+                                     ctx->ifName,
+                                     (unsigned)start,
+                                     (unsigned)count,
+                                     sent ? "Y" : "N",
+                                     (unsigned)snap.soc,
+                                     (int)snap.tempC,
+                                     (double)snap.packCv / 100.0,
+                                     (double)snap.cellMaxMv / 1000.0,
+                                     (unsigned)snap.cellMaxIdx,
+                                     (double)snap.cellMinMv / 1000.0,
+                                     (unsigned)snap.cellMinIdx);
+                        }
+
+                        const uint16_t consume = (uint16_t)(off + 8u);
+                        if (consume < streamLen) {
+                            memmove(streamBuf, &streamBuf[consume], streamLen - consume);
+                        }
+                        streamLen = (uint16_t)(streamLen - consume);
+                        found = true;
+                        break;
+                    }
+                }
+
+                if (!found) {
+                    if (streamLen > 7u) {
+                        const uint16_t drop = (uint16_t)(streamLen - 7u);
+                        memmove(streamBuf, &streamBuf[drop], 7u);
+                        streamLen = 7u;
+                    }
+                    break;
+                }
+            }
+        }
+
+        if ((xTaskGetTickCount() - lastStatsTick) >= pdMS_TO_TICKS(5000)) {
+            ESP_LOGI(EXAMPLE_TAG,
+                     "JKBMS->RS485 %s stats: rxBytes=%u req=%u rsp=%u",
+                     ctx->ifName,
+                     (unsigned)ctx->rxBytes,
+                     (unsigned)ctx->reqCount,
+                     (unsigned)ctx->rspCount);
+            ctx->rxBytes = 0u;
+            lastStatsTick = xTaskGetTickCount();
+        }
+    }
+}
 static bool decoderGetCachedReg(const modbusDecoder_t *d, uint16_t addr, uint16_t *outVal)
 {
     if (d == NULL) {
@@ -637,6 +934,55 @@ esp_err_t canRs485GrowattBridgeEnable(uart_port_t inverterUart,
 #endif
 }
 
+esp_err_t jkbmsRs485GrowattBridgeEnable(uart_port_t inverterUart,
+                                        gpio_num_t inverterDir,
+                                        const char *ifName)
+{
+#if !CAN_RS485_SOC_TRANSLATOR_ENABLE
+    (void)inverterUart;
+    (void)inverterDir;
+    (void)ifName;
+    ESP_LOGI(EXAMPLE_TAG, "JKBMS->RS485 Growatt translator disabled by config");
+    return ESP_ERR_NOT_SUPPORTED;
+#else
+    if (g_jkbmsRsGrowattTaskHandle != NULL) {
+        ESP_LOGI(EXAMPLE_TAG, "JKBMS->RS485 Growatt translator already running");
+        return ESP_OK;
+    }
+
+    memset(&g_jkbmsRsGrowattCtx, 0, sizeof(g_jkbmsRsGrowattCtx));
+    g_jkbmsRsGrowattCtx.uart = inverterUart;
+    g_jkbmsRsGrowattCtx.dirPin = inverterDir;
+    g_jkbmsRsGrowattCtx.ifName = (ifName != NULL) ? ifName : "RS485";
+    g_jkbmsRsGrowattCtx.slaveId = (uint8_t)CAN_RS485_SOC_SLAVE_ID;
+    g_jkbmsRsGrowattCtx.fakeSocPct =
+        (uint8_t)((CAN_RS485_SOC_FAKE_PCT > 100u) ? 100u : CAN_RS485_SOC_FAKE_PCT);
+
+    rs485SetDirection(g_jkbmsRsGrowattCtx.dirPin, false);
+    (void)drainUartRx(g_jkbmsRsGrowattCtx.uart, 4096);
+
+    BaseType_t taskOk = xTaskCreate(jkbmsRs485GrowattTask,
+                                    "jkbms_to_rs485_gw",
+                                    4096,
+                                    &g_jkbmsRsGrowattCtx,
+                                    9,
+                                    &g_jkbmsRsGrowattTaskHandle);
+    if (taskOk != pdPASS) {
+        g_jkbmsRsGrowattTaskHandle = NULL;
+        memset(&g_jkbmsRsGrowattCtx, 0, sizeof(g_jkbmsRsGrowattCtx));
+        ESP_LOGE(EXAMPLE_TAG, "JKBMS->RS485 Growatt translator task create failed");
+        return ESP_ERR_NO_MEM;
+    }
+
+    ESP_LOGI(EXAMPLE_TAG,
+             "JKBMS->RS485 Growatt translator enabled (if=%s slave=%u fallbackSOC=%u%%)",
+             g_jkbmsRsGrowattCtx.ifName,
+             (unsigned)g_jkbmsRsGrowattCtx.slaveId,
+             (unsigned)g_jkbmsRsGrowattCtx.fakeSocPct);
+    return ESP_OK;
+#endif
+}
+
 void canRs485GrowattBridgeStop(void)
 {
     if (g_canRsGrowattTaskHandle != NULL) {
@@ -647,4 +993,14 @@ void canRs485GrowattBridgeStop(void)
         rs485SetDirection(g_canRsGrowattCtx.dirPin, false);
     }
     memset(&g_canRsGrowattCtx, 0, sizeof(g_canRsGrowattCtx));
+
+    if (g_jkbmsRsGrowattTaskHandle != NULL) {
+        vTaskDelete(g_jkbmsRsGrowattTaskHandle);
+        g_jkbmsRsGrowattTaskHandle = NULL;
+    }
+    if ((int)g_jkbmsRsGrowattCtx.dirPin >= 0) {
+        rs485SetDirection(g_jkbmsRsGrowattCtx.dirPin, false);
+    }
+    memset(&g_jkbmsRsGrowattCtx, 0, sizeof(g_jkbmsRsGrowattCtx));
 }
+

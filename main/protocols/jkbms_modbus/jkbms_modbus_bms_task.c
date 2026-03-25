@@ -9,6 +9,7 @@
 #include "orchestrator/protocol_types.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_poller.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_register_map.h"
+#include "runtime_settings.h"
 
 #include "driver/uart.h"
 #include "esp_log.h"
@@ -196,12 +197,16 @@ static void jkbmsModbusBmsTask(void *pv)
 {
     jkbmsModbusBmsTaskCtx_t *ctx = (jkbmsModbusBmsTaskCtx_t *)pv;
     uint8_t rxChunk[RS485_BUF_SIZE];
-    const uart_port_t rxUart = rs485GetUart1();
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+    const uint8_t bmsPort = (settings.bms_port == 2u) ? 2u : 1u;
+    const uart_port_t rxUart = (bmsPort == 2u) ? rs485GetUart2() : rs485GetUart1();
+    const gpio_num_t dirPin = (bmsPort == 2u) ? rs485GetDir2() : rs485GetDir1();
+    const char *ifName = (bmsPort == 2u) ? "JKBMS_RS485_2" : "JKBMS_RS485_1";
 
-    modbusDecoderInit(&ctx->decoder, "JKBMS_RS485", JKBMS_BMS_MODBUS_GAP_US);
+    modbusDecoderInit(&ctx->decoder, ifName, JKBMS_BMS_MODBUS_GAP_US);
     jkbmsModbusPollerInit(&ctx->poller,
-                          rs485GetUart1(),
-                          rs485GetDir1(),
+                          rxUart,
+                          dirPin,
                           (uint8_t)JKBMS_BMS_MODBUS_SLAVE_ADDR);
     uart_flush_input(rxUart);
 
