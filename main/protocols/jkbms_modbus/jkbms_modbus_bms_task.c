@@ -97,68 +97,222 @@ static uint16_t bswap16(uint16_t v)
     return (uint16_t)((v >> 8) | (v << 8));
 }
 
-static bool normalizeCellMv(uint16_t raw, uint16_t *mvOut)
+static uint16_t absDiffU16(uint16_t a, uint16_t b)
 {
-    uint16_t candidates[4];
-    size_t n = 0u;
-    const uint16_t rawSwap = bswap16(raw);
-
-    candidates[n++] = raw;
-    candidates[n++] = rawSwap;
-
-    /* Some JK firmwares expose cell mV scaled x10 (e.g. 45270 -> 4527mV). */
-    if (raw >= 30000u && raw <= 60000u) {
-        candidates[n++] = (uint16_t)(raw / 10u);
-    }
-    if (rawSwap >= 30000u && rawSwap <= 60000u) {
-        candidates[n++] = (uint16_t)(rawSwap / 10u);
-    }
-
-    for (size_t i = 0u; i < n; i++) {
-        const uint16_t mv = candidates[i];
-        if (mv >= 2500u && mv <= 5000u) {
-            if (mvOut != NULL) {
-                *mvOut = mv;
-            }
-            return true;
-        }
-    }
-
-    return false;
+    return (a >= b) ? (uint16_t)(a - b) : (uint16_t)(b - a);
 }
 
-static bool decodeCellAtAddr(const modbusDecoder_t *decoder, uint16_t addr, uint16_t *mvOut)
+static uint32_t absDiffU32(uint32_t a, uint32_t b)
 {
-    uint16_t raw = 0u;
-    if (!decoderGetU16(decoder, addr, &raw)) {
-        return false;
-    }
-    return normalizeCellMv(raw, mvOut);
+    return (a >= b) ? (uint32_t)(a - b) : (uint32_t)(b - a);
 }
 
 typedef enum {
-    CELL_MAP_STRIDE2 = 0,
-    CELL_MAP_STRIDE1 = 1
-} cell_map_mode_t;
+    CELL_VALUE_RAW = 0,
+    CELL_VALUE_SWAP = 1,
+    CELL_VALUE_RAW_DIV10 = 2,
+    CELL_VALUE_SWAP_DIV10 = 3,
+} cell_value_mode_t;
 
-static cell_map_mode_t detectCellMapMode(const modbusDecoder_t *decoder)
+typedef struct {
+    bool hasExpectedCount;
+    uint8_t expectedCount;
+    bool hasCellAvg;
+    uint16_t cellAvgMv;
+    bool hasCellDiff;
+    uint16_t cellDiffMv;
+    bool hasPackMv;
+    uint32_t packMv;
+    bool hasMinIdx;
+    uint8_t minIdx;
+    bool hasMaxIdx;
+    uint8_t maxIdx;
+} cell_expectation_t;
+
+typedef struct {
+    uint8_t stride;
+    uint8_t offset;
+    cell_value_mode_t mode;
+    uint8_t windowCount;
+    uint8_t validInWindow;
+    uint8_t headCount;
+    uint8_t gapCount;
+    int32_t score;
+    bool cellValid[JKBMS_MAX_CELLS];
+    uint16_t cellMv[JKBMS_MAX_CELLS];
+} cell_decode_candidate_t;
+
+static bool decodeCellRawWithMode(uint16_t raw, cell_value_mode_t mode, uint16_t *mvOut)
 {
-    uint8_t stride2Score = 0u;
-    uint8_t stride1Score = 0u;
-    uint16_t mv = 0u;
+    uint16_t candidate = 0u;
+    const uint16_t rawSwap = bswap16(raw);
 
-    for (uint8_t i = 0u; i < JKBMS_MAX_CELLS; i++) {
-        const uint16_t regStride2 = (uint16_t)(JKBMS_RT_REG_CELL0_MV + ((uint16_t)i * JKBMS_RT_CELL_STEP));
-        const uint16_t regStride1 = (uint16_t)(JKBMS_RT_REG_CELL0_MV + (uint16_t)i);
-        if (decodeCellAtAddr(decoder, regStride2, &mv)) {
-            stride2Score++;
+    switch (mode) {
+        case CELL_VALUE_RAW:
+            candidate = raw;
+            break;
+        case CELL_VALUE_SWAP:
+            candidate = rawSwap;
+            break;
+        case CELL_VALUE_RAW_DIV10:
+            candidate = (uint16_t)(raw / 10u);
+            break;
+        case CELL_VALUE_SWAP_DIV10:
+            candidate = (uint16_t)(rawSwap / 10u);
+            break;
+        default:
+            return false;
+    }
+
+    /* Keep a broad acceptance range to also capture abnormal cells. */
+    if (candidate < 500u || candidate > 6000u) {
+        return false;
+    }
+
+    if (mvOut != NULL) {
+        *mvOut = candidate;
+    }
+    return true;
+}
+
+static bool normalizeCellMv(uint16_t raw, uint16_t *mvOut)
+{
+    uint16_t best = 0u;
+    bool have = false;
+
+    for (int mode = CELL_VALUE_RAW; mode <= CELL_VALUE_SWAP_DIV10; mode++) {
+        uint16_t mv = 0u;
+        if (!decodeCellRawWithMode(raw, (cell_value_mode_t)mode, &mv)) {
+            continue;
         }
-        if (decodeCellAtAddr(decoder, regStride1, &mv)) {
-            stride1Score++;
+        if (!have || absDiffU16(mv, 4000u) < absDiffU16(best, 4000u)) {
+            best = mv;
+            have = true;
         }
     }
 
-    return (stride1Score > stride2Score) ? CELL_MAP_STRIDE1 : CELL_MAP_STRIDE2;
+    if (!have) {
+        return false;
+    }
+
+    if (mvOut != NULL) {
+        *mvOut = best;
+    }
+    return true;
+}
+
+static void evaluateCellDecodeCandidate(const modbusDecoder_t *decoder,
+                                        uint8_t stride,
+                                        uint8_t offset,
+                                        cell_value_mode_t mode,
+                                        const cell_expectation_t *exp,
+                                        cell_decode_candidate_t *out)
+{
+    uint32_t sumMv = 0u;
+    uint16_t minMv = UINT16_MAX;
+    uint16_t maxMv = 0u;
+
+    if (out == NULL) {
+        return;
+    }
+
+    memset(out, 0, sizeof(*out));
+    out->stride = stride;
+    out->offset = offset;
+    out->mode = mode;
+    out->windowCount = (exp != NULL && exp->hasExpectedCount && exp->expectedCount > 0u)
+                           ? exp->expectedCount
+                           : JKBMS_MAX_CELLS;
+
+    for (uint8_t i = 0u; i < JKBMS_MAX_CELLS; i++) {
+        const uint16_t addr = (uint16_t)(JKBMS_RT_REG_CELL0_MV + (uint16_t)offset + ((uint16_t)i * (uint16_t)stride));
+        uint16_t raw = 0u;
+        uint16_t mv = 0u;
+        if (!decoderGetU16(decoder, addr, &raw)) {
+            continue;
+        }
+        if (!decodeCellRawWithMode(raw, mode, &mv)) {
+            continue;
+        }
+        out->cellValid[i] = true;
+        out->cellMv[i] = mv;
+    }
+
+    for (uint8_t i = 0u; i < JKBMS_MAX_CELLS; i++) {
+        if (out->cellValid[i]) {
+            out->headCount = (uint8_t)(i + 1u);
+        } else {
+            break;
+        }
+    }
+
+    for (uint8_t i = 0u; i < out->windowCount; i++) {
+        if (out->cellValid[i]) {
+            const uint16_t mv = out->cellMv[i];
+            out->validInWindow++;
+            sumMv += mv;
+            if (mv < minMv) {
+                minMv = mv;
+            }
+            if (mv > maxMv) {
+                maxMv = mv;
+            }
+        } else {
+            out->gapCount++;
+        }
+    }
+
+    if (out->validInWindow == 0u) {
+        out->score = INT_MIN / 2;
+        return;
+    }
+
+    int32_t score = ((int32_t)out->validInWindow * 200) +
+                    ((int32_t)out->headCount * 20) -
+                    ((int32_t)out->gapCount * 35);
+
+    if (exp != NULL && exp->hasExpectedCount) {
+        const int deltaCount = (int)out->validInWindow - (int)exp->expectedCount;
+        score -= (int32_t)((deltaCount < 0 ? -deltaCount : deltaCount) * 90);
+    }
+
+    if (exp != NULL && exp->hasCellAvg) {
+        const uint16_t avgMv = (uint16_t)(sumMv / (uint32_t)out->validInWindow);
+        score -= (int32_t)(absDiffU16(avgMv, exp->cellAvgMv) / 2u);
+    }
+
+    if (exp != NULL && exp->hasPackMv && exp->hasExpectedCount &&
+        out->validInWindow >= ((exp->expectedCount + 1u) / 2u)) {
+        const uint16_t avgMv = (uint16_t)(sumMv / (uint32_t)out->validInWindow);
+        const uint32_t estPackMv = (uint32_t)avgMv * (uint32_t)exp->expectedCount;
+        score -= (int32_t)(absDiffU32(estPackMv, exp->packMv) / 20u);
+    }
+
+    if (exp != NULL && exp->hasCellDiff && out->validInWindow >= 2u && minMv <= maxMv) {
+        const uint16_t spreadMv = (uint16_t)(maxMv - minMv);
+        score -= (int32_t)(absDiffU16(spreadMv, exp->cellDiffMv) * 2u);
+    }
+
+    if (exp != NULL && exp->hasMaxIdx && exp->maxIdx >= 1u && exp->maxIdx <= out->windowCount &&
+        out->cellValid[exp->maxIdx - 1u] && out->cellMv[exp->maxIdx - 1u] >= maxMv) {
+        score += 40;
+    }
+
+    if (exp != NULL && exp->hasMinIdx && exp->minIdx >= 1u && exp->minIdx <= out->windowCount &&
+        out->cellValid[exp->minIdx - 1u] && out->cellMv[exp->minIdx - 1u] <= minMv) {
+        score += 40;
+    }
+
+    if (out->headCount < 4u) {
+        score -= 400;
+    }
+
+    /* Slight preference for protocol-documented map start (offset 0). */
+    if (offset != 0u) {
+        score -= 10;
+    }
+
+    out->score = score;
 }
 
 static bool normalizeSignedDeciC(int16_t raw, int16_t *outC)
@@ -386,88 +540,25 @@ static bool decodeSohPrecharge(const modbusDecoder_t *decoder,
 
 static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_snapshot_t *out)
 {
+    static const uint8_t k_strides[] = {1u, (uint8_t)JKBMS_RT_CELL_STEP};
+    static const uint8_t k_offsets[] = {0u, 1u};
+
     if (decoder == NULL || out == NULL) {
         return false;
     }
 
     memset(out, 0, sizeof(*out));
 
-    const cell_map_mode_t cellMapMode = detectCellMapMode(decoder);
-    bool cellValid[JKBMS_MAX_CELLS] = {0};
-    uint8_t validCells = 0u;
-    uint8_t highestCellIdx = 0u;
-    uint16_t minMv = UINT16_MAX;
-    uint16_t maxMv = 0u;
-    uint8_t minIdx = 0u;
-    uint8_t maxIdx = 0u;
-
-    for (uint8_t i = 0; i < JKBMS_MAX_CELLS; i++) {
-        const uint16_t reg = (cellMapMode == CELL_MAP_STRIDE2)
-                                 ? (uint16_t)(JKBMS_RT_REG_CELL0_MV + ((uint16_t)i * JKBMS_RT_CELL_STEP))
-                                 : (uint16_t)(JKBMS_RT_REG_CELL0_MV + (uint16_t)i);
-        uint16_t mv = 0u;
-        if (!decodeCellAtAddr(decoder, reg, &mv)) {
-            continue;
-        }
-
-        cellValid[i] = true;
-        out->cellMv[i] = mv;
-        validCells++;
-        if ((uint8_t)(i + 1u) > highestCellIdx) {
-            highestCellIdx = (uint8_t)(i + 1u);
-        }
-    }
-
-    /* Determine a stable cell count as contiguous populated cells from cell #1. */
-    uint8_t contiguousCount = 0u;
-    bool started = false;
-    uint8_t gapRun = 0u;
-    for (uint8_t i = 0u; i < JKBMS_MAX_CELLS; i++) {
-        if (cellValid[i]) {
-            contiguousCount = (uint8_t)(i + 1u);
-            started = true;
-            gapRun = 0u;
-        } else if (started) {
-            gapRun++;
-            if (gapRun >= 2u) {
-                break;
-            }
-        }
-    }
-
-    out->cellCount = (contiguousCount > 0u) ? contiguousCount : highestCellIdx;
-    if (validCells > 0u && out->cellCount > 0u) {
-        minMv = UINT16_MAX;
-        maxMv = 0u;
-        minIdx = 0u;
-        maxIdx = 0u;
-        for (uint8_t i = 0u; i < out->cellCount; i++) {
-            if (!cellValid[i]) {
-                continue;
-            }
-            const uint16_t mv = out->cellMv[i];
-            if (mv < minMv) {
-                minMv = mv;
-                minIdx = (uint8_t)(i + 1u);
-            }
-            if (mv > maxMv) {
-                maxMv = mv;
-                maxIdx = (uint8_t)(i + 1u);
-            }
-        }
-        if (minIdx != 0u && maxIdx != 0u) {
-            out->hasCellExtremes = true;
-            out->minCellMv = minMv;
-            out->maxCellMv = maxMv;
-            out->minCellIndex = minIdx;
-            out->maxCellIndex = maxIdx;
-        }
-    }
+    cell_expectation_t exp = {0};
+    cell_decode_candidate_t bestCandidate = {0};
+    bestCandidate.score = INT_MIN;
 
     uint16_t u16 = 0u;
     if (decoderGetU16(decoder, JKBMS_RT_REG_CELL_AVG_MV, &u16) && normalizeCellMv(u16, &u16)) {
         out->hasCellAvgMv = true;
         out->cellAvgMv = u16;
+        exp.hasCellAvg = true;
+        exp.cellAvgMv = u16;
     }
     if (decoderGetU16(decoder, JKBMS_RT_REG_CELL_VDIFF_MAX_MV, &u16)) {
         if (u16 > 5000u) {
@@ -475,26 +566,136 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
         }
         out->hasCellDiffMaxMv = true;
         out->cellDiffMaxMv = u16;
+        exp.hasCellDiff = true;
+        exp.cellDiffMv = u16;
     }
-
     if (decoderGetU16(decoder, JKBMS_RT_REG_MAX_MIN_CELL_NBR_U8X2, &u16)) {
         const uint8_t idxA = (uint8_t)((u16 >> 8) & 0xFFu);
         const uint8_t idxB = (uint8_t)(u16 & 0xFFu);
-        const bool idxAValid = (idxA >= 1u && idxA <= JKBMS_MAX_CELLS);
-        const bool idxBValid = (idxB >= 1u && idxB <= JKBMS_MAX_CELLS);
+        if (idxA >= 1u && idxA <= JKBMS_MAX_CELLS) {
+            exp.hasMaxIdx = true;
+            exp.maxIdx = idxA;
+        }
+        if (idxB >= 1u && idxB <= JKBMS_MAX_CELLS) {
+            exp.hasMinIdx = true;
+            exp.minIdx = idxB;
+        }
+    }
 
-        if (idxAValid && idxBValid) {
-            if (out->hasCellExtremes && idxA == out->minCellIndex && idxB == out->maxCellIndex) {
-                out->minCellIndex = idxA;
-                out->maxCellIndex = idxB;
-            } else if (out->hasCellExtremes && idxA == out->maxCellIndex && idxB == out->minCellIndex) {
-                out->maxCellIndex = idxA;
-                out->minCellIndex = idxB;
-            } else {
-                /* Protocol naming suggests max/min order. */
-                out->maxCellIndex = idxA;
-                out->minCellIndex = idxB;
+    uint32_t u32 = 0u;
+    if (decodeU32Best(decoder, JKBMS_RT_REG_PACK_VOLT_MV_U32, 1000u, 200000u, &u32)) {
+        out->hasPackVoltageMv = true;
+        out->packVoltageMv = u32;
+        exp.hasPackMv = true;
+        exp.packMv = u32;
+    }
+
+    if (exp.hasPackMv && exp.hasCellAvg && exp.cellAvgMv > 0u) {
+        const uint32_t estimatedCells = (exp.packMv + ((uint32_t)exp.cellAvgMv / 2u)) / (uint32_t)exp.cellAvgMv;
+        if (estimatedCells >= 1u && estimatedCells <= JKBMS_MAX_CELLS) {
+            exp.hasExpectedCount = true;
+            exp.expectedCount = (uint8_t)estimatedCells;
+        }
+    }
+    if (!exp.hasExpectedCount && (exp.hasMaxIdx || exp.hasMinIdx)) {
+        uint8_t idxHint = 0u;
+        if (exp.hasMaxIdx && exp.maxIdx > idxHint) {
+            idxHint = exp.maxIdx;
+        }
+        if (exp.hasMinIdx && exp.minIdx > idxHint) {
+            idxHint = exp.minIdx;
+        }
+        if (idxHint > 0u) {
+            exp.hasExpectedCount = true;
+            exp.expectedCount = idxHint;
+        }
+    }
+
+    for (size_t si = 0u; si < (sizeof(k_strides) / sizeof(k_strides[0])); si++) {
+        for (size_t oi = 0u; oi < (sizeof(k_offsets) / sizeof(k_offsets[0])); oi++) {
+            for (int mode = CELL_VALUE_RAW; mode <= CELL_VALUE_SWAP_DIV10; mode++) {
+                cell_decode_candidate_t candidate = {0};
+                evaluateCellDecodeCandidate(decoder,
+                                            k_strides[si],
+                                            k_offsets[oi],
+                                            (cell_value_mode_t)mode,
+                                            &exp,
+                                            &candidate);
+                if (candidate.score > bestCandidate.score) {
+                    bestCandidate = candidate;
+                }
             }
+        }
+    }
+
+    uint8_t targetCellCount = 0u;
+    if (exp.hasExpectedCount && exp.expectedCount > 0u) {
+        targetCellCount = exp.expectedCount;
+    } else {
+        targetCellCount = bestCandidate.headCount;
+    }
+    if (targetCellCount > JKBMS_MAX_CELLS) {
+        targetCellCount = JKBMS_MAX_CELLS;
+    }
+    out->cellCount = targetCellCount;
+
+    uint8_t validCells = 0u;
+    uint16_t minMv = UINT16_MAX;
+    uint16_t maxMv = 0u;
+    uint8_t minIdx = 0u;
+    uint8_t maxIdx = 0u;
+
+    for (uint8_t i = 0u; i < out->cellCount; i++) {
+        if (!bestCandidate.cellValid[i]) {
+            continue;
+        }
+        const uint16_t mv = bestCandidate.cellMv[i];
+        out->cellMv[i] = mv;
+        validCells++;
+        if (mv < minMv) {
+            minMv = mv;
+            minIdx = (uint8_t)(i + 1u);
+        }
+        if (mv > maxMv) {
+            maxMv = mv;
+            maxIdx = (uint8_t)(i + 1u);
+        }
+    }
+
+    /* Reject sparse/noisy cell maps: keep cells only when at least 4 channels decode cleanly. */
+    if (validCells < 4u) {
+        out->cellCount = 0u;
+        memset(out->cellMv, 0, sizeof(out->cellMv));
+        minIdx = 0u;
+        maxIdx = 0u;
+        validCells = 0u;
+    }
+
+    if (validCells >= 2u && minIdx != 0u && maxIdx != 0u) {
+        out->hasCellExtremes = true;
+        out->minCellMv = minMv;
+        out->maxCellMv = maxMv;
+        out->minCellIndex = minIdx;
+        out->maxCellIndex = maxIdx;
+    }
+
+    if (out->hasCellExtremes && exp.hasMaxIdx && exp.hasMinIdx &&
+        exp.maxIdx >= 1u && exp.maxIdx <= out->cellCount &&
+        exp.minIdx >= 1u && exp.minIdx <= out->cellCount &&
+        bestCandidate.cellValid[exp.maxIdx - 1u] &&
+        bestCandidate.cellValid[exp.minIdx - 1u]) {
+        const uint16_t vA = out->cellMv[exp.maxIdx - 1u];
+        const uint16_t vB = out->cellMv[exp.minIdx - 1u];
+        if (vA >= vB) {
+            out->maxCellIndex = exp.maxIdx;
+            out->minCellIndex = exp.minIdx;
+            out->maxCellMv = vA;
+            out->minCellMv = vB;
+        } else {
+            out->maxCellIndex = exp.minIdx;
+            out->minCellIndex = exp.maxIdx;
+            out->maxCellMv = vB;
+            out->minCellMv = vA;
         }
     }
 
@@ -510,12 +711,6 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
     if (decoderGetI16(decoder, JKBMS_RT_REG_TEMP_BAT2_DECIC, &i16) && normalizeSignedDeciC(i16, &i16)) {
         out->hasTempBat2C = true;
         out->tempBat2C = i16;
-    }
-
-    uint32_t u32 = 0u;
-    if (decodeU32Best(decoder, JKBMS_RT_REG_PACK_VOLT_MV_U32, 1000u, 200000u, &u32)) {
-        out->hasPackVoltageMv = true;
-        out->packVoltageMv = u32;
     }
 
     int32_t i32 = 0;
@@ -586,10 +781,10 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
                  out->hasRemainMah ||
                  out->hasFullMah ||
                  out->hasCycles ||
-                 out->hasCellExtremes ||
                  out->hasCellAvgMv ||
                  out->hasCellDiffMaxMv ||
-                 out->hasAlarmBits;
+                 out->hasAlarmBits ||
+                 (out->hasCellExtremes && out->cellCount >= 4u);
 
     return out->valid;
 }

@@ -113,6 +113,22 @@ static void reqQueuePush(modbusDecoder_t *d,
         return;
     }
 
+    if (d->reqQSize > 0u) {
+        const uint8_t tailPrev = (uint8_t)((d->reqQHead + d->reqQSize - 1u) % MODBUS_DECODER_REQ_QUEUE_LEN);
+        if (d->reqQSlave[tailPrev] == slave &&
+            d->reqQFunc[tailPrev] == func &&
+            d->reqQStart[tailPrev] == start &&
+            d->reqQCount[tailPrev] == count) {
+            int64_t dUs = tsUs - d->reqQTsUs[tailPrev];
+            if (dUs < 0) {
+                dUs = -dUs;
+            }
+            if (dUs < 50000LL) {
+                return;
+            }
+        }
+    }
+
     if (d->reqQSize >= MODBUS_DECODER_REQ_QUEUE_LEN) {
         d->reqQHead = (uint8_t)((d->reqQHead + 1u) % MODBUS_DECODER_REQ_QUEUE_LEN);
         d->reqQSize--;
@@ -144,7 +160,7 @@ static bool reqQueuePopForResp(modbusDecoder_t *d,
         }
 
         const uint16_t reqCount = d->reqQCount[idx];
-        if (reqCount > 0u && respRegCount > reqCount) {
+        if (reqCount != respRegCount) {
             continue;
         }
 
@@ -245,7 +261,12 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
                  (unsigned)startBase,
                  regCount,
                  crcOk ? "OK" : "BAD");
-    } else if (d->lastReqValid && d->lastReqSlave == slave && d->lastReqFunc == func) {
+    } else if (d->lastReqValid &&
+               d->lastReqSlave == slave &&
+               d->lastReqFunc == func &&
+               d->lastReqCount == (uint16_t)regCount &&
+               (d->lastByteUs - d->lastReqUs) >= 0 &&
+               (d->lastByteUs - d->lastReqUs) < 500000LL) {
         startBase = d->lastReqStart;
         MODBUS_RUNTIME_LOGI(
                  "RESP on %s: slave=%u func=0x%02X start=0x%04X regs=%d crc=%s",
