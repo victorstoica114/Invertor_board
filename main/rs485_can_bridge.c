@@ -639,14 +639,6 @@ esp_err_t canRs485GrowattBridgeEnable(uart_port_t inverterUart,
 
     rs485SetDirection(g_canRsGrowattCtx.dirPin, false);
 
-    esp_err_t flushErr = uart_flush_input(g_canRsGrowattCtx.uart);
-    if (flushErr != ESP_OK) {
-        ESP_LOGW(EXAMPLE_TAG,
-                 "CAN->RS485 translator uart_flush_input failed on %s (err=0x%x)",
-                 g_canRsGrowattCtx.ifName,
-                 (unsigned)flushErr);
-    }
-
     const int drained = drainUartRx(g_canRsGrowattCtx.uart, 4096);
     if (drained > 0) {
         ESP_LOGI(EXAMPLE_TAG,
@@ -680,6 +672,7 @@ esp_err_t canRs485GrowattBridgeEnable(uart_port_t inverterUart,
 
 void canRs485GrowattBridgeStop(void)
 {
+    ESP_LOGI(EXAMPLE_TAG, "CAN->RS485 translator stop requested");
     if (g_canRsGrowattTaskHandle != NULL) {
         vTaskDelete(g_canRsGrowattTaskHandle);
         g_canRsGrowattTaskHandle = NULL;
@@ -687,9 +680,6 @@ void canRs485GrowattBridgeStop(void)
     if ((int)g_canRsGrowattCtx.dirPin >= 0) {
         rs485SetDirection(g_canRsGrowattCtx.dirPin, false);
     }
-    if ((int)g_canRsGrowattCtx.uart >= 0) {
-        (void)uart_flush_input(g_canRsGrowattCtx.uart);
-        (void)drainUartRx(g_canRsGrowattCtx.uart, 4096);
-    }
     memset(&g_canRsGrowattCtx, 0, sizeof(g_canRsGrowattCtx));
+    ESP_LOGI(EXAMPLE_TAG, "CAN->RS485 translator stopped");
 }
