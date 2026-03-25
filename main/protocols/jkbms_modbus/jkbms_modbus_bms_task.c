@@ -99,14 +99,13 @@ static uint16_t bswap16(uint16_t v)
 
 static bool normalizeCellMv(uint16_t raw, uint16_t *mvOut)
 {
-    uint16_t candidates[3];
+    uint16_t candidates[2];
     candidates[0] = raw;
     candidates[1] = bswap16(raw);
-    candidates[2] = (raw > 5000u) ? (uint16_t)(raw / 10u) : raw;
 
     for (size_t i = 0u; i < (sizeof(candidates) / sizeof(candidates[0])); i++) {
         uint16_t mv = candidates[i];
-        if (mv >= 1000u && mv <= 5000u) {
+        if (mv >= 2000u && mv <= 5000u) {
             if (mvOut != NULL) {
                 *mvOut = mv;
             }
@@ -114,15 +113,41 @@ static bool normalizeCellMv(uint16_t raw, uint16_t *mvOut)
         }
     }
 
-    if (raw >= 100u && raw <= 600u) {
-        uint16_t mv = (uint16_t)(raw * 10u);
-        if (mvOut != NULL) {
-            *mvOut = mv;
+    return false;
+}
+
+static bool decodeCellAtAddr(const modbusDecoder_t *decoder, uint16_t addr, uint16_t *mvOut)
+{
+    uint16_t raw = 0u;
+    if (!decoderGetU16(decoder, addr, &raw)) {
+        return false;
+    }
+    return normalizeCellMv(raw, mvOut);
+}
+
+typedef enum {
+    CELL_MAP_STRIDE2 = 0,
+    CELL_MAP_STRIDE1 = 1
+} cell_map_mode_t;
+
+static cell_map_mode_t detectCellMapMode(const modbusDecoder_t *decoder)
+{
+    uint8_t stride2Score = 0u;
+    uint8_t stride1Score = 0u;
+    uint16_t mv = 0u;
+
+    for (uint8_t i = 0u; i < JKBMS_MAX_CELLS; i++) {
+        const uint16_t regStride2 = (uint16_t)(JKBMS_RT_REG_CELL0_MV + ((uint16_t)i * JKBMS_RT_CELL_STEP));
+        const uint16_t regStride1 = (uint16_t)(JKBMS_RT_REG_CELL0_MV + (uint16_t)i);
+        if (decodeCellAtAddr(decoder, regStride2, &mv)) {
+            stride2Score++;
         }
-        return true;
+        if (decodeCellAtAddr(decoder, regStride1, &mv)) {
+            stride1Score++;
+        }
     }
 
-    return false;
+    return (stride1Score > stride2Score) ? CELL_MAP_STRIDE1 : CELL_MAP_STRIDE2;
 }
 
 static bool normalizeSignedDeciC(int16_t raw, int16_t *outC)
@@ -356,6 +381,8 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
 
     memset(out, 0, sizeof(*out));
 
+    const cell_map_mode_t cellMapMode = detectCellMapMode(decoder);
+    bool cellValid[JKBMS_MAX_CELLS] = {0};
     uint8_t validCells = 0u;
     uint8_t highestCellIdx = 0u;
     uint16_t minMv = UINT16_MAX;
@@ -364,48 +391,66 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
     uint8_t maxIdx = 0u;
 
     for (uint8_t i = 0; i < JKBMS_MAX_CELLS; i++) {
-        const uint16_t regPrimary = (uint16_t)(JKBMS_RT_REG_CELL0_MV + ((uint16_t)i * JKBMS_RT_CELL_STEP));
-        const uint16_t regCompact = (uint16_t)(JKBMS_RT_REG_CELL0_MV + (uint16_t)i);
-        const uint16_t regOdd = (uint16_t)(regPrimary + 1u);
-        uint16_t raw = 0u;
+        const uint16_t reg = (cellMapMode == CELL_MAP_STRIDE2)
+                                 ? (uint16_t)(JKBMS_RT_REG_CELL0_MV + ((uint16_t)i * JKBMS_RT_CELL_STEP))
+                                 : (uint16_t)(JKBMS_RT_REG_CELL0_MV + (uint16_t)i);
         uint16_t mv = 0u;
-        bool ok = false;
-
-        if (decoderGetU16(decoder, regPrimary, &raw) && normalizeCellMv(raw, &mv)) {
-            ok = true;
-        } else if (decoderGetU16(decoder, regCompact, &raw) && normalizeCellMv(raw, &mv)) {
-            ok = true;
-        } else if (decoderGetU16(decoder, regOdd, &raw) && normalizeCellMv(raw, &mv)) {
-            ok = true;
-        }
-
-        if (!ok) {
+        if (!decodeCellAtAddr(decoder, reg, &mv)) {
             continue;
         }
 
+        cellValid[i] = true;
         out->cellMv[i] = mv;
         validCells++;
         if ((uint8_t)(i + 1u) > highestCellIdx) {
             highestCellIdx = (uint8_t)(i + 1u);
         }
+    }
 
-        if (mv < minMv) {
-            minMv = mv;
-            minIdx = (uint8_t)(i + 1u);
-        }
-        if (mv > maxMv) {
-            maxMv = mv;
-            maxIdx = (uint8_t)(i + 1u);
+    /* Determine a stable cell count as contiguous populated cells from cell #1. */
+    uint8_t contiguousCount = 0u;
+    bool started = false;
+    uint8_t gapRun = 0u;
+    for (uint8_t i = 0u; i < JKBMS_MAX_CELLS; i++) {
+        if (cellValid[i]) {
+            contiguousCount = (uint8_t)(i + 1u);
+            started = true;
+            gapRun = 0u;
+        } else if (started) {
+            gapRun++;
+            if (gapRun >= 2u) {
+                break;
+            }
         }
     }
 
-    out->cellCount = (validCells > 0u) ? highestCellIdx : 0u;
-    if (validCells > 0u) {
-        out->hasCellExtremes = true;
-        out->minCellMv = minMv;
-        out->maxCellMv = maxMv;
-        out->minCellIndex = minIdx;
-        out->maxCellIndex = maxIdx;
+    out->cellCount = (contiguousCount > 0u) ? contiguousCount : highestCellIdx;
+    if (validCells > 0u && out->cellCount > 0u) {
+        minMv = UINT16_MAX;
+        maxMv = 0u;
+        minIdx = 0u;
+        maxIdx = 0u;
+        for (uint8_t i = 0u; i < out->cellCount; i++) {
+            if (!cellValid[i]) {
+                continue;
+            }
+            const uint16_t mv = out->cellMv[i];
+            if (mv < minMv) {
+                minMv = mv;
+                minIdx = (uint8_t)(i + 1u);
+            }
+            if (mv > maxMv) {
+                maxMv = mv;
+                maxIdx = (uint8_t)(i + 1u);
+            }
+        }
+        if (minIdx != 0u && maxIdx != 0u) {
+            out->hasCellExtremes = true;
+            out->minCellMv = minMv;
+            out->maxCellMv = maxMv;
+            out->minCellIndex = minIdx;
+            out->maxCellIndex = maxIdx;
+        }
     }
 
     uint16_t u16 = 0u;
