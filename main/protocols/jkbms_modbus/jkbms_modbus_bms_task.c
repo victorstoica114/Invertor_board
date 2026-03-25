@@ -99,13 +99,24 @@ static uint16_t bswap16(uint16_t v)
 
 static bool normalizeCellMv(uint16_t raw, uint16_t *mvOut)
 {
-    uint16_t candidates[2];
-    candidates[0] = raw;
-    candidates[1] = bswap16(raw);
+    uint16_t candidates[4];
+    size_t n = 0u;
+    const uint16_t rawSwap = bswap16(raw);
 
-    for (size_t i = 0u; i < (sizeof(candidates) / sizeof(candidates[0])); i++) {
-        uint16_t mv = candidates[i];
-        if (mv >= 2000u && mv <= 5000u) {
+    candidates[n++] = raw;
+    candidates[n++] = rawSwap;
+
+    /* Some JK firmwares expose cell mV scaled x10 (e.g. 45270 -> 4527mV). */
+    if (raw >= 30000u && raw <= 60000u) {
+        candidates[n++] = (uint16_t)(raw / 10u);
+    }
+    if (rawSwap >= 30000u && rawSwap <= 60000u) {
+        candidates[n++] = (uint16_t)(rawSwap / 10u);
+    }
+
+    for (size_t i = 0u; i < n; i++) {
+        const uint16_t mv = candidates[i];
+        if (mv >= 2500u && mv <= 5000u) {
             if (mvOut != NULL) {
                 *mvOut = mv;
             }
