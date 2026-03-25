@@ -341,12 +341,25 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "row('0x371 Temp Min Sensor','#'+t.deye_temp_min_sensor)"
         "]);"
         "}"
+        "function jkbmsCard(t){"
+        "if(t.protocol!=='JKBMS_MODBUS'){return '';}"
+        "return card('JKBMS Runtime',["
+        "row('Pack Voltage',t.pack_voltage_v.toFixed(3)+' V'),"
+        "row('Pack Power',t.pack_power_w.toFixed(1)+' W'),"
+        "row('Balance Current',t.balance_current_a.toFixed(3)+' A'),"
+        "row('Remaining / Full',t.remaining_ah.toFixed(3)+' / '+t.full_ah.toFixed(3)+' Ah'),"
+        "row('Cell Avg / Diff',t.cell_avg_v.toFixed(3)+' / '+t.cell_diff_v.toFixed(3)+' V'),"
+        "row('Alarm Raw','0x'+t.alarm_raw.toString(16).toUpperCase().padStart(8,'0')),"
+        "row('Precharge',String(t.precharge_state))"
+        "]);"
+        "}"
         "function renderTelemetry(t){"
         "const cards=["
         "card('Runtime',[row('Valid',t.valid?'YES':'NO'),row('Source',t.source),row('Protocol',t.protocol),row('Status 0x63',t.status_63)]),"
-        "card('Pack',[row('Current',t.current_a.toFixed(2)+' A'),row('SOC',t.soc_pct+' %'),row('SOH',t.soh_pct+' %'),row('Cycles',t.cycles)]),"
+        "card('Pack',[row('Voltage',t.pack_voltage_v.toFixed(3)+' V'),row('Current',t.current_a.toFixed(2)+' A'),row('Power',t.pack_power_w.toFixed(1)+' W'),row('SOC',t.soc_pct+' %'),row('SOH',t.soh_pct+' %'),row('Cycles',t.cycles)]),"
         "card('Cells',[row('Cell Max',t.cell_max_v.toFixed(3)+' V @ #'+t.cell_max_idx),row('Cell Min',t.cell_min_v.toFixed(3)+' V @ #'+t.cell_min_idx),row('Delta',t.delta_v.toFixed(3)+' V')]),"
         "card('Temperatures',[row('MOS',t.temp_mos_c.toFixed(1)+' C'),row('T1',t.temp_t1_c.toFixed(1)+' C'),row('T2',t.temp_t2_c.toFixed(1)+' C'),row('T4',t.temp_t4_c.toFixed(1)+' C'),row('T5',t.temp_t5_c.toFixed(1)+' C')]),"
+        "jkbmsCard(t),"
         "miscCard(t),"
         "cellGridCard(t),"
         "alertBadges('Protections','prot',t.protections),"
@@ -485,6 +498,11 @@ static esp_err_t telemetryHandler(httpd_req_t *req)
                     "\"source\":\"%s\","
                     "\"protocol\":\"%s\","
                     "\"current_a\":%.2f,"
+                    "\"pack_voltage_v\":%.3f,"
+                    "\"pack_power_w\":%.1f,"
+                    "\"balance_current_a\":%.3f,"
+                    "\"remaining_ah\":%.3f,"
+                    "\"full_ah\":%.3f,"
                     "\"soc_pct\":%u,"
                     "\"soh_pct\":%u,"
                     "\"cycles\":%u,"
@@ -504,6 +522,10 @@ static esp_err_t telemetryHandler(httpd_req_t *req)
                     "\"deye_temp_min_sensor\":%u,"
                     "\"state_flags\":\"%s\","
                     "\"cell_count\":%u,"
+                    "\"cell_avg_v\":%.3f,"
+                    "\"cell_diff_v\":%.3f,"
+                    "\"alarm_raw\":%u,"
+                    "\"precharge_state\":%u,"
                     "\"protections\":\"%s\","
                     "\"alarms\":\"%s\","
                     "\"warnings\":\"%s\","
@@ -512,6 +534,11 @@ static esp_err_t telemetryHandler(httpd_req_t *req)
                     snap.source,
                     snap.protocol,
                     (double)snap.currentA,
+                    (double)snap.packVoltageV,
+                    (double)snap.packPowerW,
+                    (double)snap.balanceCurrentA,
+                    (double)snap.remainingAh,
+                    (double)snap.fullAh,
                     (unsigned)snap.socPct,
                     (unsigned)snap.sohPct,
                     (unsigned)snap.cycles,
@@ -531,6 +558,10 @@ static esp_err_t telemetryHandler(httpd_req_t *req)
                     (unsigned)snap.deyeTempMinSensor,
                     snap.stateFlags,
                     (unsigned)snap.cellCount,
+                    (double)snap.cellAvgV,
+                    (double)snap.cellDiffV,
+                    (unsigned)snap.alarmRaw,
+                    (unsigned)snap.prechargeState,
                     snap.protections,
                     snap.alarms,
                     snap.warnings);

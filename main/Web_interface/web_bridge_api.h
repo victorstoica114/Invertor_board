@@ -12,6 +12,11 @@ typedef struct {
     char source[24];
     char protocol[24];
     float currentA;
+    float packVoltageV;
+    float packPowerW;
+    float balanceCurrentA;
+    float remainingAh;
+    float fullAh;
     uint16_t cycles;
     uint8_t socPct;
     uint8_t sohPct;
@@ -30,7 +35,11 @@ typedef struct {
     uint8_t deyeTempMaxSensor;
     uint8_t deyeTempMinSensor;
     uint8_t cellCount;
-    float cellVoltagesV[16];
+    float cellVoltagesV[32];
+    float cellAvgV;
+    float cellDiffV;
+    uint32_t alarmRaw;
+    uint8_t prechargeState;
     char stateFlags[128];
     char protections[256];
     char alarms[256];

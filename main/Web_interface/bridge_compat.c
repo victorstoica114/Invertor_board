@@ -1,5 +1,6 @@
 #include "Web_interface/web_bridge_api.h"
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -54,6 +55,131 @@ static const char *protocolToStr(uint8_t protocol)
     }
 }
 
+static void formatBitList(uint32_t bits, const char *prefix, char *out, size_t outSize)
+{
+    size_t used = 0u;
+    if (out == NULL || outSize == 0u) {
+        return;
+    }
+
+    out[0] = '\0';
+    if (bits == 0u) {
+        return;
+    }
+
+    for (uint8_t i = 0; i < 32u; i++) {
+        if ((bits & (1u << i)) == 0u) {
+            continue;
+        }
+
+        int w = snprintf(out + used,
+                         outSize - used,
+                         "%s%s%u",
+                         (used == 0u) ? "" : ", ",
+                         (prefix != NULL) ? prefix : "B",
+                         (unsigned)i);
+        if (w <= 0) {
+            break;
+        }
+        if ((size_t)w >= (outSize - used)) {
+            used = outSize - 1u;
+            out[used] = '\0';
+            break;
+        }
+        used += (size_t)w;
+    }
+}
+
+static void fillTelemetryFromJkbmsSnapshot(const jkbms_modbus_snapshot_t *snapshot,
+                                           bridgeTelemetrySnapshot_t *out)
+{
+    if (snapshot == NULL || out == NULL || !snapshot->valid) {
+        return;
+    }
+
+    out->valid = true;
+    snprintf(out->source, sizeof(out->source), "%s", "JKBMS_BMS_TASK");
+    snprintf(out->protocol, sizeof(out->protocol), "%s", "JKBMS_MODBUS");
+
+    if (snapshot->hasSoc) {
+        out->socPct = snapshot->socPct;
+    }
+    if (snapshot->hasSoh) {
+        out->sohPct = snapshot->sohPct;
+    }
+    if (snapshot->hasCycles) {
+        out->cycles = (uint16_t)((snapshot->cycles > 65535u) ? 65535u : snapshot->cycles);
+    }
+
+    if (snapshot->hasPackVoltageMv) {
+        out->packVoltageV = (float)snapshot->packVoltageMv / 1000.0f;
+    }
+    if (snapshot->hasPackCurrentMa) {
+        out->currentA = (float)snapshot->packCurrentMa / 1000.0f;
+    }
+    if (snapshot->hasPackPowerMw) {
+        out->packPowerW = (float)snapshot->packPowerMw / 1000.0f;
+    }
+    if (snapshot->hasBalanceCurrentMa) {
+        out->balanceCurrentA = (float)snapshot->balanceCurrentMa / 1000.0f;
+    }
+
+    if (snapshot->hasRemainMah) {
+        out->remainingAh = (float)snapshot->remainMah / 1000.0f;
+    }
+    if (snapshot->hasFullMah) {
+        out->fullAh = (float)snapshot->fullMah / 1000.0f;
+    }
+
+    if (snapshot->hasTempMosC) {
+        out->tempMosC = (float)snapshot->tempMosC;
+    }
+    if (snapshot->hasTempBat1C) {
+        out->tempT1C = (float)snapshot->tempBat1C;
+    }
+    if (snapshot->hasTempBat2C) {
+        out->tempT2C = (float)snapshot->tempBat2C;
+    }
+
+    if (snapshot->hasCellAvgMv) {
+        out->cellAvgV = (float)snapshot->cellAvgMv / 1000.0f;
+    }
+    if (snapshot->hasCellDiffMaxMv) {
+        out->cellDiffV = (float)snapshot->cellDiffMaxMv / 1000.0f;
+    }
+
+    out->cellCount = snapshot->cellCount;
+    for (uint8_t i = 0; i < snapshot->cellCount && i < 32u; i++) {
+        out->cellVoltagesV[i] = (float)snapshot->cellMv[i] / 1000.0f;
+    }
+
+    if (snapshot->hasCellExtremes) {
+        out->cellMaxV = (float)snapshot->maxCellMv / 1000.0f;
+        out->cellMinV = (float)snapshot->minCellMv / 1000.0f;
+        out->cellMaxIdx = snapshot->maxCellIndex;
+        out->cellMinIdx = snapshot->minCellIndex;
+        out->deltaV = out->cellMaxV - out->cellMinV;
+    }
+
+    if (snapshot->hasAlarmBits) {
+        out->alarmRaw = snapshot->alarmBits;
+        formatBitList(snapshot->alarmBits, "A", out->alarms, sizeof(out->alarms));
+        formatBitList(snapshot->alarmBits & 0x0000FFFFu, "P", out->protections, sizeof(out->protections));
+        formatBitList((snapshot->alarmBits >> 16), "W", out->warnings, sizeof(out->warnings));
+    }
+
+    if (snapshot->hasPrecharge) {
+        out->prechargeState = snapshot->prechargeState;
+    }
+
+    snprintf(out->stateFlags,
+             sizeof(out->stateFlags),
+             "AlarmRaw=0x%08" PRIX32 ", Precharge=%u, Cells=%u",
+             snapshot->hasAlarmBits ? snapshot->alarmBits : 0u,
+             snapshot->hasPrecharge ? snapshot->prechargeState : 0u,
+             (unsigned)snapshot->cellCount);
+}
+
 static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out)
 {
     bms_decoded_packet_t packet = {0};
@@ -61,6 +187,11 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out)
 
     bool hasPacket = false;
     if (settings.bms_protocol == PROTOCOL_RS485_JKBMS) {
+        jkbms_modbus_snapshot_t snapshot = {0};
+        if (jkbmsModbusBmsTaskGetLatestSnapshot(&snapshot)) {
+            fillTelemetryFromJkbmsSnapshot(&snapshot, out);
+            return;
+        }
         hasPacket = jkbmsModbusBmsTaskGetLatestPacket(&packet);
     } else {
         hasPacket = growattBmsTaskGetLatestPacket(&packet);
@@ -95,6 +226,7 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out)
         out->deltaV = out->cellMaxV - out->cellMinV;
     }
     if (packet.hasPackVoltageCv) {
+        out->packVoltageV = (float)packet.packVoltageCv / 100.0f;
         out->currentA = 0.0f;
     }
 }
@@ -103,8 +235,56 @@ static void buildFallbackLog(char *out, uint32_t outSize)
 {
     bridgeTelemetrySnapshot_t snap = {0};
     bridge_runtime_settings_t settings = runtimeSettingsGet();
+    jkbms_modbus_snapshot_t jkbms = {0};
+    bool haveJkbmsSnapshot = false;
+
+    if (settings.bms_protocol == PROTOCOL_RS485_JKBMS) {
+        haveJkbmsSnapshot = jkbmsModbusBmsTaskGetLatestSnapshot(&jkbms);
+    }
 
     bridgeGetTelemetrySnapshot(&snap);
+    if (haveJkbmsSnapshot) {
+        snprintf(out,
+                 outSize,
+                 "Runtime\n"
+                 "  mode         : %s\n"
+                 "  bms prot     : %s\n"
+                 "  inv prot     : %s\n"
+                 "JKBMS Telemetry\n"
+                 "  valid        : %s\n"
+                 "  SOC / SOH    : %u %% / %u %%\n"
+                 "  Pack         : %.3f V | %.3f A | %.1f W\n"
+                 "  Capacity     : %.3f Ah / %.3f Ah\n"
+                 "  Temperatures : MOS %.1f C | T1 %.1f C | T2 %.1f C\n"
+                 "  Cells        : count=%u max=%.3fV(#%u) min=%.3fV(#%u) dV=%.3fV avg=%.3fV\n"
+                 "  AlarmRaw     : 0x%08" PRIX32 "\n"
+                 "  Alarm bits   : %s\n",
+                 modeToStr(settings.mode),
+                 protocolToStr(settings.bms_protocol),
+                 protocolToStr(settings.inverter_protocol),
+                 snap.valid ? "YES" : "NO",
+                 (unsigned)snap.socPct,
+                 (unsigned)snap.sohPct,
+                 (double)snap.packVoltageV,
+                 (double)snap.currentA,
+                 (double)snap.packPowerW,
+                 (double)snap.remainingAh,
+                 (double)snap.fullAh,
+                 (double)snap.tempMosC,
+                 (double)snap.tempT1C,
+                 (double)snap.tempT2C,
+                 (unsigned)snap.cellCount,
+                 (double)snap.cellMaxV,
+                 (unsigned)snap.cellMaxIdx,
+                 (double)snap.cellMinV,
+                 (unsigned)snap.cellMinIdx,
+                 (double)snap.deltaV,
+                 (double)snap.cellAvgV,
+                 snap.alarmRaw,
+                 (snap.alarms[0] != '\0') ? snap.alarms : "None");
+        return;
+    }
+
     snprintf(out,
              outSize,
              "Runtime\n"

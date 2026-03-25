@@ -2,14 +2,16 @@
 
 /*
  * Poll window #1:
- *   0x1200..0x123F includes cell voltage area from table (0x0000..0x003E).
+ *   0x1200..0x1249 includes:
+ *   - cell voltage area (0x0000..0x003E)
+ *   - cell avg / max diff / min-max index pair (0x0044..0x0048)
  *
  * Poll window #2:
- *   0x128A..0x12B1 includes temp/pack voltage/current/SOC/cycles area.
+ *   0x128A..0x12B9 includes temp/pack voltage/current/alarm/SOC/cycles/SOH area.
  */
 const jkbms_modbus_poll_block_t g_jkbmsModbusPollBlocks[] = {
-    { .start = JKBMS_RT_REG_CELL0_MV,       .count = 0x0040u },
-    { .start = JKBMS_RT_REG_TEMP_MOS_DECIC, .count = 0x0028u },
+    { .start = JKBMS_RT_REG_CELL0_MV,       .count = 0x004Au },
+    { .start = JKBMS_RT_REG_TEMP_MOS_DECIC, .count = 0x0030u },
 };
 
 const size_t g_jkbmsModbusPollBlocksCount =
