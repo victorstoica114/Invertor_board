@@ -1,12 +1,8 @@
 #include "config.h"
 
 #include "driver/gpio.h"
-<<<<<<< HEAD
-#include "esp_log.h"
-=======
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
->>>>>>> sniffer_V2
 
 /*
  * CAN forward exclusion list (CAN1 -> CAN2).
@@ -15,13 +11,13 @@
 const uint32_t g_can1ToCan2ExcludeIds[] = {
     GROWATT_CAN_ID_311_STATUS_LIMITS,
     GROWATT_CAN_ID_312_PROT_ALM,
-    // GROWATT_CAN_ID_313_V_I_SOC_SOH,
-    // GROWATT_CAN_ID_314_RM_FCC_DV_CYCLES,
+    GROWATT_CAN_ID_313_V_I_SOC_SOH,
+    GROWATT_CAN_ID_314_RM_FCC_DV_CYCLES,
     GROWATT_CAN_ID_315_CELL_GRP1,
     GROWATT_CAN_ID_316_CELL_GRP2,
     GROWATT_CAN_ID_317_CELL_GRP3,
     GROWATT_CAN_ID_318_CELL_GRP4,
-    // GROWATT_CAN_ID_319_CELL_REF_FLAGS,
+    GROWATT_CAN_ID_319_CELL_REF_FLAGS,
     GROWATT_CAN_ID_320_MAKER_SW,
     GROWATT_CAN_ID_321_UPGRADE_INFO,
     // GROWATT_CAN_ID_322_TEMP_SOC_MIN_MAX,
@@ -116,8 +112,3 @@ void led_blink_task(void *pvParameters)
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
-<<<<<<< HEAD
-
-
-=======
->>>>>>> sniffer_V2

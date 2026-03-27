@@ -3,10 +3,7 @@
 #include "driver/gpio.h"
 #include "driver/twai.h"
 #include "driver/uart.h"
-<<<<<<< HEAD
-=======
 #include "esp_err.h"
->>>>>>> sniffer_V2
 #include "modbusDecoder.h"
 
 #ifdef __cplusplus
@@ -24,12 +21,6 @@ esp_err_t jkbmsRs485GrowattBridgeEnable(uart_port_t inverterUart,
 void canRs485GrowattBridgeStop(void);
 
 void rs485Can322BridgeEnable(modbusDecoder_t *srcDecoder, twai_handle_t txBus, const char *txName);
-void canRs485GrowattBridgeEnable(uart_port_t inverterUart,
-                                 gpio_num_t inverterDir,
-                                 const char *ifName,
-                                 const char *srcCanIf);
-void rs485Can322BridgeStop(void);
-void canRs485GrowattBridgeStop(void);
 
 #ifdef __cplusplus
 }

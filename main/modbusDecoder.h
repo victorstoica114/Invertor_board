@@ -45,10 +45,6 @@ void modbusDecoderInit(modbusDecoder_t *d, const char *ifName, uint32_t gapUs);
 void modbusDecoderFeed(modbusDecoder_t *d, const uint8_t *data, int len, int64_t rxUs);
 void modbusDecoderFlush(modbusDecoder_t *d);
 void modbusDecoderPrintSnapshot(modbusDecoder_t *d);
-<<<<<<< HEAD
-bool modbusDecoderGetReg(const modbusDecoder_t *d, uint16_t addr, uint16_t *valOut);
-bool modbusDecoderHasFreshData(const modbusDecoder_t *d, uint32_t maxAgeMs);
-=======
 bool modbusDecoderGetCachedReg(const modbusDecoder_t *d, uint16_t addr, uint16_t *valOut);
 void modbusDecoderRecordRequest(modbusDecoder_t *d,
                                 uint8_t slave,
@@ -56,7 +52,6 @@ void modbusDecoderRecordRequest(modbusDecoder_t *d,
                                 uint16_t start,
                                 uint16_t count,
                                 int64_t tsUs);
->>>>>>> sniffer_V2
 
 #ifdef __cplusplus
 }

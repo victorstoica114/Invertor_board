@@ -7,22 +7,6 @@ idf_component_register(
         "rs485_can_bridge.c"
         "Web_interface/web_interface.c"
         "config.c"
-<<<<<<< HEAD
-        "runtime_settings.c"
-        "bridge.c"
-        "Drivers/CAN/can_driver.c"
-        "Drivers/RS485/rs485_driver.c"
-        "Operation_Modes/can_forward_sniffer.c"
-        "Operation_Modes/rs485_forward_sniffer.c"
-        "CAN_Decoder.c"
-        "modbusDecoder.c"
-        "rs485_can_bridge.c"
-        "BMS_Protocols/Pylon/pylon_rs485_bridge.c"
-        "BMS_Protocols/Pylon/pylon_can_protocol.c"
-        "BMS_Protocols/Deye/deye_can_protocol.c"
-        "Web_interface/web_interface.c"
-        # "modbusResp.c"
-=======
         "Drivers/can_driver.c"
         "Drivers/rs485_driver.c"
         "CAN_Decoder.c"
@@ -39,7 +23,6 @@ idf_component_register(
         "protocols/rs485_growatt/rs485_growatt_bms_task.c"
         "protocols/pylon/pylon_bms_task.c"
         "protocols/pylon/pylon_inverter_task.c"
->>>>>>> sniffer_V2
     INCLUDE_DIRS
         "."
     REQUIRES
@@ -47,10 +30,7 @@ idf_component_register(
         esp_timer
         esp_http_server
         esp_wifi
-<<<<<<< HEAD
-=======
         esp_event
->>>>>>> sniffer_V2
         esp_netif
         nvs_flash
 )

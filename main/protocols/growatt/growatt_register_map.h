@@ -1,12 +1,5 @@
 #pragma once
 
-<<<<<<<< HEAD:main/BMS_Protocols/Growatt/growatt_modbus_map.h
-/*
- * Growatt / JK register map used by this project.
- * This file centralizes the CAN IDs and Modbus register addresses used by
- * Growatt-compatible BMS/inverter integrations.
- */
-========
 #include <stddef.h>
 #include <stdint.h>
 
@@ -17,7 +10,6 @@ typedef struct {
 
 /* Default slave address used for polling the BMS over Modbus RTU. */
 #define GROWATT_MODBUS_DEFAULT_SLAVE_ADDR      0x01u
->>>>>>>> sniffer_V2:main/protocols/growatt/growatt_register_map.h
 
 /* ---------------- CAN IDs ---------------- */
 #define GROWATT_CAN_ID_CTRL_EVENT_TRIGGER      0x211u
@@ -106,9 +98,6 @@ typedef struct {
 #define GROWATT_MB_REG_CELL14_MV               GROWATT_MB_REG_CELL_N(14u)
 #define GROWATT_MB_REG_CELL15_MV               GROWATT_MB_REG_CELL_N(15u)
 #define GROWATT_MB_REG_CELL16_MV               GROWATT_MB_REG_CELL_N(16u)
-<<<<<<<< HEAD:main/BMS_Protocols/Growatt/growatt_modbus_map.h
-========
 
 extern const growatt_modbus_poll_block_t g_growattModbusPollBlocks[];
 extern const size_t g_growattModbusPollBlocksCount;
->>>>>>>> sniffer_V2:main/protocols/growatt/growatt_register_map.h
