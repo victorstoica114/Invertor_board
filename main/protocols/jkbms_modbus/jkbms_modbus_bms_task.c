@@ -846,7 +846,13 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
         }
     }
 
-    if (validCells >= 4u) {
+    uint8_t minStableCells = 4u;
+    if (hintCount >= 8u) {
+        /* Require at least 75% of expected cells before replacing stable map. */
+        minStableCells = (uint8_t)((hintCount * 3u + 3u) / 4u);
+    }
+
+    if (validCells >= minStableCells) {
         g_lastGoodCellMap.valid = true;
         g_lastGoodCellMap.cellCount = out->cellCount;
         memcpy(g_lastGoodCellMap.cellMv, out->cellMv, sizeof(out->cellMv));
