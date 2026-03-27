@@ -312,8 +312,12 @@ static void logCellDebug(const modbusDecoder_t *decoder,
 {
     char decA[320];
     char decB[320];
+    char decC[320];
+    char decD[320];
     char rawA[320];
     char rawB[320];
+    char rawC[320];
+    char rawD[320];
 
     if (decoder == NULL || snapshot == NULL) {
         return;
@@ -326,8 +330,12 @@ static void logCellDebug(const modbusDecoder_t *decoder,
 
     formatCellVoltageSlice(snapshot, 1u, 8u, decA, sizeof(decA));
     formatCellVoltageSlice(snapshot, 9u, 16u, decB, sizeof(decB));
+    formatCellVoltageSlice(snapshot, 17u, 24u, decC, sizeof(decC));
+    formatCellVoltageSlice(snapshot, 25u, 32u, decD, sizeof(decD));
     formatCellRawSlice(decoder, 1u, 8u, rawA, sizeof(rawA));
     formatCellRawSlice(decoder, 9u, 16u, rawB, sizeof(rawB));
+    formatCellRawSlice(decoder, 17u, 24u, rawC, sizeof(rawC));
+    formatCellRawSlice(decoder, 25u, 32u, rawD, sizeof(rawD));
 
     ESP_LOGI(EXAMPLE_TAG,
              "JKBMS decoded cells: valid=%s count=%u min=%.3fV(#%u) max=%.3fV(#%u)",
@@ -339,8 +347,12 @@ static void logCellDebug(const modbusDecoder_t *decoder,
              snapshot->hasCellExtremes ? (unsigned)snapshot->maxCellIndex : 0u);
     ESP_LOGI(EXAMPLE_TAG, "JKBMS cells 01-08: %s", decA);
     ESP_LOGI(EXAMPLE_TAG, "JKBMS cells 09-16: %s", decB);
+    ESP_LOGI(EXAMPLE_TAG, "JKBMS cells 17-24: %s", decC);
+    ESP_LOGI(EXAMPLE_TAG, "JKBMS cells 25-32: %s", decD);
     ESP_LOGI(EXAMPLE_TAG, "JKBMS raw   01-08: %s", rawA);
     ESP_LOGI(EXAMPLE_TAG, "JKBMS raw   09-16: %s", rawB);
+    ESP_LOGI(EXAMPLE_TAG, "JKBMS raw   17-24: %s", rawC);
+    ESP_LOGI(EXAMPLE_TAG, "JKBMS raw   25-32: %s", rawD);
 }
 
 static void evaluateCellDecodeCandidate(const modbusDecoder_t *decoder,
@@ -684,8 +696,8 @@ static bool decodeSohPrecharge(const modbusDecoder_t *decoder,
 static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_snapshot_t *out)
 {
     /* JK runtime map stores cells at fixed stride from CELL0. */
-    static const uint8_t k_strides[] = {(uint8_t)JKBMS_RT_CELL_STEP};
-    static const uint8_t k_offsets[] = {0u};
+    static const uint8_t k_strides[] = {1u, (uint8_t)JKBMS_RT_CELL_STEP};
+    static const uint8_t k_offsets[] = {0u, 1u, 0x10u, 0x20u, 0x30u, 0x40u};
 
     if (decoder == NULL || out == NULL) {
         return false;

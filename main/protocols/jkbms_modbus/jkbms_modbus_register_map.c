@@ -13,6 +13,7 @@ const jkbms_modbus_poll_block_t g_jkbmsModbusPollBlocks[] = {
     { .start = (uint16_t)(JKBMS_RT_REG_CELL0_MV + 0x0010u), .count = 0x0010u },
     { .start = (uint16_t)(JKBMS_RT_REG_CELL0_MV + 0x0020u), .count = 0x0010u },
     { .start = (uint16_t)(JKBMS_RT_REG_CELL0_MV + 0x0030u), .count = 0x0010u },
+    { .start = (uint16_t)(JKBMS_RT_REG_CELL0_MV + 0x0040u), .count = 0x0020u },
     /* Cell summary area: avg/diff/max-min indexes */
     { .start = JKBMS_RT_REG_CELL_AVG_MV,           .count = 0x0006u },
     /* Runtime electrical + thermal + alarm + capacity + cycles */
