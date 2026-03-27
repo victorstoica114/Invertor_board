@@ -4,10 +4,15 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+<<<<<<< HEAD
 #include "BMS_Protocols/Growatt/growatt_modbus_map.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+=======
+#include "protocols/growatt/growatt_register_map.h"
+#include "protocols/jkbms_modbus/jkbms_modbus_register_map.h"
+>>>>>>> sniffer_V2
 
 /* Common log tag */
 #define EXAMPLE_TAG "SNIFFER_BRIDGE"
@@ -140,6 +145,7 @@
 #define CAN_RS485_SOC_RX_GAP_US 5000u
 #define CAN_RS485_SOC_LOG_EVERY_N 20u
 
+<<<<<<< HEAD
 /* Active RS485 BMS poller: requests Modbus blocks directly from BMS on RS485_1. */
 #define RS485_BMS_POLLER_ENABLE 1
 #define RS485_BMS_SLAVE_ID 1u
@@ -164,6 +170,112 @@
 #define RS485_CAN_BRIDGE_FALLBACK_ADDR_319      0u
 #define RS485_CAN_BRIDGE_FALLBACK_TEMP_SENSOR_MAX 1u
 #define RS485_CAN_BRIDGE_FALLBACK_TEMP_SENSOR_MIN 1u
+=======
+/* --- CAN -> RS485 Growatt translator (answers inverter Modbus polls from CAN cache) --- */
+#define CAN_RS485_SOC_TRANSLATOR_ENABLE 1
+#define CAN_RS485_SOC_SLAVE_ID 1u
+#define CAN_RS485_SOC_FAKE_PCT 99u
+#define CAN_RS485_SOC_RX_GAP_US 5000u
+
+/* --- Global working mode --- */
+#define ACTIVE_WORKING_MODE 0 /* 0=bridge, 1=forward, 2=sniffer */
+
+/* --- Active protocol selection --- */
+#define ACTIVE_BMS_PROTOCOL      0 /* 0=Growatt, 1=Pylon */
+#define ACTIVE_INVERTER_PROTOCOL 0 /* 0=Growatt, 1=Pylon */
+
+/* --- Runtime/web compatibility IDs --- */
+#define MODE_SNIFFER 1
+#define MODE_FORWARD 2
+#define MODE_BRIDGE 3
+
+#define SYSTEM_MODE (((ACTIVE_WORKING_MODE) == 2) ? MODE_SNIFFER : \
+                     (((ACTIVE_WORKING_MODE) == 1) ? MODE_FORWARD : MODE_BRIDGE))
+
+#define LINE_CAN 1
+#define LINE_RS485 2
+
+#define PROTOCOL_CAN_GROWATT 1
+#define PROTOCOL_RS485_GROWATT 2
+#define PROTOCOL_RS485_PYLON 3
+#define PROTOCOL_CAN_PYLON 4
+#define PROTOCOL_CAN_DEYE 5
+#define PROTOCOL_RS485_JKBMS 6
+
+#define BMS_line LINE_RS485
+#define Inverter_line LINE_CAN
+#define BMS_protocol PROTOCOL_RS485_GROWATT
+#define Inverter_protocol PROTOCOL_CAN_GROWATT
+#define BMS_PORT 1
+#define Inverter_PORT 2
+
+/* --- Orchestrator runtime --- */
+#define ORCHESTRATOR_TASK_STACK        4096
+#define ORCHESTRATOR_TASK_PRIORITY     11
+#define ORCHESTRATOR_BMS_QUEUE_LEN     1
+#define ORCHESTRATOR_INVERTER_QUEUE_LEN 1
+#define ORCHESTRATOR_FORCE_FORWARD_MS  1000
+
+/* --- Growatt tasks --- */
+#define GROWATT_BMS_MODBUS_SLAVE_ADDR  GROWATT_MODBUS_DEFAULT_SLAVE_ADDR
+#define GROWATT_BMS_MODBUS_GAP_US      5000
+#define GROWATT_BMS_QUERY_PERIOD_MS    250
+#define GROWATT_BMS_PUBLISH_PERIOD_MS  250
+#define GROWATT_BMS_TASK_STACK         4096
+#define GROWATT_BMS_TASK_PRIORITY      10
+
+#define GROWATT_INVERTER_TX_PERIOD_MS  200
+#define GROWATT_INVERTER_TASK_STACK    4096
+#define GROWATT_INVERTER_TASK_PRIORITY 9
+
+/* --- JKBMS Modbus task --- */
+#define JKBMS_BMS_MODBUS_SLAVE_ADDR    JKBMS_MODBUS_DEFAULT_SLAVE_ADDR
+#define JKBMS_BMS_MODBUS_GAP_US        5000
+#define JKBMS_BMS_QUERY_PERIOD_MS      250
+#define JKBMS_BMS_PUBLISH_PERIOD_MS    250
+#define JKBMS_BMS_TASK_STACK           4096
+#define JKBMS_BMS_TASK_PRIORITY        10
+
+/* --- Pylon placeholders --- */
+#define PYLON_BMS_TASK_STACK           3072
+#define PYLON_BMS_TASK_PRIORITY        8
+#define PYLON_INVERTER_TASK_STACK      3072
+#define PYLON_INVERTER_TASK_PRIORITY   8
+#define PYLON_PLACEHOLDER_TASK_PERIOD_MS 1000
+
+/* --- Working mode task settings --- */
+#define FORWARD_CAN_DECODE_ENABLE      1
+#define FORWARD_RS485_DECODE_ENABLE    1
+#define FORWARD_CAN_TASK_STACK         4096
+#define FORWARD_CAN_TASK_PRIORITY      10
+#define FORWARD_RS485_TASK_STACK       4096
+#define FORWARD_RS485_TASK_PRIORITY    9
+#define FORWARD_RS485_GAP_US           5000
+
+#define SNIFFER_CAN_DECODE_ENABLE      1
+#define SNIFFER_RS485_DECODE_ENABLE    1
+#define SNIFFER_CAN_TASK_STACK         4096
+#define SNIFFER_CAN_TASK_PRIORITY      9
+#define SNIFFER_RS485_TASK_STACK       4096
+#define SNIFFER_RS485_TASK_PRIORITY    9
+#define SNIFFER_RS485_GAP_US           5000
+
+#define WORKING_MODE_HEX_PRINT_LIMIT   64
+#define WORKING_MODE_SNAPSHOT_PERIOD_MS 5000
+#define WORKING_MODE_SNAPSHOT_TASK_STACK 4096
+#define WORKING_MODE_SNAPSHOT_TASK_PRIORITY 7
+
+/* --- Web interface --- */
+#define WEB_INTERFACE_ENABLE            1
+#define WEB_INTERFACE_PORT              80
+#define WEB_INTERFACE_TASK_STACK        8192
+#define WEB_INTERFACE_TASK_PRIO         5
+#define WIFI_STA_SSID                   "ED423"
+#define WIFI_STA_PASSWORD               "electr0n!ca"
+#define WIFI_STA_MAX_RETRY              10
+#define WIFI_STA_HOSTNAME               "esp32-bridge"
+
+>>>>>>> sniffer_V2
 #ifdef __cplusplus
 extern "C" {
 #endif

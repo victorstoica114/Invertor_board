@@ -1,0 +1,99 @@
+#pragma once
+
+#include <stddef.h>
+#include <stdint.h>
+
+typedef struct {
+    uint16_t start;
+    uint16_t count;
+} jkbms_modbus_poll_block_t;
+
+/* Ji Kong BMS RS485 Modbus Universal Protocol V1.1 */
+#define JKBMS_MODBUS_DEFAULT_SLAVE_ADDR 0x01u
+
+#define JKBMS_MB_BASE_CONFIG       0x1000u
+#define JKBMS_MB_BASE_RUNTIME      0x1200u
+#define JKBMS_MB_BASE_DEVICE_INFO  0x1400u
+#define JKBMS_MB_BASE_FACTORY      0x1600u
+
+#define JKBMS_RT_OFF_CELL0_MV              0x0000u
+#define JKBMS_RT_OFF_CELL31_MV             0x003Eu
+#define JKBMS_RT_CELL_STEP                 0x0002u
+#define JKBMS_RT_MAX_CELLS                 32u
+
+#define JKBMS_RT_OFF_CELL_AVG_MV           0x0044u
+#define JKBMS_RT_OFF_CELL_VDIFF_MAX_MV     0x0046u
+#define JKBMS_RT_OFF_MAX_MIN_CELL_NBR_U8X2 0x0048u
+
+#define JKBMS_RT_OFF_TEMP_MOS_DECIC        0x008Au
+#define JKBMS_RT_OFF_PACK_VOLT_MV_U32      0x0090u
+#define JKBMS_RT_OFF_PACK_WATT_MW_U32      0x0094u
+#define JKBMS_RT_OFF_PACK_CURRENT_MA_I32   0x0098u
+#define JKBMS_RT_OFF_TEMP_BAT1_DECIC       0x009Cu
+#define JKBMS_RT_OFF_TEMP_BAT2_DECIC       0x009Eu
+#define JKBMS_RT_OFF_ALARM_U32             0x00A0u
+#define JKBMS_RT_OFF_BALAN_CURRENT_MA_I16  0x00A4u
+#define JKBMS_RT_OFF_BALAN_SOC_U8X2        0x00A6u
+#define JKBMS_RT_OFF_SOC_REMAIN_MAH_I32    0x00A8u
+#define JKBMS_RT_OFF_SOC_FULL_MAH_U32      0x00ACu
+#define JKBMS_RT_OFF_CYCLE_COUNT_U32       0x00B0u
+#define JKBMS_RT_OFF_SOH_PRECHARGE_U8X2    0x00B8u
+
+#define JKBMS_RT_REG(addr_off) (JKBMS_MB_BASE_RUNTIME + (addr_off))
+
+#define JKBMS_RT_REG_CELL0_MV              JKBMS_RT_REG(JKBMS_RT_OFF_CELL0_MV)
+#define JKBMS_RT_REG_CELL31_MV             JKBMS_RT_REG(JKBMS_RT_OFF_CELL31_MV)
+#define JKBMS_RT_REG_CELL_N_MV(n)          (JKBMS_RT_REG_CELL0_MV + ((uint16_t)(n) * JKBMS_RT_CELL_STEP))
+#define JKBMS_RT_REG_CELL_AVG_MV           JKBMS_RT_REG(JKBMS_RT_OFF_CELL_AVG_MV)
+#define JKBMS_RT_REG_CELL_VDIFF_MAX_MV     JKBMS_RT_REG(JKBMS_RT_OFF_CELL_VDIFF_MAX_MV)
+#define JKBMS_RT_REG_MAX_MIN_CELL_NBR_U8X2 JKBMS_RT_REG(JKBMS_RT_OFF_MAX_MIN_CELL_NBR_U8X2)
+#define JKBMS_RT_REG_TEMP_MOS_DECIC        JKBMS_RT_REG(JKBMS_RT_OFF_TEMP_MOS_DECIC)
+#define JKBMS_RT_REG_PACK_VOLT_MV_U32      JKBMS_RT_REG(JKBMS_RT_OFF_PACK_VOLT_MV_U32)
+#define JKBMS_RT_REG_PACK_WATT_MW_U32      JKBMS_RT_REG(JKBMS_RT_OFF_PACK_WATT_MW_U32)
+#define JKBMS_RT_REG_PACK_CURRENT_MA_I32   JKBMS_RT_REG(JKBMS_RT_OFF_PACK_CURRENT_MA_I32)
+#define JKBMS_RT_REG_TEMP_BAT1_DECIC       JKBMS_RT_REG(JKBMS_RT_OFF_TEMP_BAT1_DECIC)
+#define JKBMS_RT_REG_TEMP_BAT2_DECIC       JKBMS_RT_REG(JKBMS_RT_OFF_TEMP_BAT2_DECIC)
+#define JKBMS_RT_REG_ALARM_U32             JKBMS_RT_REG(JKBMS_RT_OFF_ALARM_U32)
+#define JKBMS_RT_REG_BALAN_CURRENT_MA_I16  JKBMS_RT_REG(JKBMS_RT_OFF_BALAN_CURRENT_MA_I16)
+#define JKBMS_RT_REG_BALAN_SOC_U8X2        JKBMS_RT_REG(JKBMS_RT_OFF_BALAN_SOC_U8X2)
+#define JKBMS_RT_REG_SOC_REMAIN_MAH_I32    JKBMS_RT_REG(JKBMS_RT_OFF_SOC_REMAIN_MAH_I32)
+#define JKBMS_RT_REG_SOC_FULL_MAH_U32      JKBMS_RT_REG(JKBMS_RT_OFF_SOC_FULL_MAH_U32)
+#define JKBMS_RT_REG_CYCLE_COUNT_U32       JKBMS_RT_REG(JKBMS_RT_OFF_CYCLE_COUNT_U32)
+#define JKBMS_RT_REG_SOH_PRECHARGE_U8X2    JKBMS_RT_REG(JKBMS_RT_OFF_SOH_PRECHARGE_U8X2)
+
+/* Explicit per-cell aliases for easier auditing/testing against protocol docs */
+#define JKBMS_RT_REG_C01_MV                JKBMS_RT_REG_CELL_N_MV(0u)
+#define JKBMS_RT_REG_C02_MV                JKBMS_RT_REG_CELL_N_MV(1u)
+#define JKBMS_RT_REG_C03_MV                JKBMS_RT_REG_CELL_N_MV(2u)
+#define JKBMS_RT_REG_C04_MV                JKBMS_RT_REG_CELL_N_MV(3u)
+#define JKBMS_RT_REG_C05_MV                JKBMS_RT_REG_CELL_N_MV(4u)
+#define JKBMS_RT_REG_C06_MV                JKBMS_RT_REG_CELL_N_MV(5u)
+#define JKBMS_RT_REG_C07_MV                JKBMS_RT_REG_CELL_N_MV(6u)
+#define JKBMS_RT_REG_C08_MV                JKBMS_RT_REG_CELL_N_MV(7u)
+#define JKBMS_RT_REG_C09_MV                JKBMS_RT_REG_CELL_N_MV(8u)
+#define JKBMS_RT_REG_C10_MV                JKBMS_RT_REG_CELL_N_MV(9u)
+#define JKBMS_RT_REG_C11_MV                JKBMS_RT_REG_CELL_N_MV(10u)
+#define JKBMS_RT_REG_C12_MV                JKBMS_RT_REG_CELL_N_MV(11u)
+#define JKBMS_RT_REG_C13_MV                JKBMS_RT_REG_CELL_N_MV(12u)
+#define JKBMS_RT_REG_C14_MV                JKBMS_RT_REG_CELL_N_MV(13u)
+#define JKBMS_RT_REG_C15_MV                JKBMS_RT_REG_CELL_N_MV(14u)
+#define JKBMS_RT_REG_C16_MV                JKBMS_RT_REG_CELL_N_MV(15u)
+#define JKBMS_RT_REG_C17_MV                JKBMS_RT_REG_CELL_N_MV(16u)
+#define JKBMS_RT_REG_C18_MV                JKBMS_RT_REG_CELL_N_MV(17u)
+#define JKBMS_RT_REG_C19_MV                JKBMS_RT_REG_CELL_N_MV(18u)
+#define JKBMS_RT_REG_C20_MV                JKBMS_RT_REG_CELL_N_MV(19u)
+#define JKBMS_RT_REG_C21_MV                JKBMS_RT_REG_CELL_N_MV(20u)
+#define JKBMS_RT_REG_C22_MV                JKBMS_RT_REG_CELL_N_MV(21u)
+#define JKBMS_RT_REG_C23_MV                JKBMS_RT_REG_CELL_N_MV(22u)
+#define JKBMS_RT_REG_C24_MV                JKBMS_RT_REG_CELL_N_MV(23u)
+#define JKBMS_RT_REG_C25_MV                JKBMS_RT_REG_CELL_N_MV(24u)
+#define JKBMS_RT_REG_C26_MV                JKBMS_RT_REG_CELL_N_MV(25u)
+#define JKBMS_RT_REG_C27_MV                JKBMS_RT_REG_CELL_N_MV(26u)
+#define JKBMS_RT_REG_C28_MV                JKBMS_RT_REG_CELL_N_MV(27u)
+#define JKBMS_RT_REG_C29_MV                JKBMS_RT_REG_CELL_N_MV(28u)
+#define JKBMS_RT_REG_C30_MV                JKBMS_RT_REG_CELL_N_MV(29u)
+#define JKBMS_RT_REG_C31_MV                JKBMS_RT_REG_CELL_N_MV(30u)
+#define JKBMS_RT_REG_C32_MV                JKBMS_RT_REG_CELL_N_MV(31u)
+
+extern const jkbms_modbus_poll_block_t g_jkbmsModbusPollBlocks[];
+extern const size_t g_jkbmsModbusPollBlocksCount;

@@ -1,6 +1,10 @@
 #include "modbusDecoder.h"
 #include "config.h"
+<<<<<<< HEAD
 #include "BMS_Protocols/Growatt/growatt_modbus_map.h"
+=======
+#include "protocols/growatt/growatt_register_map.h"
+>>>>>>> sniffer_V2
 
 #include <inttypes.h>
 #include <stdbool.h>
@@ -103,6 +107,96 @@ static void cacheStoreReg(modbusDecoder_t *d, uint16_t addr, uint16_t val, int64
     d->cacheValid[idx] = 1;
 }
 
+static void reqQueuePush(modbusDecoder_t *d,
+                         uint8_t slave,
+                         uint8_t func,
+                         uint16_t start,
+                         uint16_t count,
+                         int64_t tsUs)
+{
+    if (d == NULL || count == 0u) {
+        return;
+    }
+
+    if (d->reqQSize > 0u) {
+        const uint8_t tailPrev = (uint8_t)((d->reqQHead + d->reqQSize - 1u) % MODBUS_DECODER_REQ_QUEUE_LEN);
+        if (d->reqQSlave[tailPrev] == slave &&
+            d->reqQFunc[tailPrev] == func &&
+            d->reqQStart[tailPrev] == start &&
+            d->reqQCount[tailPrev] == count) {
+            int64_t dUs = tsUs - d->reqQTsUs[tailPrev];
+            if (dUs < 0) {
+                dUs = -dUs;
+            }
+            if (dUs < 50000LL) {
+                return;
+            }
+        }
+    }
+
+    if (d->reqQSize >= MODBUS_DECODER_REQ_QUEUE_LEN) {
+        d->reqQHead = (uint8_t)((d->reqQHead + 1u) % MODBUS_DECODER_REQ_QUEUE_LEN);
+        d->reqQSize--;
+    }
+
+    const uint8_t tail = (uint8_t)((d->reqQHead + d->reqQSize) % MODBUS_DECODER_REQ_QUEUE_LEN);
+    d->reqQSlave[tail] = slave;
+    d->reqQFunc[tail] = func;
+    d->reqQStart[tail] = start;
+    d->reqQCount[tail] = count;
+    d->reqQTsUs[tail] = tsUs;
+    d->reqQSize++;
+}
+
+static bool reqQueuePopForResp(modbusDecoder_t *d,
+                               uint8_t slave,
+                               uint8_t func,
+                               uint16_t respRegCount,
+                               uint16_t *startOut)
+{
+    if (d == NULL || d->reqQSize == 0u) {
+        return false;
+    }
+
+    for (uint8_t i = 0u; i < d->reqQSize; i++) {
+        const uint8_t idx = (uint8_t)((d->reqQHead + i) % MODBUS_DECODER_REQ_QUEUE_LEN);
+        if (d->reqQSlave[idx] != slave || d->reqQFunc[idx] != func) {
+            continue;
+        }
+
+        const uint16_t reqCount = d->reqQCount[idx];
+        if (reqCount != respRegCount) {
+            continue;
+        }
+
+        if (startOut != NULL) {
+            *startOut = d->reqQStart[idx];
+        }
+
+        if (i == 0u) {
+            d->reqQHead = (uint8_t)((d->reqQHead + 1u) % MODBUS_DECODER_REQ_QUEUE_LEN);
+            d->reqQSize--;
+            return true;
+        }
+
+        while (i + 1u < d->reqQSize) {
+            const uint8_t from = (uint8_t)((d->reqQHead + i + 1u) % MODBUS_DECODER_REQ_QUEUE_LEN);
+            const uint8_t to = (uint8_t)((d->reqQHead + i) % MODBUS_DECODER_REQ_QUEUE_LEN);
+            d->reqQSlave[to] = d->reqQSlave[from];
+            d->reqQFunc[to] = d->reqQFunc[from];
+            d->reqQStart[to] = d->reqQStart[from];
+            d->reqQCount[to] = d->reqQCount[from];
+            d->reqQTsUs[to] = d->reqQTsUs[from];
+            i++;
+        }
+
+        d->reqQSize--;
+        return true;
+    }
+
+    return false;
+}
+
 static void printReq03(modbusDecoder_t *d, const uint8_t *f, int len, bool crcOk)
 {
     if (len < 8) {
@@ -129,6 +223,7 @@ static void printReq03(modbusDecoder_t *d, const uint8_t *f, int len, bool crcOk
     d->lastReqStart = start;
     d->lastReqCount = count;
     d->lastReqUs = d->lastByteUs;
+    reqQueuePush(d, slave, func, start, count, d->lastByteUs);
 }
 
 static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool crcOk)
@@ -162,7 +257,21 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
     const uint8_t *data = &frame[3];
 
     uint16_t startBase = 0xFFFF;
-    if (d->lastReqValid && d->lastReqSlave == slave && d->lastReqFunc == func) {
+    if (reqQueuePopForResp(d, slave, func, (uint16_t)regCount, &startBase)) {
+        MODBUS_RUNTIME_LOGI(
+                 "RESP on %s: slave=%u func=0x%02X start=0x%04X regs=%d crc=%s",
+                 d->ifName,
+                 (unsigned)slave,
+                 (unsigned)func,
+                 (unsigned)startBase,
+                 regCount,
+                 crcOk ? "OK" : "BAD");
+    } else if (d->lastReqValid &&
+               d->lastReqSlave == slave &&
+               d->lastReqFunc == func &&
+               d->lastReqCount == (uint16_t)regCount &&
+               (d->lastByteUs - d->lastReqUs) >= 0 &&
+               (d->lastByteUs - d->lastReqUs) < 500000LL) {
         startBase = d->lastReqStart;
         MODBUS_RUNTIME_LOGI(
                  "RESP on %s: slave=%u func=0x%02X start=0x%04X regs=%d crc=%s",
@@ -449,10 +558,71 @@ static void printFrameGeneric(modbusDecoder_t *d, const uint8_t *f, int len, boo
              (len > 64) ? " ..." : "");
 }
 
+static bool isReq03Frame(const uint8_t *f, int len)
+{
+    if (f == NULL || len != 8) {
+        return false;
+    }
+    if (f[1] != 0x03u) {
+        return false;
+    }
+    const uint16_t count = be16(&f[4]);
+    if (count == 0u || count > 125u) {
+        return false;
+    }
+    return modbusCheckCrc(f, len);
+}
+
+static bool isResp03Frame(const uint8_t *f, int len)
+{
+    if (f == NULL || len < 5) {
+        return false;
+    }
+    if (f[1] != 0x03u) {
+        return false;
+    }
+    const int expLen = (int)f[2] + 5;
+    if (len != expLen) {
+        return false;
+    }
+    return modbusCheckCrc(f, len);
+}
+
 static void decodeFrame(modbusDecoder_t *d, const uint8_t *f, int len)
 {
     if (len < 4) {
         printFrameGeneric(d, f, len, false);
+        return;
+    }
+
+    /* Handle concatenated RTU frames (e.g. echoed request + response in one buffer). */
+    int off = 0;
+    bool decodedAny = false;
+    while ((len - off) >= 4) {
+        const uint8_t *cur = &f[off];
+        const int rem = len - off;
+
+        if (rem >= 8 && isReq03Frame(cur, 8)) {
+            printReq03(d, cur, 8, true);
+            off += 8;
+            decodedAny = true;
+            continue;
+        }
+
+        if (rem >= 5) {
+            const int respLen = (int)cur[2] + 5;
+            if (respLen >= 5 && respLen <= rem && isResp03Frame(cur, respLen)) {
+                printResp03(d, cur, respLen, true);
+                off += respLen;
+                decodedAny = true;
+                continue;
+            }
+        }
+
+        break;
+    }
+
+    if (decodedAny && off == len) {
         return;
     }
 
@@ -461,15 +631,11 @@ static void decodeFrame(modbusDecoder_t *d, const uint8_t *f, int len)
 
     if (func == 0x03 && len == 8) {
         printReq03(d, f, len, crcOk);
-        return;
-    }
-
-    if (func == 0x03 && len >= 5) {
+    } else if (func == 0x03 && len >= 5) {
         printResp03(d, f, len, crcOk);
-        return;
+    } else {
+        printFrameGeneric(d, f, len, crcOk);
     }
-
-    printFrameGeneric(d, f, len, crcOk);
 }
 
 void modbusDecoderInit(modbusDecoder_t *d, const char *ifName, uint32_t gapUs)
@@ -477,6 +643,27 @@ void modbusDecoderInit(modbusDecoder_t *d, const char *ifName, uint32_t gapUs)
     memset(d, 0, sizeof(*d));
     d->ifName = ifName;
     d->gapUs = gapUs;
+}
+
+void modbusDecoderRecordRequest(modbusDecoder_t *d,
+                                uint8_t slave,
+                                uint8_t func,
+                                uint16_t start,
+                                uint16_t count,
+                                int64_t tsUs)
+{
+    if (d == NULL || count == 0u) {
+        return;
+    }
+
+    d->lastReqValid = true;
+    d->lastReqSlave = slave;
+    d->lastReqFunc = func;
+    d->lastReqStart = start;
+    d->lastReqCount = count;
+    d->lastReqUs = tsUs;
+
+    reqQueuePush(d, slave, func, start, count, tsUs);
 }
 
 static void finalizeIfAny(modbusDecoder_t *d)
@@ -523,7 +710,11 @@ static const char *snapshotIfName(const modbusDecoder_t *d)
     return (d != NULL && d->ifName != NULL) ? d->ifName : "RS485";
 }
 
+<<<<<<< HEAD
 bool modbusDecoderGetReg(const modbusDecoder_t *d, uint16_t addr, uint16_t *valOut)
+=======
+bool modbusDecoderGetCachedReg(const modbusDecoder_t *d, uint16_t addr, uint16_t *valOut)
+>>>>>>> sniffer_V2
 {
     if (d == NULL) {
         return false;
@@ -567,10 +758,17 @@ static void printSnapshotDecoded(modbusDecoder_t *d)
     uint16_t r0002 = 0;
     uint16_t r0003 = 0;
     uint16_t r0004 = 0;
+<<<<<<< HEAD
     if (modbusDecoderGetReg(d, GROWATT_MB_REG_INFO_0001, &r0001) &&
         modbusDecoderGetReg(d, GROWATT_MB_REG_INFO_0002, &r0002) &&
         modbusDecoderGetReg(d, GROWATT_MB_REG_INFO_0003, &r0003) &&
         modbusDecoderGetReg(d, GROWATT_MB_REG_INFO_0004, &r0004)) {
+=======
+    if (modbusDecoderGetCachedReg(d, GROWATT_MB_REG_INFO_0001, &r0001) &&
+        modbusDecoderGetCachedReg(d, GROWATT_MB_REG_INFO_0002, &r0002) &&
+        modbusDecoderGetCachedReg(d, GROWATT_MB_REG_INFO_0003, &r0003) &&
+        modbusDecoderGetCachedReg(d, GROWATT_MB_REG_INFO_0004, &r0004)) {
+>>>>>>> sniffer_V2
         ESP_LOGI(EXAMPLE_TAG,
                  "%s BMS-INFO: r0001..0004 = %04X %04X %04X %04X",
                  ifn,
@@ -596,6 +794,7 @@ static void printSnapshotDecoded(modbusDecoder_t *d)
     uint16_t ichgLimCa = 0;
     uint16_t idisLimCa = 0;
 
+<<<<<<< HEAD
     if (modbusDecoderGetReg(d, GROWATT_MB_REG_SOC_PCT, &soc) &&
         modbusDecoderGetReg(d, GROWATT_MB_REG_PACK_V_CV, &packCv) &&
         modbusDecoderGetReg(d, GROWATT_MB_REG_TEMP_C, &temp) &&
@@ -603,6 +802,15 @@ static void printSnapshotDecoded(modbusDecoder_t *d)
         modbusDecoderGetReg(d, GROWATT_MB_REG_CELL_MIN_MV, &cminMv) &&
         modbusDecoderGetReg(d, GROWATT_MB_REG_CELL_MAX_IDX, &cmaxIdx) &&
         modbusDecoderGetReg(d, GROWATT_MB_REG_CELL_MIN_IDX, &cminIdx)) {
+=======
+    if (modbusDecoderGetCachedReg(d, GROWATT_MB_REG_SOC_PCT, &soc) &&
+        modbusDecoderGetCachedReg(d, GROWATT_MB_REG_PACK_V_CV, &packCv) &&
+        modbusDecoderGetCachedReg(d, GROWATT_MB_REG_TEMP_C, &temp) &&
+        modbusDecoderGetCachedReg(d, GROWATT_MB_REG_CELL_MAX_MV, &cmaxMv) &&
+        modbusDecoderGetCachedReg(d, GROWATT_MB_REG_CELL_MIN_MV, &cminMv) &&
+        modbusDecoderGetCachedReg(d, GROWATT_MB_REG_CELL_MAX_IDX, &cmaxIdx) &&
+        modbusDecoderGetCachedReg(d, GROWATT_MB_REG_CELL_MIN_IDX, &cminIdx)) {
+>>>>>>> sniffer_V2
         ESP_LOGI(EXAMPLE_TAG,
                  "%s BMS: %.2fV | SOC %u%% | %dC | Cmin %.3fV(C%u) | Cmax %.3fV(C%u) | dV %.3fV",
                  ifn,
@@ -616,8 +824,13 @@ static void printSnapshotDecoded(modbusDecoder_t *d)
                  (double)(cmaxMv - cminMv) / 1000.0);
     }
 
+<<<<<<< HEAD
     if (modbusDecoderGetReg(d, GROWATT_MB_REG_REMAIN_CAP_CAH, &remainCapCah) &&
         modbusDecoderGetReg(d, GROWATT_MB_REG_FULL_CAP_CAH, &fullCapCah)) {
+=======
+    if (modbusDecoderGetCachedReg(d, GROWATT_MB_REG_REMAIN_CAP_CAH, &remainCapCah) &&
+        modbusDecoderGetCachedReg(d, GROWATT_MB_REG_FULL_CAP_CAH, &fullCapCah)) {
+>>>>>>> sniffer_V2
         ESP_LOGI(EXAMPLE_TAG,
                  "%s BMS-CAP: RM %.2fAh | FCC %.2fAh",
                  ifn,
@@ -625,8 +838,13 @@ static void printSnapshotDecoded(modbusDecoder_t *d)
                  (double)fullCapCah / 100.0);
     }
 
+<<<<<<< HEAD
     if (modbusDecoderGetReg(d, GROWATT_MB_REG_CV_TARGET_CV, &cvTargetCv) &&
         modbusDecoderGetReg(d, GROWATT_MB_REG_SOH_PCT, &soh)) {
+=======
+    if (modbusDecoderGetCachedReg(d, GROWATT_MB_REG_CV_TARGET_CV, &cvTargetCv) &&
+        modbusDecoderGetCachedReg(d, GROWATT_MB_REG_SOH_PCT, &soh)) {
+>>>>>>> sniffer_V2
         ESP_LOGI(EXAMPLE_TAG,
                  "%s BMS-EXT: CVtarget %.2fV | SOH %u%%",
                  ifn,
@@ -634,20 +852,33 @@ static void printSnapshotDecoded(modbusDecoder_t *d)
                  (unsigned)soh);
     }
 
+<<<<<<< HEAD
     if (modbusDecoderGetReg(d, GROWATT_MB_REG_PACK_I_ABS_CA_TENTATIVE, &packAbsICa)) {
+=======
+    if (modbusDecoderGetCachedReg(d, GROWATT_MB_REG_PACK_I_ABS_CA_TENTATIVE, &packAbsICa)) {
+>>>>>>> sniffer_V2
         ESP_LOGI(EXAMPLE_TAG,
                  "%s BMS-TENT: |Ipack| %.2fA",
                  ifn,
                  (double)packAbsICa / 100.0);
     }
+<<<<<<< HEAD
     if (modbusDecoderGetReg(d, GROWATT_MB_REG_CYCLE_COUNT_TENTATIVE, &cycleCount)) {
+=======
+    if (modbusDecoderGetCachedReg(d, GROWATT_MB_REG_CYCLE_COUNT_TENTATIVE, &cycleCount)) {
+>>>>>>> sniffer_V2
         ESP_LOGI(EXAMPLE_TAG,
                  "%s BMS-TENT: Cycles %u",
                  ifn,
                  (unsigned)cycleCount);
     }
+<<<<<<< HEAD
     bool hasIchgLim = modbusDecoderGetReg(d, GROWATT_MB_REG_ICHG_LIM_CA_TENTATIVE, &ichgLimCa);
     bool hasIdisLim = modbusDecoderGetReg(d, GROWATT_MB_REG_IDIS_LIM_CA_TENTATIVE, &idisLimCa);
+=======
+    bool hasIchgLim = modbusDecoderGetCachedReg(d, GROWATT_MB_REG_ICHG_LIM_CA_TENTATIVE, &ichgLimCa);
+    bool hasIdisLim = modbusDecoderGetCachedReg(d, GROWATT_MB_REG_IDIS_LIM_CA_TENTATIVE, &idisLimCa);
+>>>>>>> sniffer_V2
     if (hasIchgLim || hasIdisLim) {
         ESP_LOGI(EXAMPLE_TAG,
                  "%s BMS-TENT: IchgLim %.2fA | IdisLim %.2fA",
@@ -659,7 +890,11 @@ static void printSnapshotDecoded(modbusDecoder_t *d)
     for (int i = 0; i < 16; i++) {
         uint16_t addr = (uint16_t)(GROWATT_MB_REG_CELL_BASE + i);
         uint16_t mv = 0;
+<<<<<<< HEAD
         if (!modbusDecoderGetReg(d, addr, &mv)) {
+=======
+        if (!modbusDecoderGetCachedReg(d, addr, &mv)) {
+>>>>>>> sniffer_V2
             continue;
         }
 
@@ -691,7 +926,12 @@ static void printSnapshotDecoded(modbusDecoder_t *d)
     {
         uint16_t r0013 = 0;
         uint16_t cell13 = 0;
+<<<<<<< HEAD
         if (modbusDecoderGetReg(d, GROWATT_MB_REG_MAIN_RAW_0013, &r0013) && modbusDecoderGetReg(d, GROWATT_MB_REG_CELL_N(13), &cell13)) {
+=======
+        if (modbusDecoderGetCachedReg(d, GROWATT_MB_REG_MAIN_RAW_0013, &r0013) &&
+            modbusDecoderGetCachedReg(d, GROWATT_MB_REG_CELL_N(13), &cell13)) {
+>>>>>>> sniffer_V2
             ESP_LOGI(EXAMPLE_TAG,
                      "%s reg[0x0013] = 0x%04X (%u)  |  Cell13 @0x007C = %.3f V (%u mV)",
                      ifn,

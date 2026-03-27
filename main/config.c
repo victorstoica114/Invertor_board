@@ -1,7 +1,12 @@
 #include "config.h"
 
 #include "driver/gpio.h"
+<<<<<<< HEAD
 #include "esp_log.h"
+=======
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+>>>>>>> sniffer_V2
 
 /*
  * CAN forward exclusion list (CAN1 -> CAN2).
@@ -32,7 +37,6 @@ const size_t g_can1ToCan2ExcludeIdsCount =
  * RS485 Modbus register exclusion list (forward path to inverter).
  * Requests that include these registers are filtered/sanitized per bridge logic.
  */
-
 const uint16_t g_rs485ForwardExcludeRegs[] = {
     GROWATT_MB_REG_INFO_0001,
     GROWATT_MB_REG_INFO_0002,
@@ -112,5 +116,8 @@ void led_blink_task(void *pvParameters)
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
+<<<<<<< HEAD
 
 
+=======
+>>>>>>> sniffer_V2

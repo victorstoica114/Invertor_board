@@ -1,0 +1,16 @@
+#pragma once
+
+#include "esp_err.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+esp_err_t growattInverterTaskStart(QueueHandle_t inQueue);
+esp_err_t growattInverterTaskStop(void);
+
+#ifdef __cplusplus
+}
+#endif

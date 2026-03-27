@@ -4,7 +4,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+<<<<<<< HEAD
 #include "bridge.h"
+=======
+#include "Web_interface/web_bridge_api.h"
+>>>>>>> sniffer_V2
 #include "config.h"
 #include "runtime_settings.h"
 
@@ -13,9 +17,17 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
+<<<<<<< HEAD
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+=======
+#include "nvs_flash.h"
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
+#include "freertos/queue.h"
+>>>>>>> sniffer_V2
 #include "freertos/task.h"
 
 #define WEB_TAG "WEB_INTERFACE"
@@ -27,6 +39,7 @@ static int s_wifiRetryCount = 0;
 static httpd_handle_t s_httpd = NULL;
 static esp_netif_t *s_wifiStaNetif = NULL;
 static TaskHandle_t s_settingsApplyTask = NULL;
+<<<<<<< HEAD
 static char s_logsResponse[2048];
 
 typedef struct {
@@ -34,6 +47,15 @@ typedef struct {
     bool restartWifi;
     bool restartWeb;
 } settingsApplyCtx_t;
+=======
+static QueueHandle_t s_settingsApplyQueue = NULL;
+static char s_logsResponse[2048];
+
+typedef struct {
+    bool restartWeb;
+    bool reconfigureWifi;
+} settingsApplyReq_t;
+>>>>>>> sniffer_V2
 
 static void startHttpServer(void);
 
@@ -95,6 +117,10 @@ static const char *protocolToStr(int protocol)
         case PROTOCOL_RS485_PYLON: return "RS485_PYLON";
         case PROTOCOL_CAN_PYLON: return "CAN_PYLON";
         case PROTOCOL_CAN_DEYE: return "CAN_DEYE";
+<<<<<<< HEAD
+=======
+        case PROTOCOL_RS485_JKBMS: return "JKBMS_MODBUS";
+>>>>>>> sniffer_V2
         default: return "UNKNOWN";
     }
 }
@@ -162,6 +188,7 @@ static bool extractJsonString(const char *json, const char *key, char *out, size
     return true;
 }
 
+<<<<<<< HEAD
 static bool settingsEqual(const bridge_runtime_settings_t *a, const bridge_runtime_settings_t *b)
 {
     if (a == NULL || b == NULL) {
@@ -205,6 +232,8 @@ static bool wifiSettingsEqual(const bridge_runtime_settings_t *a, const bridge_r
            strcmp(a->wifi_password, b->wifi_password) == 0;
 }
 
+=======
+>>>>>>> sniffer_V2
 static void wifiApplyRuntimeSettings(void)
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
@@ -231,6 +260,7 @@ static void stopHttpServer(void)
     }
 }
 
+<<<<<<< HEAD
 static void settingsApplyTask(void *pv)
 {
     settingsApplyCtx_t ctx = *(settingsApplyCtx_t *)pv;
@@ -264,6 +294,38 @@ static void settingsApplyTask(void *pv)
 
     s_settingsApplyTask = NULL;
     vTaskDelete(NULL);
+=======
+static void applyRuntimeSettings(bool restartWeb, bool reconfigureWifi)
+{
+    bridgeReloadFromRuntimeSettings();
+    if (reconfigureWifi) {
+        wifiApplyRuntimeSettings();
+    }
+
+    if (restartWeb) {
+        stopHttpServer();
+        startHttpServer();
+    }
+}
+
+static void settingsApplyTask(void *pv)
+{
+    (void)pv;
+
+    while (1) {
+        settingsApplyReq_t req = {0};
+        if (xQueueReceive(s_settingsApplyQueue, &req, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(80));
+        applyRuntimeSettings(req.restartWeb, req.reconfigureWifi);
+        ESP_LOGI(WEB_TAG,
+                 "Runtime settings saved and applied (restartWeb=%s reconfigureWifi=%s)",
+                 req.restartWeb ? "YES" : "NO",
+                 req.reconfigureWifi ? "YES" : "NO");
+    }
+>>>>>>> sniffer_V2
 }
 
 static void wifiEventHandler(void *arg,
@@ -384,12 +446,32 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "row('0x371 Temp Min Sensor','#'+t.deye_temp_min_sensor)"
         "]);"
         "}"
+<<<<<<< HEAD
         "function renderTelemetry(t){"
         "const cards=["
         "card('Runtime',[row('Valid',t.valid?'YES':'NO'),row('Source',t.source),row('Protocol',t.protocol),row('Status 0x63',t.status_63)]),"
         "card('Pack',[row('Current',t.current_a.toFixed(2)+' A'),row('SOC',t.soc_pct+' %'),row('SOH',t.soh_pct+' %'),row('Cycles',t.cycles)]),"
         "card('Cells',[row('Cell Max',t.cell_max_v.toFixed(3)+' V @ #'+t.cell_max_idx),row('Cell Min',t.cell_min_v.toFixed(3)+' V @ #'+t.cell_min_idx),row('Delta',t.delta_v.toFixed(3)+' V')]),"
         "card('Temperatures',[row('MOS',t.temp_mos_c.toFixed(1)+' C'),row('T1',t.temp_t1_c.toFixed(1)+' C'),row('T2',t.temp_t2_c.toFixed(1)+' C'),row('T4',t.temp_t4_c.toFixed(1)+' C'),row('T5',t.temp_t5_c.toFixed(1)+' C')]),"
+=======
+        "function jkbmsCard(t){"
+        "if(t.protocol!=='JKBMS_MODBUS'){return '';}"
+        "return card('JKBMS Runtime',["
+        "row('Balance Current',t.balance_current_a.toFixed(3)+' A'),"
+        "row('Remaining / Full',t.remaining_ah.toFixed(3)+' / '+t.full_ah.toFixed(3)+' Ah'),"
+        "row('Cell Avg / Diff',t.cell_avg_v.toFixed(3)+' / '+t.cell_diff_v.toFixed(3)+' V'),"
+        "row('Alarm Raw','0x'+t.alarm_raw.toString(16).toUpperCase().padStart(8,'0')),"
+        "row('Precharge',String(t.precharge_state))"
+        "]);"
+        "}"
+        "function renderTelemetry(t){"
+        "const cards=["
+        "card('Runtime',[row('Valid',t.valid?'YES':'NO'),row('Source',t.source),row('Protocol',t.protocol),row('Status 0x63',t.status_63)]),"
+        "card('Pack',[row('Pack Voltage',t.pack_voltage_v.toFixed(3)+' V'),row('Current',t.current_a.toFixed(2)+' A'),row('Power',t.pack_power_w.toFixed(1)+' W'),row('SOC',t.soc_pct+' %'),row('SOH',t.soh_pct+' %'),row('Cycles',t.cycles)]),"
+        "card('Cells',[row('Cell Max',t.cell_max_v.toFixed(3)+' V @ #'+t.cell_max_idx),row('Cell Min',t.cell_min_v.toFixed(3)+' V @ #'+t.cell_min_idx),row('Delta',t.delta_v.toFixed(3)+' V')]),"
+        "card('Temperatures',[row('MOS',t.temp_mos_c.toFixed(1)+' C'),row('T1',t.temp_t1_c.toFixed(1)+' C'),row('T2',t.temp_t2_c.toFixed(1)+' C'),row('T4',t.temp_t4_c.toFixed(1)+' C'),row('T5',t.temp_t5_c.toFixed(1)+' C')]),"
+        "jkbmsCard(t),"
+>>>>>>> sniffer_V2
         "miscCard(t),"
         "cellGridCard(t),"
         "alertBadges('Protections','prot',t.protections),"
@@ -400,6 +482,7 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "}"
         "function renderSettings(s){"
         "function sel(id,val,opts){return '<select id=\"'+id+'\">'+opts.map(o=>'<option value=\"'+o.value+'\"'+(String(o.value)===String(val)?' selected':'')+'>'+o.label+'</option>').join('')+'</select>';}"
+<<<<<<< HEAD
         "function validProtoOpts(line){"
         "const all=[{value:1,label:'CAN_GROWATT'},{value:2,label:'RS485_GROWATT'},{value:3,label:'RS485_PYLON'},{value:4,label:'CAN_PYLON'},{value:5,label:'CAN_DEYE'}];"
         "if(String(line)==='1'){return all.filter(o=>o.value===1||o.value===4||o.value===5);}"
@@ -427,14 +510,79 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "row('BMS line',sel('bms_line',s.bms_line_id,lineOpts)),"
         "row('BMS protocol',sel('bms_protocol',s.bms_protocol_id,validProtoOpts(s.bms_line_id))),"
         "row('BMS port',sel('bms_port',s.bms_port,portOpts)),"
+=======
+        "const modeOpts=[{value:1,label:'sniffer'},{value:2,label:'forward'},{value:3,label:'bridge'}];"
+        "const lineOpts=[{value:1,label:'CAN'},{value:2,label:'RS485'}];"
+        "const bmsCanProtoOpts=[{value:1,label:'CAN_GROWATT (CAN BMS)'},{value:4,label:'CAN_PYLON'},{value:5,label:'CAN_DEYE'}];"
+        "const bmsRsProtoOpts=[{value:2,label:'RS485_GROWATT (Modbus Poller)'},{value:6,label:'JKBMS_MODBUS (RS485 Poller)'},{value:3,label:'RS485_PYLON'}];"
+        "const invCanProtoOpts=[{value:1,label:'CAN_GROWATT'},{value:4,label:'CAN_PYLON'},{value:5,label:'CAN_DEYE'}];"
+        "const invRsProtoOpts=[{value:2,label:'RS485_GROWATT'},{value:3,label:'RS485_PYLON'}];"
+        "const portOpts=[{value:1,label:'1'},{value:2,label:'2'}];"
+        "const rows=["
+        "row('Mode',sel('mode',s.mode_id,modeOpts)),"
+        "row('BMS line',sel('bms_line',s.bms_line_id,lineOpts)),"
+        "row('Inverter line',sel('inverter_line',s.inverter_line_id,lineOpts)),"
+        "row('BMS protocol','<select id=\"bms_protocol\"></select>'),"
+        "row('Inverter protocol','<select id=\"inverter_protocol\"></select>'),"
+        "row('BMS port',sel('bms_port',s.bms_port,portOpts)),"
+        "row('Inverter port',sel('inverter_port',s.inverter_port,portOpts)),"
+>>>>>>> sniffer_V2
         "row('Wi-Fi SSID','<input id=\"wifi_ssid\" value=\"'+s.wifi_ssid+'\" />'),"
         "row('Wi-Fi PASS','<input id=\"wifi_password\" type=\"password\" value=\"'+s.wifi_password+'\" />'),"
         "row('Web port','<input id=\"web_port\" type=\"number\" min=\"1\" max=\"65535\" value=\"'+s.web_port+'\" />')"
         "];"
+<<<<<<< HEAD
         "const actions='<div class=\"actions\"><button onclick=\"saveSettings()\">Save</button><span id=\"settingsStatus\" class=\"mono\"></span></div>';"
         "document.getElementById('settingsForm').innerHTML='<table>'+rows.join('')+'</table>'+actions;"
         "document.getElementById('bms_line').addEventListener('change',function(){syncProto('bms_line','bms_protocol');});"
         "document.getElementById('inverter_line').addEventListener('change',function(){syncProto('inverter_line','inverter_protocol');});"
+=======
+        "const actions='<div class=\"actions\"><button onclick=\"saveSettings()\">Save</button><span id=\"settingsStatus\" class=\"mono\"></span></div><div id=\"routeHint\" class=\"mono\" style=\"margin-top:8px;color:#8aa0b7\"></div>';"
+        "document.getElementById('settingsForm').innerHTML='<table>'+rows.join('')+'</table>'+actions;"
+        "function applyProtoFilter(lineId,protoId,wanted,canOpts,rsOpts){"
+        "const line=parseInt(document.getElementById(lineId).value,10);"
+        "const opts=(line===1)?canOpts:rsOpts;"
+        "const selEl=document.getElementById(protoId);"
+        "const wantedStr=String(wanted);"
+        "selEl.innerHTML=opts.map(o=>'<option value=\"'+o.value+'\"'+(String(o.value)===wantedStr?' selected':'')+'>'+o.label+'</option>').join('');"
+        "if(!opts.some(o=>String(o.value)===wantedStr)){selEl.value=String(opts[0].value);}"
+        "}"
+        "function lineLabel(v){return parseInt(v,10)===1?'CAN':'RS485';}"
+        "function protoLabel(v){const all=bmsCanProtoOpts.concat(bmsRsProtoOpts,invCanProtoOpts,invRsProtoOpts);const p=all.find(o=>String(o.value)===String(v));return p?p.label:String(v);}"
+        "function updateRouteHint(){"
+        "const mode=parseInt(document.getElementById('mode').value,10);"
+        "const bl=parseInt(document.getElementById('bms_line').value,10);"
+        "const il=parseInt(document.getElementById('inverter_line').value,10);"
+        "const bp=parseInt(document.getElementById('bms_protocol').value,10);"
+        "const ip=parseInt(document.getElementById('inverter_protocol').value,10);"
+        "const bport=parseInt(document.getElementById('bms_port').value,10);"
+        "const iport=parseInt(document.getElementById('inverter_port').value,10);"
+        "let txt='';"
+        "if(mode!==3){txt='Bridge inactive in this mode.';}"
+        "else if(bl===2&&bp===6&&il===2&&ip===2){txt='Special route active: JKBMS_MODBUS (RS485_'+bport+') -> RS485_GROWATT responder (RS485_'+iport+').';}"
+        "else if(bl===2&&bp===6){txt='Testing JKBMS_Modbus poller on RS485_'+bport+'.';}"
+        "else if(bl===2&&bp===2){txt='Testing RS485_GROWATT poller on RS485_'+bport+'.';}"
+        "else if(bl===1&&bp===1&&il===2&&ip===2){txt='Special route active: CAN_GROWATT -> RS485_GROWATT translator.';}"
+        "else{txt='Route: BMS '+lineLabel(bl)+'_'+bport+' / '+protoLabel(bp)+' -> Inverter '+lineLabel(il)+'_'+iport+' / '+protoLabel(ip);}"
+        "document.getElementById('routeHint').textContent=txt;"
+        "}"
+        "applyProtoFilter('bms_line','bms_protocol',s.bms_protocol_id,bmsCanProtoOpts,bmsRsProtoOpts);"
+        "applyProtoFilter('inverter_line','inverter_protocol',s.inverter_protocol_id,invCanProtoOpts,invRsProtoOpts);"
+        "document.getElementById('bms_line').addEventListener('change',function(){"
+        "applyProtoFilter('bms_line','bms_protocol',document.getElementById('bms_protocol').value,bmsCanProtoOpts,bmsRsProtoOpts);"
+        "updateRouteHint();"
+        "});"
+        "document.getElementById('inverter_line').addEventListener('change',function(){"
+        "applyProtoFilter('inverter_line','inverter_protocol',document.getElementById('inverter_protocol').value,invCanProtoOpts,invRsProtoOpts);"
+        "updateRouteHint();"
+        "});"
+        "document.getElementById('mode').addEventListener('change',updateRouteHint);"
+        "document.getElementById('bms_protocol').addEventListener('change',updateRouteHint);"
+        "document.getElementById('inverter_protocol').addEventListener('change',updateRouteHint);"
+        "document.getElementById('bms_port').addEventListener('change',updateRouteHint);"
+        "document.getElementById('inverter_port').addEventListener('change',updateRouteHint);"
+        "updateRouteHint();"
+>>>>>>> sniffer_V2
         "}"
         "async function saveSettings(){"
         "const payload={"
@@ -499,6 +647,14 @@ static esp_err_t telemetryHandler(httpd_req_t *req)
                     "\"source\":\"%s\","
                     "\"protocol\":\"%s\","
                     "\"current_a\":%.2f,"
+<<<<<<< HEAD
+=======
+                    "\"pack_voltage_v\":%.3f,"
+                    "\"pack_power_w\":%.1f,"
+                    "\"balance_current_a\":%.3f,"
+                    "\"remaining_ah\":%.3f,"
+                    "\"full_ah\":%.3f,"
+>>>>>>> sniffer_V2
                     "\"soc_pct\":%u,"
                     "\"soh_pct\":%u,"
                     "\"cycles\":%u,"
@@ -518,6 +674,13 @@ static esp_err_t telemetryHandler(httpd_req_t *req)
                     "\"deye_temp_min_sensor\":%u,"
                     "\"state_flags\":\"%s\","
                     "\"cell_count\":%u,"
+<<<<<<< HEAD
+=======
+                    "\"cell_avg_v\":%.3f,"
+                    "\"cell_diff_v\":%.3f,"
+                    "\"alarm_raw\":%u,"
+                    "\"precharge_state\":%u,"
+>>>>>>> sniffer_V2
                     "\"protections\":\"%s\","
                     "\"alarms\":\"%s\","
                     "\"warnings\":\"%s\","
@@ -526,6 +689,14 @@ static esp_err_t telemetryHandler(httpd_req_t *req)
                     snap.source,
                     snap.protocol,
                     (double)snap.currentA,
+<<<<<<< HEAD
+=======
+                    (double)snap.packVoltageV,
+                    (double)snap.packPowerW,
+                    (double)snap.balanceCurrentA,
+                    (double)snap.remainingAh,
+                    (double)snap.fullAh,
+>>>>>>> sniffer_V2
                     (unsigned)snap.socPct,
                     (unsigned)snap.sohPct,
                     (unsigned)snap.cycles,
@@ -545,6 +716,13 @@ static esp_err_t telemetryHandler(httpd_req_t *req)
                     (unsigned)snap.deyeTempMinSensor,
                     snap.stateFlags,
                     (unsigned)snap.cellCount,
+<<<<<<< HEAD
+=======
+                    (double)snap.cellAvgV,
+                    (double)snap.cellDiffV,
+                    (unsigned)snap.alarmRaw,
+                    (unsigned)snap.prechargeState,
+>>>>>>> sniffer_V2
                     snap.protections,
                     snap.alarms,
                     snap.warnings);
@@ -622,13 +800,20 @@ static esp_err_t settingsHandler(httpd_req_t *req)
 
 static esp_err_t settingsPostHandler(httpd_req_t *req)
 {
+<<<<<<< HEAD
     char buf[512];
+=======
+    char buf[256];
+>>>>>>> sniffer_V2
     int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
     bridge_runtime_settings_t settings = runtimeSettingsGet();
     bridge_runtime_settings_t oldSettings = settings;
     int v = 0;
     const char *okResp = "{\"ok\":true,\"message\":\"Saved and applied\"}";
+<<<<<<< HEAD
     const char *sameResp = "{\"ok\":true,\"message\":\"No changes\"}";
+=======
+>>>>>>> sniffer_V2
     const char *errResp = "{\"ok\":false,\"message\":\"Invalid settings\"}";
 
     if (received <= 0) {
@@ -640,8 +825,11 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
 
     buf[received] = '\0';
 
+<<<<<<< HEAD
     ESP_LOGI(WEB_TAG, "Settings POST payload: %s", buf);
 
+=======
+>>>>>>> sniffer_V2
     if (extractJsonInt(buf, "mode", &v)) settings.mode = (uint8_t)v;
     if (extractJsonInt(buf, "bms_line", &v)) settings.bms_line = (uint8_t)v;
     if (extractJsonInt(buf, "inverter_line", &v)) settings.inverter_line = (uint8_t)v;
@@ -653,6 +841,7 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
     (void)extractJsonString(buf, "wifi_password", settings.wifi_password, sizeof(settings.wifi_password));
     if (extractJsonInt(buf, "web_port", &v)) settings.web_port = (uint16_t)v;
 
+<<<<<<< HEAD
     ESP_LOGI(WEB_TAG,
              "Parsed settings old: mode=%u bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u)",
              (unsigned)oldSettings.mode,
@@ -681,6 +870,9 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
 
     if (!runtimeSettingsSave(&settings)) {
         ESP_LOGW(WEB_TAG, "Settings rejected by runtimeSettingsSave()");
+=======
+    if (!runtimeSettingsSave(&settings)) {
+>>>>>>> sniffer_V2
         httpd_resp_set_status(req, "400 Bad Request");
         setNoCacheHeaders(req);
         httpd_resp_set_type(req, "application/json");
@@ -691,6 +883,7 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, okResp, HTTPD_RESP_USE_STRLEN);
 
+<<<<<<< HEAD
     if (s_settingsApplyTask != NULL) {
         vTaskDelete(s_settingsApplyTask);
         s_settingsApplyTask = NULL;
@@ -708,6 +901,47 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
         &applyCtx,
         5,
         &s_settingsApplyTask);
+=======
+    ESP_LOGI(WEB_TAG,
+             "Settings POST accepted: mode=%u bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) web_port=%u",
+             (unsigned)settings.mode,
+             (unsigned)settings.bms_line,
+             (unsigned)settings.bms_protocol,
+             (unsigned)settings.bms_port,
+             (unsigned)settings.inverter_line,
+             (unsigned)settings.inverter_protocol,
+             (unsigned)settings.inverter_port,
+             (unsigned)settings.web_port);
+
+    settingsApplyReq_t applyReq = {
+        .restartWeb = (settings.web_port != oldSettings.web_port),
+        .reconfigureWifi =
+            (strcmp(settings.wifi_ssid, oldSettings.wifi_ssid) != 0) ||
+            (strcmp(settings.wifi_password, oldSettings.wifi_password) != 0),
+    };
+
+    if (s_settingsApplyQueue != NULL) {
+        if (xQueueOverwrite(s_settingsApplyQueue, &applyReq) != pdPASS) {
+            ESP_LOGW(WEB_TAG, "settings_apply queue overwrite failed, applying inline");
+            applyRuntimeSettings(applyReq.restartWeb, applyReq.reconfigureWifi);
+        }
+    } else {
+        ESP_LOGW(WEB_TAG, "settings_apply queue not ready, applying inline");
+        applyRuntimeSettings(applyReq.restartWeb, applyReq.reconfigureWifi);
+    }
+
+    if (s_settingsApplyTask == NULL) {
+        if (xTaskCreate(settingsApplyTask,
+                        "settings_apply",
+                        4096,
+                        NULL,
+                        5,
+                        &s_settingsApplyTask) != pdPASS) {
+            ESP_LOGW(WEB_TAG, "settings_apply task create failed, applying inline");
+            applyRuntimeSettings(applyReq.restartWeb, applyReq.reconfigureWifi);
+        }
+    }
+>>>>>>> sniffer_V2
 
     return ESP_OK;
 }
@@ -765,12 +999,26 @@ static void initWifiSta(void)
 {
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     wifi_config_t wifiConfig = { 0 };
+<<<<<<< HEAD
+=======
+    esp_err_t err = ESP_OK;
+>>>>>>> sniffer_V2
     bridge_runtime_settings_t settings = runtimeSettingsGet();
 
     wifiCopyField(wifiConfig.sta.ssid, sizeof(wifiConfig.sta.ssid), settings.wifi_ssid);
     wifiCopyField(wifiConfig.sta.password, sizeof(wifiConfig.sta.password), settings.wifi_password);
     wifiConfig.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
 
+<<<<<<< HEAD
+=======
+    err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(err);
+
+>>>>>>> sniffer_V2
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     s_wifiStaNetif = esp_netif_create_default_wifi_sta();
@@ -792,6 +1040,21 @@ static void webInterfaceTask(void *pv)
 
     configureWebLogLevels();
     s_wifiEventGroup = xEventGroupCreate();
+<<<<<<< HEAD
+=======
+    s_settingsApplyQueue = xQueueCreate(1, sizeof(settingsApplyReq_t));
+    if (s_settingsApplyQueue == NULL) {
+        ESP_LOGW(WEB_TAG, "settings_apply queue create failed");
+    } else if (xTaskCreate(settingsApplyTask,
+                           "settings_apply",
+                           4096,
+                           NULL,
+                           5,
+                           &s_settingsApplyTask) != pdPASS) {
+        ESP_LOGW(WEB_TAG, "settings_apply task create failed");
+        s_settingsApplyTask = NULL;
+    }
+>>>>>>> sniffer_V2
     initWifiSta();
     startHttpServer();
 

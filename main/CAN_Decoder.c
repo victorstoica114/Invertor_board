@@ -1,10 +1,14 @@
 #include "CAN_Decoder.h"
 
 #include "config.h"
+<<<<<<< HEAD
 #include "BMS_Protocols/Growatt/growatt_modbus_map.h"
 #include "BMS_Protocols/Deye/deye_can_protocol.h"
 #include "BMS_Protocols/Pylon/pylon_can_protocol.h"
 #include "runtime_settings.h"
+=======
+#include "protocols/growatt/growatt_register_map.h"
+>>>>>>> sniffer_V2
 
 #include <inttypes.h>
 #include <stdio.h>
