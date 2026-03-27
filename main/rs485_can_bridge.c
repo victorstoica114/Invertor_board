@@ -73,6 +73,8 @@ typedef struct {
 
 static jkbmsRs485GrowattCtx_t g_jkbmsRsGrowattCtx;
 static TaskHandle_t g_jkbmsRsGrowattTaskHandle;
+static can_rs485_growatt_snapshot_t g_canRsGrowattSnapshot;
+static portMUX_TYPE g_canRsGrowattSnapshotMux = portMUX_INITIALIZER_UNLOCKED;
 
 static int drainUartRx(uart_port_t uart, int maxBytes)
 {
@@ -323,6 +325,62 @@ static bool fillSnapshotFromJkbms(growattSynthSnapshot_t *snap, uint8_t fallback
     return true;
 }
 
+static void synthCellMap16(uint16_t *cellsOut,
+                           uint16_t cellMaxMv,
+                           uint16_t cellMinMv,
+                           uint8_t cellMaxIdx,
+                           uint8_t cellMinIdx)
+{
+    if (cellsOut == NULL) {
+        return;
+    }
+
+    for (uint8_t i = 0; i < 16u; i++) {
+        cellsOut[i] = fallbackCell(i);
+    }
+
+    if (cellMaxIdx >= 1u && cellMaxIdx <= 16u) {
+        cellsOut[cellMaxIdx - 1u] = cellMaxMv;
+    }
+    if (cellMinIdx >= 1u && cellMinIdx <= 16u) {
+        cellsOut[cellMinIdx - 1u] = cellMinMv;
+    }
+}
+
+static void publishCanRsGrowattSnapshot(uint8_t socPct,
+                                        uint8_t sohPct,
+                                        int16_t tempC,
+                                        uint16_t packCv,
+                                        uint16_t cycles,
+                                        uint16_t remCapCah,
+                                        uint16_t fullCapCah,
+                                        uint16_t cellMaxMv,
+                                        uint16_t cellMinMv,
+                                        uint8_t cellMaxIdx,
+                                        uint8_t cellMinIdx)
+{
+    can_rs485_growatt_snapshot_t s = {0};
+    s.valid = true;
+    s.timestampUs = esp_timer_get_time();
+    s.socPct = socPct;
+    s.sohPct = sohPct;
+    s.tempC = tempC;
+    s.packCv = packCv;
+    s.cycles = cycles;
+    s.remainingCapCah = remCapCah;
+    s.fullCapCah = fullCapCah;
+    s.cellMaxMv = cellMaxMv;
+    s.cellMinMv = cellMinMv;
+    s.cellMaxIdx = cellMaxIdx;
+    s.cellMinIdx = cellMinIdx;
+    s.cellCount = 16u;
+    synthCellMap16(s.cellMv, cellMaxMv, cellMinMv, cellMaxIdx, cellMinIdx);
+
+    portENTER_CRITICAL(&g_canRsGrowattSnapshotMux);
+    g_canRsGrowattSnapshot = s;
+    portEXIT_CRITICAL(&g_canRsGrowattSnapshotMux);
+}
+
 static uint16_t synthRegFromSnapshot(const growattSynthSnapshot_t *snap, uint16_t addr)
 {
     if (snap == NULL) {
@@ -571,6 +629,20 @@ static void logDecodedRegisterSnapshot(const canRs485GrowattCtx_t *ctx,
              (unsigned)cMaxIdx,
              (double)cMinMv / 1000.0,
              (unsigned)cMinIdx);
+
+    if (sent) {
+        publishCanRsGrowattSnapshot((uint8_t)soc,
+                                    (uint8_t)soh,
+                                    tempC,
+                                    packCv,
+                                    cycles,
+                                    remCap,
+                                    fullCap,
+                                    cMaxMv,
+                                    cMinMv,
+                                    (uint8_t)cMaxIdx,
+                                    (uint8_t)cMinIdx);
+    }
 }
 
 static bool canSourceFresh(const canRs485GrowattCtx_t *ctx)
@@ -770,6 +842,22 @@ static void jkbmsRs485GrowattTask(void *pv)
                                      (unsigned)snap.cellMaxIdx,
                                      (double)snap.cellMinMv / 1000.0,
                                      (unsigned)snap.cellMinIdx);
+                        }
+
+                        if (sent) {
+                            const uint16_t fullCap = 4000u;
+                            const uint16_t remCap = (uint16_t)(((uint32_t)fullCap * (uint32_t)snap.soc) / 100u);
+                            publishCanRsGrowattSnapshot((uint8_t)snap.soc,
+                                                        (uint8_t)snap.soh,
+                                                        snap.tempC,
+                                                        snap.packCv,
+                                                        snap.cycles,
+                                                        remCap,
+                                                        fullCap,
+                                                        snap.cellMaxMv,
+                                                        snap.cellMinMv,
+                                                        snap.cellMaxIdx,
+                                                        snap.cellMinIdx);
                         }
 
                         const uint16_t consume = (uint16_t)(off + 8u);
@@ -1032,5 +1120,37 @@ void canRs485GrowattBridgeStop(void)
         rs485SetDirection(g_jkbmsRsGrowattCtx.dirPin, false);
     }
     memset(&g_jkbmsRsGrowattCtx, 0, sizeof(g_jkbmsRsGrowattCtx));
+
+    portENTER_CRITICAL(&g_canRsGrowattSnapshotMux);
+    memset(&g_canRsGrowattSnapshot, 0, sizeof(g_canRsGrowattSnapshot));
+    portEXIT_CRITICAL(&g_canRsGrowattSnapshotMux);
+}
+
+bool canRs485GrowattBridgeGetLatestSnapshot(can_rs485_growatt_snapshot_t *out)
+{
+    can_rs485_growatt_snapshot_t snap = {0};
+
+    if (out == NULL) {
+        return false;
+    }
+
+    portENTER_CRITICAL(&g_canRsGrowattSnapshotMux);
+    snap = g_canRsGrowattSnapshot;
+    portEXIT_CRITICAL(&g_canRsGrowattSnapshotMux);
+
+    if (!snap.valid || snap.timestampUs <= 0) {
+        return false;
+    }
+
+    int64_t ageUs = esp_timer_get_time() - snap.timestampUs;
+    if (ageUs < 0) {
+        ageUs = 0;
+    }
+    if (ageUs > ((int64_t)BRIDGE_SOURCE_STALE_MS * 1000LL)) {
+        return false;
+    }
+
+    *out = snap;
+    return true;
 }
 

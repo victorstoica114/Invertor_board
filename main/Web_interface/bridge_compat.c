@@ -9,6 +9,7 @@
 #include "orchestrator/protocol_types.h"
 #include "protocols/growatt/growatt_bms_task.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_bms_task.h"
+#include "rs485_can_bridge.h"
 #include "runtime_settings.h"
 
 #include "esp_log.h"
@@ -184,8 +185,46 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out)
 {
     bms_decoded_packet_t packet = {0};
     bridge_runtime_settings_t settings = runtimeSettingsGet();
+    can_rs485_growatt_snapshot_t canRsSnap = {0};
 
     bool hasPacket = false;
+    const bool canToRsGrowattRoute =
+        (settings.bms_line == LINE_CAN) &&
+        (settings.inverter_line == LINE_RS485) &&
+        ((settings.bms_protocol == PROTOCOL_CAN_GROWATT) ||
+         (settings.bms_protocol == PROTOCOL_CAN_PYLON)) &&
+        (settings.inverter_protocol == PROTOCOL_RS485_GROWATT);
+
+    if (canToRsGrowattRoute && canRs485GrowattBridgeGetLatestSnapshot(&canRsSnap)) {
+        out->valid = true;
+        snprintf(out->source, sizeof(out->source), "%s", "CAN_RS485_TRANSLATOR");
+        snprintf(out->protocol, sizeof(out->protocol), "%s", protocolToStr(settings.bms_protocol));
+
+        out->socPct = canRsSnap.socPct;
+        out->sohPct = canRsSnap.sohPct;
+        out->tempMosC = (float)canRsSnap.tempC;
+        out->tempT1C = (float)canRsSnap.tempC;
+        out->tempT2C = (float)canRsSnap.tempC;
+        out->tempT4C = (float)canRsSnap.tempC;
+        out->tempT5C = (float)canRsSnap.tempC;
+        out->packVoltageV = (float)canRsSnap.packCv / 100.0f;
+        out->cycles = canRsSnap.cycles;
+        out->remainingAh = (float)canRsSnap.remainingCapCah / 100.0f;
+        out->fullAh = (float)canRsSnap.fullCapCah / 100.0f;
+
+        out->cellMaxV = (float)canRsSnap.cellMaxMv / 1000.0f;
+        out->cellMinV = (float)canRsSnap.cellMinMv / 1000.0f;
+        out->cellMaxIdx = canRsSnap.cellMaxIdx;
+        out->cellMinIdx = canRsSnap.cellMinIdx;
+        out->deltaV = out->cellMaxV - out->cellMinV;
+
+        out->cellCount = canRsSnap.cellCount;
+        for (uint8_t i = 0; i < canRsSnap.cellCount && i < 32u; i++) {
+            out->cellVoltagesV[i] = (float)canRsSnap.cellMv[i] / 1000.0f;
+        }
+        return;
+    }
+
     if (settings.bms_protocol == PROTOCOL_RS485_JKBMS) {
         jkbms_modbus_snapshot_t snapshot = {0};
         if (jkbmsModbusBmsTaskGetLatestSnapshot(&snapshot)) {
