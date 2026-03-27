@@ -32,6 +32,7 @@ static bool g_haveLatestPacket;
 static bms_decoded_packet_t g_latestPacket;
 static bool g_haveLatestSnapshot;
 static jkbms_modbus_snapshot_t g_latestSnapshot;
+static int64_t g_lastCellDebugLogUs;
 static struct {
     bool valid;
     uint8_t cellCount;
@@ -220,6 +221,126 @@ static bool normalizeCellMv(uint16_t raw, uint16_t *mvOut)
         *mvOut = best;
     }
     return true;
+}
+
+static void formatCellVoltageSlice(const jkbms_modbus_snapshot_t *snapshot,
+                                   uint8_t firstCell,
+                                   uint8_t lastCell,
+                                   char *out,
+                                   size_t outSize)
+{
+    size_t pos = 0u;
+
+    if (snapshot == NULL || out == NULL || outSize == 0u || firstCell < 1u || lastCell < firstCell) {
+        return;
+    }
+
+    out[0] = '\0';
+    for (uint8_t c = firstCell; c <= lastCell; c++) {
+        const uint8_t idx = (uint8_t)(c - 1u);
+        const bool hasCell = (idx < snapshot->cellCount &&
+                              snapshot->cellMv[idx] >= 2000u &&
+                              snapshot->cellMv[idx] <= 5000u);
+        int w = 0;
+
+        if (hasCell) {
+            w = snprintf(out + pos,
+                         outSize - pos,
+                         "%sC%02u=%.3fV",
+                         (pos == 0u) ? "" : " ",
+                         (unsigned)c,
+                         (double)((float)snapshot->cellMv[idx] / 1000.0f));
+        } else {
+            w = snprintf(out + pos,
+                         outSize - pos,
+                         "%sC%02u=-",
+                         (pos == 0u) ? "" : " ",
+                         (unsigned)c);
+        }
+
+        if (w <= 0 || (size_t)w >= (outSize - pos)) {
+            out[outSize - 1u] = '\0';
+            return;
+        }
+        pos += (size_t)w;
+    }
+}
+
+static void formatCellRawSlice(const modbusDecoder_t *decoder,
+                               uint8_t firstCell,
+                               uint8_t lastCell,
+                               char *out,
+                               size_t outSize)
+{
+    size_t pos = 0u;
+
+    if (decoder == NULL || out == NULL || outSize == 0u || firstCell < 1u || lastCell < firstCell) {
+        return;
+    }
+
+    out[0] = '\0';
+    for (uint8_t c = firstCell; c <= lastCell; c++) {
+        const uint16_t addr = JKBMS_RT_REG_CELL_N_MV((uint16_t)(c - 1u));
+        uint16_t raw = 0u;
+        const bool ok = decoderGetU16(decoder, addr, &raw);
+        int w = snprintf(out + pos,
+                         outSize - pos,
+                         "%sR%02u=%s",
+                         (pos == 0u) ? "" : " ",
+                         (unsigned)c,
+                         ok ? "0x" : "--");
+        if (w <= 0 || (size_t)w >= (outSize - pos)) {
+            out[outSize - 1u] = '\0';
+            return;
+        }
+        pos += (size_t)w;
+
+        if (ok) {
+            w = snprintf(out + pos, outSize - pos, "%04X", (unsigned)raw);
+            if (w <= 0 || (size_t)w >= (outSize - pos)) {
+                out[outSize - 1u] = '\0';
+                return;
+            }
+            pos += (size_t)w;
+        }
+    }
+}
+
+static void logCellDebug(const modbusDecoder_t *decoder,
+                         const jkbms_modbus_snapshot_t *snapshot,
+                         int64_t nowUs)
+{
+    char decA[320];
+    char decB[320];
+    char rawA[320];
+    char rawB[320];
+
+    if (decoder == NULL || snapshot == NULL) {
+        return;
+    }
+
+    if ((nowUs - g_lastCellDebugLogUs) < 5000000LL) {
+        return;
+    }
+    g_lastCellDebugLogUs = nowUs;
+
+    formatCellVoltageSlice(snapshot, 1u, 8u, decA, sizeof(decA));
+    formatCellVoltageSlice(snapshot, 9u, 16u, decB, sizeof(decB));
+    formatCellRawSlice(decoder, 1u, 8u, rawA, sizeof(rawA));
+    formatCellRawSlice(decoder, 9u, 16u, rawB, sizeof(rawB));
+
+    ESP_LOGI(EXAMPLE_TAG,
+             "JKBMS decoded cells: valid=%s count=%u min=%.3fV(#%u) max=%.3fV(#%u)",
+             snapshot->valid ? "YES" : "NO",
+             (unsigned)snapshot->cellCount,
+             snapshot->hasCellExtremes ? (double)((float)snapshot->minCellMv / 1000.0f) : 0.0,
+             snapshot->hasCellExtremes ? (unsigned)snapshot->minCellIndex : 0u,
+             snapshot->hasCellExtremes ? (double)((float)snapshot->maxCellMv / 1000.0f) : 0.0,
+             snapshot->hasCellExtremes ? (unsigned)snapshot->maxCellIndex : 0u);
+    ESP_LOGI(EXAMPLE_TAG, "JKBMS cells 01-08: %s", decA);
+    ESP_LOGI(EXAMPLE_TAG, "JKBMS cells 09-16: %s", decB);
+    ESP_LOGI(EXAMPLE_TAG, "JKBMS raw   01-08: %s", rawA);
+    ESP_LOGI(EXAMPLE_TAG, "JKBMS raw   09-16: %s", rawB);
 }
 
 static void evaluateCellDecodeCandidate(const modbusDecoder_t *decoder,
@@ -958,6 +1079,7 @@ static void jkbmsModbusBmsTask(void *pv)
             jkbms_modbus_snapshot_t snapshot = {0};
             if (buildDecodedSnapshot(&ctx->decoder, &snapshot)) {
                 jkbmsStoreLatestSnapshot(&snapshot);
+                logCellDebug(&ctx->decoder, &snapshot, nowUs);
 
                 bms_decoded_packet_t packet = {0};
                 if (buildPacketFromSnapshot(&snapshot, ++ctx->sequence, &packet)) {
@@ -983,6 +1105,7 @@ esp_err_t jkbmsModbusBmsTaskStart(QueueHandle_t outQueue)
 
     memset(&g_jkbmsModbusBmsCtx, 0, sizeof(g_jkbmsModbusBmsCtx));
     g_jkbmsModbusBmsCtx.outQueue = outQueue;
+    g_lastCellDebugLogUs = 0;
     memset(&g_lastGoodCellMap, 0, sizeof(g_lastGoodCellMap));
 
     portENTER_CRITICAL(&g_latestPacketMux);
@@ -1056,6 +1179,7 @@ esp_err_t jkbmsModbusBmsTaskStop(void)
     vTaskDelete(g_jkbmsModbusBmsTaskHandle);
     g_jkbmsModbusBmsTaskHandle = NULL;
     memset(&g_jkbmsModbusBmsCtx, 0, sizeof(g_jkbmsModbusBmsCtx));
+    g_lastCellDebugLogUs = 0;
     memset(&g_lastGoodCellMap, 0, sizeof(g_lastGoodCellMap));
 
     portENTER_CRITICAL(&g_latestPacketMux);
