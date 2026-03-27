@@ -154,6 +154,12 @@ typedef struct {
     uint16_t cellMv[JKBMS_MAX_CELLS];
 } cell_decode_candidate_t;
 
+/*
+ * Current JK setup used with this bridge is 16S. When pack-derived hint is
+ * missing/noisy, keep a stable default to avoid sparse maps drifting to 32 cells.
+ */
+#define JKBMS_DEFAULT_CELL_COUNT_HINT 16u
+
 static bool decodeCellRawWithMode(uint16_t raw, cell_value_mode_t mode, uint16_t *mvOut)
 {
     uint16_t candidate = 0u;
@@ -176,8 +182,11 @@ static bool decodeCellRawWithMode(uint16_t raw, cell_value_mode_t mode, uint16_t
             return false;
     }
 
-    /* Keep a broad acceptance range to also capture abnormal cells. */
-    if (candidate < 500u || candidate > 6000u) {
+    /*
+     * Keep only realistic Li-ion/LFP per-cell voltages.
+     * Wider ranges produced false positives (e.g. 5.9V phantom cells).
+     */
+    if (candidate < 2000u || candidate > 5000u) {
         return false;
     }
 
@@ -611,18 +620,13 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
             exp.expectedCount = (uint8_t)estimatedCells;
         }
     }
-    if (!exp.hasExpectedCount && (exp.hasMaxIdx || exp.hasMinIdx)) {
-        uint8_t idxHint = 0u;
-        if (exp.hasMaxIdx && exp.maxIdx > idxHint) {
-            idxHint = exp.maxIdx;
-        }
-        if (exp.hasMinIdx && exp.minIdx > idxHint) {
-            idxHint = exp.minIdx;
-        }
-        if (idxHint > 0u) {
-            exp.hasExpectedCount = true;
-            exp.expectedCount = idxHint;
-        }
+    /*
+     * Do not use max/min index word as cell-count hint. On some JK firmwares
+     * this field is noisy while polling and creates bogus counts (27, 29, ...).
+     */
+    if (!exp.hasExpectedCount) {
+        exp.hasExpectedCount = true;
+        exp.expectedCount = JKBMS_DEFAULT_CELL_COUNT_HINT;
     }
 
     for (size_t si = 0u; si < (sizeof(k_strides) / sizeof(k_strides[0])); si++) {
@@ -656,6 +660,7 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
         targetCellCount = JKBMS_MAX_CELLS;
     }
     out->cellCount = targetCellCount;
+    memset(out->cellMv, 0, sizeof(out->cellMv));
 
     uint8_t validCells = 0u;
     uint16_t minMv = UINT16_MAX;
