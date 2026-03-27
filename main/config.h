@@ -55,6 +55,8 @@
 #define CAN_RS485_SOC_SLAVE_ID 1u
 #define CAN_RS485_SOC_FAKE_PCT 99u
 #define CAN_RS485_SOC_RX_GAP_US 5000u
+/* Source freshness window for fail-safe (stop answering if source is stale). */
+#define BRIDGE_SOURCE_STALE_MS 2000u
 
 /* --- Global working mode --- */
 #define ACTIVE_WORKING_MODE 0 /* 0=bridge, 1=forward, 2=sniffer */
