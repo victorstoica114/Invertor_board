@@ -553,8 +553,9 @@ static bool decodeSohPrecharge(const modbusDecoder_t *decoder,
 
 static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_snapshot_t *out)
 {
-    static const uint8_t k_strides[] = {1u, (uint8_t)JKBMS_RT_CELL_STEP};
-    static const uint8_t k_offsets[] = {0u, 1u, 2u, 3u};
+    /* JK runtime map stores cells at fixed stride from CELL0. */
+    static const uint8_t k_strides[] = {(uint8_t)JKBMS_RT_CELL_STEP};
+    static const uint8_t k_offsets[] = {0u};
 
     if (decoder == NULL || out == NULL) {
         return false;
@@ -645,9 +646,8 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
     const uint8_t hintCount =
         (exp.hasExpectedCount && exp.expectedCount > 0u) ? exp.expectedCount : 0u;
     const uint8_t highestSeen = bestCandidate.highestValidIdx;
-    if (hintCount > 0u && highestSeen > 0u) {
-        targetCellCount = (hintCount > highestSeen) ? hintCount : highestSeen;
-    } else if (hintCount > 0u) {
+    if (hintCount > 0u) {
+        /* Prefer physical cell-count hint (packV/cellAvg or index hints). */
         targetCellCount = hintCount;
     } else {
         targetCellCount = highestSeen;
@@ -719,13 +719,41 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
         g_lastGoodCellMap.cellAvgMv = out->cellAvgMv;
         g_lastGoodCellMap.cellDiffMaxMv = out->cellDiffMaxMv;
     } else if (g_lastGoodCellMap.valid && g_lastGoodCellMap.cellCount >= 4u) {
-        out->cellCount = g_lastGoodCellMap.cellCount;
+        uint8_t fallbackCount = g_lastGoodCellMap.cellCount;
+        if (hintCount > 0u && fallbackCount > hintCount) {
+            fallbackCount = hintCount;
+        }
+        out->cellCount = fallbackCount;
         memcpy(out->cellMv, g_lastGoodCellMap.cellMv, sizeof(out->cellMv));
-        out->hasCellExtremes = true;
-        out->minCellMv = g_lastGoodCellMap.minCellMv;
-        out->maxCellMv = g_lastGoodCellMap.maxCellMv;
-        out->minCellIndex = g_lastGoodCellMap.minCellIndex;
-        out->maxCellIndex = g_lastGoodCellMap.maxCellIndex;
+        {
+            uint16_t fMin = UINT16_MAX;
+            uint16_t fMax = 0u;
+            uint8_t fMinIdx = 0u;
+            uint8_t fMaxIdx = 0u;
+            for (uint8_t i = 0u; i < out->cellCount; i++) {
+                const uint16_t mv = out->cellMv[i];
+                if (mv < 500u || mv > 6000u) {
+                    continue;
+                }
+                if (mv < fMin) {
+                    fMin = mv;
+                    fMinIdx = (uint8_t)(i + 1u);
+                }
+                if (mv > fMax) {
+                    fMax = mv;
+                    fMaxIdx = (uint8_t)(i + 1u);
+                }
+            }
+            if (fMinIdx != 0u && fMaxIdx != 0u) {
+                out->hasCellExtremes = true;
+                out->minCellMv = fMin;
+                out->maxCellMv = fMax;
+                out->minCellIndex = fMinIdx;
+                out->maxCellIndex = fMaxIdx;
+            } else {
+                out->hasCellExtremes = false;
+            }
+        }
         if (!out->hasCellAvgMv) {
             out->hasCellAvgMv = true;
             out->cellAvgMv = g_lastGoodCellMap.cellAvgMv;
