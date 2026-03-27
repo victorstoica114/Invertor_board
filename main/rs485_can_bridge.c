@@ -297,10 +297,10 @@ typedef struct {
     uint8_t cellMinIdx;
 } growattSynthSnapshot_t;
 
-static void fillSnapshotFromJkbms(growattSynthSnapshot_t *snap, uint8_t fallbackSocPct)
+static bool fillSnapshotFromJkbms(growattSynthSnapshot_t *snap, uint8_t fallbackSocPct)
 {
     if (snap == NULL) {
-        return;
+        return false;
     }
 
     snap->soc = fallbackSocPct;
@@ -315,7 +315,19 @@ static void fillSnapshotFromJkbms(growattSynthSnapshot_t *snap, uint8_t fallback
 
     bms_decoded_packet_t pkt = {0};
     if (!jkbmsModbusBmsTaskGetLatestPacket(&pkt)) {
-        return;
+        return false;
+    }
+    if (pkt.timestampUs <= 0) {
+        return false;
+    }
+
+    int64_t nowUs = esp_timer_get_time();
+    int64_t ageUs = nowUs - pkt.timestampUs;
+    if (ageUs < 0) {
+        ageUs = 0;
+    }
+    if (ageUs > ((int64_t)BRIDGE_SOURCE_STALE_MS * 1000LL)) {
+        return false;
     }
 
     if (pkt.hasSoc) {
@@ -333,6 +345,7 @@ static void fillSnapshotFromJkbms(growattSynthSnapshot_t *snap, uint8_t fallback
         snap->cellMaxIdx = pkt.maxCellIndex;
         snap->cellMinIdx = pkt.minCellIndex;
     }
+    return true;
 }
 
 static uint16_t synthRegFromSnapshot(const growattSynthSnapshot_t *snap, uint16_t addr)
@@ -746,9 +759,9 @@ static void jkbmsRs485GrowattTask(void *pv)
                         ctx->reqCount++;
 
                         growattSynthSnapshot_t snap = {0};
-                        fillSnapshotFromJkbms(&snap, ctx->fakeSocPct);
+                        bool fresh = fillSnapshotFromJkbms(&snap, ctx->fakeSocPct);
 
-                        bool sent = sendGrowattResponseFromSnapshot(ctx, &snap, func, start, count);
+                        bool sent = fresh && sendGrowattResponseFromSnapshot(ctx, &snap, func, start, count);
                         if (sent) {
                             ctx->rspCount++;
                         }
@@ -1042,19 +1055,27 @@ static bool canRsModelLooksUsable(const universal_battery_model_t *model)
     return model != NULL && model->valid;
 }
 
+static bool canRsModelFresh(const universal_battery_model_t *model)
+{
+    if (!canRsModelLooksUsable(model) || model->updatedMs == 0u) {
+        return false;
+    }
+
+    uint32_t nowMs = (uint32_t)(esp_timer_get_time() / 1000LL);
+    uint32_t ageMs = nowMs - model->updatedMs;
+    return ageMs <= BRIDGE_SOURCE_STALE_MS;
+}
+
 static bool canRsSourceFresh(const canRs485GrowattCtx_t *ctx, const universal_battery_model_t *model)
 {
-    bridge_runtime_settings_t settings = runtimeSettingsGet();
-
-    if (settings.bms_protocol == PROTOCOL_CAN_PYLON) {
-        return canRsModelLooksUsable(model);
-    }
-
     if (ctx != NULL && ctx->srcCanIf != NULL) {
-        return canDecoderHasFreshData(ctx->srcCanIf, BRIDGE_SOURCE_STALE_MS);
+        if (canDecoderHasFreshData(ctx->srcCanIf, BRIDGE_SOURCE_STALE_MS)) {
+            return true;
+        }
     }
 
-    return false;
+    /* Fallback for routes that rely mainly on universal model propagation (e.g. Pylon path). */
+    return canRsModelFresh(model);
 }
 
 static uint16_t canRsRoundScaled(float value, float scale, uint16_t fallback)
