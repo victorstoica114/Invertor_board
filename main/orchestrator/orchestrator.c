@@ -148,9 +148,13 @@ static bool isCanToRsGrowattRoute(const bridge_runtime_settings_t *settings)
         return false;
     }
 
+    const bool canBmsSupported =
+        (settings->bms_protocol == PROTOCOL_CAN_GROWATT) ||
+        (settings->bms_protocol == PROTOCOL_CAN_PYLON);
+
     return (settings->bms_line == LINE_CAN) &&
            (settings->inverter_line == LINE_RS485) &&
-           (settings->bms_protocol == PROTOCOL_CAN_GROWATT) &&
+           canBmsSupported &&
            (settings->inverter_protocol == PROTOCOL_RS485_GROWATT);
 }
 
@@ -337,7 +341,7 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
             return startErr;
         }
         g_orchestratorCtx.canRs485TranslatorActive = true;
-        g_orchestratorCtx.bmsProtocol = PROTOCOL_ID_GROWATT;
+        g_orchestratorCtx.bmsProtocol = protocolIdFromUiProtocol(settings->bms_protocol);
         g_orchestratorCtx.inverterProtocol = PROTOCOL_ID_GROWATT;
 
         ESP_LOGI(EXAMPLE_TAG,
