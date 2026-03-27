@@ -5,8 +5,14 @@
  * ranges that include sparse/undocumented addresses.
  */
 const jkbms_modbus_poll_block_t g_jkbmsModbusPollBlocks[] = {
-    /* Cell table: 0x1200..0x123F (contains 0x1200,0x1202,...,0x123E) */
-    { .start = JKBMS_RT_REG_CELL0_MV,              .count = 0x0040u },
+    /*
+     * Cell table split into smaller chunks. Some JK firmwares/transceivers are
+     * unstable on larger FC03 ranges and return partial/empty replies.
+     */
+    { .start = (uint16_t)(JKBMS_RT_REG_CELL0_MV + 0x0000u), .count = 0x0010u },
+    { .start = (uint16_t)(JKBMS_RT_REG_CELL0_MV + 0x0010u), .count = 0x0010u },
+    { .start = (uint16_t)(JKBMS_RT_REG_CELL0_MV + 0x0020u), .count = 0x0010u },
+    { .start = (uint16_t)(JKBMS_RT_REG_CELL0_MV + 0x0030u), .count = 0x0010u },
     /* Cell summary area: avg/diff/max-min indexes */
     { .start = JKBMS_RT_REG_CELL_AVG_MV,           .count = 0x0006u },
     /* Runtime electrical + thermal + alarm + capacity + cycles */

@@ -32,6 +32,17 @@ static bool g_haveLatestPacket;
 static bms_decoded_packet_t g_latestPacket;
 static bool g_haveLatestSnapshot;
 static jkbms_modbus_snapshot_t g_latestSnapshot;
+static struct {
+    bool valid;
+    uint8_t cellCount;
+    uint16_t cellMv[JKBMS_MAX_CELLS];
+    uint16_t minCellMv;
+    uint16_t maxCellMv;
+    uint8_t minCellIndex;
+    uint8_t maxCellIndex;
+    uint16_t cellAvgMv;
+    uint16_t cellDiffMaxMv;
+} g_lastGoodCellMap;
 
 static void jkbmsStoreLatestPacket(const bms_decoded_packet_t *packet)
 {
@@ -136,6 +147,7 @@ typedef struct {
     uint8_t windowCount;
     uint8_t validInWindow;
     uint8_t headCount;
+    uint8_t highestValidIdx;
     uint8_t gapCount;
     int32_t score;
     bool cellValid[JKBMS_MAX_CELLS];
@@ -236,6 +248,7 @@ static void evaluateCellDecodeCandidate(const modbusDecoder_t *decoder,
         }
         out->cellValid[i] = true;
         out->cellMv[i] = mv;
+        out->highestValidIdx = (uint8_t)(i + 1u);
     }
 
     for (uint8_t i = 0u; i < JKBMS_MAX_CELLS; i++) {
@@ -541,7 +554,7 @@ static bool decodeSohPrecharge(const modbusDecoder_t *decoder,
 static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_snapshot_t *out)
 {
     static const uint8_t k_strides[] = {1u, (uint8_t)JKBMS_RT_CELL_STEP};
-    static const uint8_t k_offsets[] = {0u, 1u};
+    static const uint8_t k_offsets[] = {0u, 1u, 2u, 3u};
 
     if (decoder == NULL || out == NULL) {
         return false;
@@ -629,10 +642,15 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
     }
 
     uint8_t targetCellCount = 0u;
-    if (exp.hasExpectedCount && exp.expectedCount > 0u) {
-        targetCellCount = exp.expectedCount;
+    const uint8_t hintCount =
+        (exp.hasExpectedCount && exp.expectedCount > 0u) ? exp.expectedCount : 0u;
+    const uint8_t highestSeen = bestCandidate.highestValidIdx;
+    if (hintCount > 0u && highestSeen > 0u) {
+        targetCellCount = (hintCount > highestSeen) ? hintCount : highestSeen;
+    } else if (hintCount > 0u) {
+        targetCellCount = hintCount;
     } else {
-        targetCellCount = bestCandidate.headCount;
+        targetCellCount = highestSeen;
     }
     if (targetCellCount > JKBMS_MAX_CELLS) {
         targetCellCount = JKBMS_MAX_CELLS;
@@ -662,15 +680,6 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
         }
     }
 
-    /* Reject sparse/noisy cell maps: keep cells only when at least 4 channels decode cleanly. */
-    if (validCells < 4u) {
-        out->cellCount = 0u;
-        memset(out->cellMv, 0, sizeof(out->cellMv));
-        minIdx = 0u;
-        maxIdx = 0u;
-        validCells = 0u;
-    }
-
     if (validCells >= 2u && minIdx != 0u && maxIdx != 0u) {
         out->hasCellExtremes = true;
         out->minCellMv = minMv;
@@ -697,6 +706,38 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
             out->maxCellMv = vB;
             out->minCellMv = vA;
         }
+    }
+
+    if (validCells >= 4u) {
+        g_lastGoodCellMap.valid = true;
+        g_lastGoodCellMap.cellCount = out->cellCount;
+        memcpy(g_lastGoodCellMap.cellMv, out->cellMv, sizeof(out->cellMv));
+        g_lastGoodCellMap.minCellMv = out->minCellMv;
+        g_lastGoodCellMap.maxCellMv = out->maxCellMv;
+        g_lastGoodCellMap.minCellIndex = out->minCellIndex;
+        g_lastGoodCellMap.maxCellIndex = out->maxCellIndex;
+        g_lastGoodCellMap.cellAvgMv = out->cellAvgMv;
+        g_lastGoodCellMap.cellDiffMaxMv = out->cellDiffMaxMv;
+    } else if (g_lastGoodCellMap.valid && g_lastGoodCellMap.cellCount >= 4u) {
+        out->cellCount = g_lastGoodCellMap.cellCount;
+        memcpy(out->cellMv, g_lastGoodCellMap.cellMv, sizeof(out->cellMv));
+        out->hasCellExtremes = true;
+        out->minCellMv = g_lastGoodCellMap.minCellMv;
+        out->maxCellMv = g_lastGoodCellMap.maxCellMv;
+        out->minCellIndex = g_lastGoodCellMap.minCellIndex;
+        out->maxCellIndex = g_lastGoodCellMap.maxCellIndex;
+        if (!out->hasCellAvgMv) {
+            out->hasCellAvgMv = true;
+            out->cellAvgMv = g_lastGoodCellMap.cellAvgMv;
+        }
+        if (!out->hasCellDiffMaxMv) {
+            out->hasCellDiffMaxMv = true;
+            out->cellDiffMaxMv = g_lastGoodCellMap.cellDiffMaxMv;
+        }
+    } else if (validCells < 2u) {
+        out->cellCount = 0u;
+        memset(out->cellMv, 0, sizeof(out->cellMv));
+        out->hasCellExtremes = false;
     }
 
     int16_t i16 = 0;
@@ -909,6 +950,7 @@ esp_err_t jkbmsModbusBmsTaskStart(QueueHandle_t outQueue)
 
     memset(&g_jkbmsModbusBmsCtx, 0, sizeof(g_jkbmsModbusBmsCtx));
     g_jkbmsModbusBmsCtx.outQueue = outQueue;
+    memset(&g_lastGoodCellMap, 0, sizeof(g_lastGoodCellMap));
 
     portENTER_CRITICAL(&g_latestPacketMux);
     g_haveLatestPacket = false;
@@ -981,6 +1023,7 @@ esp_err_t jkbmsModbusBmsTaskStop(void)
     vTaskDelete(g_jkbmsModbusBmsTaskHandle);
     g_jkbmsModbusBmsTaskHandle = NULL;
     memset(&g_jkbmsModbusBmsCtx, 0, sizeof(g_jkbmsModbusBmsCtx));
+    memset(&g_lastGoodCellMap, 0, sizeof(g_lastGoodCellMap));
 
     portENTER_CRITICAL(&g_latestPacketMux);
     g_haveLatestPacket = false;
