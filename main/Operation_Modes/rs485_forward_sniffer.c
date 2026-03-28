@@ -586,7 +586,8 @@ void rs485ForwardSnifferStart(const bridge_runtime_settings_t *settings)
                                 (settings->bms_line == LINE_CAN) &&
                                 (settings->inverter_line == LINE_RS485) &&
                                 ((settings->bms_protocol == PROTOCOL_CAN_GROWATT) ||
-                                 (settings->bms_protocol == PROTOCOL_CAN_PYLON)) &&
+                                 (settings->bms_protocol == PROTOCOL_CAN_PYLON) ||
+                                 (settings->bms_protocol == PROTOCOL_CAN_GOODWE)) &&
                                 (settings->inverter_protocol == PROTOCOL_RS485_GROWATT);
 
     rs485ForwardSnifferStop();

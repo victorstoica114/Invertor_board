@@ -77,6 +77,7 @@ static const char *canProtocolLabel(int protocol)
     switch (protocol) {
         case PROTOCOL_CAN_PYLON: return "PYLON";
         case PROTOCOL_CAN_DEYE: return "DEYE";
+        case PROTOCOL_CAN_GOODWE: return "GOODWE";
         case PROTOCOL_CAN_GROWATT: return "GROWATT";
         default: return "CAN";
     }
@@ -185,9 +186,15 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
     const bool bmsCanDeye = (settings != NULL) &&
                             (settings->bms_line == LINE_CAN) &&
                             (settings->bms_protocol == PROTOCOL_CAN_DEYE);
+    const bool bmsCanGoodwe = (settings != NULL) &&
+                              (settings->bms_line == LINE_CAN) &&
+                              (settings->bms_protocol == PROTOCOL_CAN_GOODWE);
     const bool invCanDeye = (settings != NULL) &&
                             (settings->inverter_line == LINE_CAN) &&
                             (settings->inverter_protocol == PROTOCOL_CAN_DEYE);
+    const bool invCanGoodwe = (settings != NULL) &&
+                              (settings->inverter_line == LINE_CAN) &&
+                              (settings->inverter_protocol == PROTOCOL_CAN_GOODWE);
     const bool sameCanProtocol = (settings != NULL) &&
                                  bmsOnCan &&
                                  invOnCan &&
@@ -243,7 +250,8 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
             ESP_LOGI(EXAMPLE_TAG,
                      "CAN bridge mode uses direct pass-through because both sides are %s",
                      (settings->bms_protocol == PROTOCOL_CAN_PYLON) ? "CAN_PYLON" :
-                     ((settings->bms_protocol == PROTOCOL_CAN_DEYE) ? "CAN_DEYE" : "CAN_GROWATT"));
+                     ((settings->bms_protocol == PROTOCOL_CAN_DEYE) ? "CAN_DEYE" :
+                      ((settings->bms_protocol == PROTOCOL_CAN_GOODWE) ? "CAN_GOODWE" : "CAN_GROWATT")));
         }
         return;
     }
@@ -255,7 +263,7 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
         bmsSniff.txBus = canBusByPort(settings->bms_port);
         bmsSniff.applyExcludeList = false;
         bmsSniff.forwardEnabled = false;
-        bmsSniff.rawLogEnabled = bmsCanPylon || bmsCanDeye;
+        bmsSniff.rawLogEnabled = bmsCanPylon || bmsCanDeye || bmsCanGoodwe;
         bmsSniff.rawLogLabel = canProtocolLabel(settings->bms_protocol);
         if (createCanTask(canBridgeTask, "can_bms_sniff", 4096, &bmsSniff, 10, &s_canTaskA)) {
             ESP_LOGI(EXAMPLE_TAG, "CAN sniffer enabled on BMS side (%s[P%d])", bmsSniff.rxName, settings->bms_port);
@@ -268,6 +276,10 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
             ESP_LOGI(EXAMPLE_TAG, "CAN Deye diagnostic logging enabled on BMS side (%s[P%d])",
                      bmsSniff.rxName,
                      settings->bms_port);
+        } else if (bmsCanGoodwe) {
+            ESP_LOGI(EXAMPLE_TAG, "CAN GoodWe diagnostic logging enabled on BMS side (%s[P%d])",
+                     bmsSniff.rxName,
+                     settings->bms_port);
         }
     }
 
@@ -278,7 +290,7 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
         invSniff.txBus = canBusByPort(settings->inverter_port);
         invSniff.applyExcludeList = false;
         invSniff.forwardEnabled = false;
-        invSniff.rawLogEnabled = invCanPylon || invCanDeye;
+        invSniff.rawLogEnabled = invCanPylon || invCanDeye || invCanGoodwe;
         invSniff.rawLogLabel = canProtocolLabel(settings->inverter_protocol);
         if (createCanTask(canBridgeTask, "can_inv_sniff", 4096, &invSniff, 10, &s_canTaskB)) {
             ESP_LOGI(EXAMPLE_TAG, "CAN sniffer enabled on inverter side (%s[P%d])", invSniff.rxName, settings->inverter_port);
@@ -289,6 +301,10 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
                      settings->inverter_port);
         } else if (invCanDeye) {
             ESP_LOGI(EXAMPLE_TAG, "CAN Deye diagnostic logging enabled on inverter side (%s[P%d])",
+                     invSniff.rxName,
+                     settings->inverter_port);
+        } else if (invCanGoodwe) {
+            ESP_LOGI(EXAMPLE_TAG, "CAN GoodWe diagnostic logging enabled on inverter side (%s[P%d])",
                      invSniff.rxName,
                      settings->inverter_port);
         }

@@ -49,6 +49,8 @@ static const char *protocolToStr(uint8_t protocol)
             return "CAN_PYLON";
         case PROTOCOL_CAN_DEYE:
             return "CAN_DEYE";
+        case PROTOCOL_CAN_GOODWE:
+            return "CAN_GOODWE";
         case PROTOCOL_RS485_JKBMS:
             return "JKBMS_MODBUS";
         default:
@@ -192,7 +194,8 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out)
         (settings.bms_line == LINE_CAN) &&
         (settings.inverter_line == LINE_RS485) &&
         ((settings.bms_protocol == PROTOCOL_CAN_GROWATT) ||
-         (settings.bms_protocol == PROTOCOL_CAN_PYLON)) &&
+         (settings.bms_protocol == PROTOCOL_CAN_PYLON) ||
+         (settings.bms_protocol == PROTOCOL_CAN_GOODWE)) &&
         (settings.inverter_protocol == PROTOCOL_RS485_GROWATT);
 
     if (canToRsGrowattRoute && canRs485GrowattBridgeGetLatestSnapshot(&canRsSnap)) {

@@ -1,4 +1,5 @@
 #include "deye_can_protocol.h"
+#include "deye_can_map.h"
 
 #include "../../bridge.h"
 
@@ -116,14 +117,14 @@ static float deyeTempWordToC(uint16_t raw)
 
 void deyeCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, size_t count)
 {
-    const pylon_can_frame_t *f351 = deyeCanFrameById(cache, count, 0x351u);
-    const pylon_can_frame_t *f355 = deyeCanFrameById(cache, count, 0x355u);
-    const pylon_can_frame_t *f356 = deyeCanFrameById(cache, count, 0x356u);
-    const pylon_can_frame_t *f359 = deyeCanFrameById(cache, count, 0x359u);
-    const pylon_can_frame_t *f35C = deyeCanFrameById(cache, count, 0x35Cu);
-    const pylon_can_frame_t *f35E = deyeCanFrameById(cache, count, 0x35Eu);
-    const pylon_can_frame_t *f370 = deyeCanFrameById(cache, count, 0x370u);
-    const pylon_can_frame_t *f371 = deyeCanFrameById(cache, count, 0x371u);
+    const pylon_can_frame_t *f351 = deyeCanFrameById(cache, count, DEYE_CAN_ID_LIMITS_351);
+    const pylon_can_frame_t *f355 = deyeCanFrameById(cache, count, DEYE_CAN_ID_SOC_SOH_355);
+    const pylon_can_frame_t *f356 = deyeCanFrameById(cache, count, DEYE_CAN_ID_PACK_356);
+    const pylon_can_frame_t *f359 = deyeCanFrameById(cache, count, DEYE_CAN_ID_MODULE_INFO_359);
+    const pylon_can_frame_t *f35C = deyeCanFrameById(cache, count, DEYE_CAN_ID_STATUS_35C);
+    const pylon_can_frame_t *f35E = deyeCanFrameById(cache, count, DEYE_CAN_ID_ASCII_ID_35E);
+    const pylon_can_frame_t *f370 = deyeCanFrameById(cache, count, DEYE_CAN_ID_TEMP_CELL_370);
+    const pylon_can_frame_t *f371 = deyeCanFrameById(cache, count, DEYE_CAN_ID_SENSOR_INDEX_371);
     bridgeTelemetrySnapshot_t snap = {0};
     universal_battery_model_t model = {0};
     char raw359[32] = {0};
@@ -159,27 +160,27 @@ void deyeCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, s
     const char *balanceText = "OFF";
 
     if (f351 && f351->dlc >= 8u) {
-        chargeVoltLimit = (float)deyeCanLe16(&f351->data[0]) / 10.0f;
-        chargeCurrentLimit = (float)deyeCanLe16(&f351->data[2]) / 10.0f;
-        dischargeCurrentLimit = (float)deyeCanLe16(&f351->data[4]) / 10.0f;
-        lowerDischargeVoltTentative = (float)deyeCanLe16(&f351->data[6]) / 10.0f;
+        chargeVoltLimit = (float)deyeCanLe16(&f351->data[DEYE_CAN_351_OFF_CHG_VLIM_DV]) / 10.0f;
+        chargeCurrentLimit = (float)deyeCanLe16(&f351->data[DEYE_CAN_351_OFF_CHG_ILIM_DA]) / 10.0f;
+        dischargeCurrentLimit = (float)deyeCanLe16(&f351->data[DEYE_CAN_351_OFF_DIS_ILIM_DA]) / 10.0f;
+        lowerDischargeVoltTentative = (float)deyeCanLe16(&f351->data[DEYE_CAN_351_OFF_DIS_VLIM_DV]) / 10.0f;
     }
     if (f355 && f355->dlc >= 4u) {
-        soc = deyeCanLe16(&f355->data[0]);
-        soh = deyeCanLe16(&f355->data[2]);
+        soc = deyeCanLe16(&f355->data[DEYE_CAN_355_OFF_SOC_PCT]);
+        soh = deyeCanLe16(&f355->data[DEYE_CAN_355_OFF_SOH_PCT]);
     }
     if (f356 && f356->dlc >= 6u) {
-        packVolt = (float)deyeCanLe16(&f356->data[0]) / 100.0f;
-        packCurrent = (float)deyeCanLe16s(&f356->data[2]) / 10.0f;
-        avgTemp = (float)deyeCanLe16(&f356->data[4]) / 10.0f;
+        packVolt = (float)deyeCanLe16(&f356->data[DEYE_CAN_356_OFF_PACK_V_CV]) / 100.0f;
+        packCurrent = (float)deyeCanLe16s(&f356->data[DEYE_CAN_356_OFF_PACK_I_DA]) / 10.0f;
+        avgTemp = (float)deyeCanLe16(&f356->data[DEYE_CAN_356_OFF_TEMP_DECIC]) / 10.0f;
     }
     if (f359) {
         deyeFormatCanData(f359->data, f359->dlc, raw359, sizeof(raw359));
-        if (f359->dlc >= 5u) {
-            moduleCount = f359->data[4];
+        if (f359->dlc >= (DEYE_CAN_359_OFF_MODULE_COUNT + 1u)) {
+            moduleCount = f359->data[DEYE_CAN_359_OFF_MODULE_COUNT];
         }
-        if (f359->dlc >= 7u) {
-            deyeFormatCanAscii(&f359->data[5], 2u, tag359, sizeof(tag359));
+        if (f359->dlc >= (DEYE_CAN_359_OFF_TAG + 2u)) {
+            deyeFormatCanAscii(&f359->data[DEYE_CAN_359_OFF_TAG], 2u, tag359, sizeof(tag359));
         }
     }
     if (f35C) {
@@ -199,17 +200,17 @@ void deyeCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, s
     }
     if (f370 && f370->dlc >= 8u) {
         deyeFormatCanData(f370->data, f370->dlc, raw370, sizeof(raw370));
-        tempMax = deyeTempWordToC(deyeCanLe16(&f370->data[0]));
-        tempMin = deyeTempWordToC(deyeCanLe16(&f370->data[2]));
-        cellMax = (float)deyeCanLe16(&f370->data[4]) / 1000.0f;
-        cellMin = (float)deyeCanLe16(&f370->data[6]) / 1000.0f;
+        tempMax = deyeTempWordToC(deyeCanLe16(&f370->data[DEYE_CAN_370_OFF_TEMP_MAX_RAW]));
+        tempMin = deyeTempWordToC(deyeCanLe16(&f370->data[DEYE_CAN_370_OFF_TEMP_MIN_RAW]));
+        cellMax = (float)deyeCanLe16(&f370->data[DEYE_CAN_370_OFF_CELL_MAX_MV]) / 1000.0f;
+        cellMin = (float)deyeCanLe16(&f370->data[DEYE_CAN_370_OFF_CELL_MIN_MV]) / 1000.0f;
     }
     if (f371 && f371->dlc >= 8u) {
         deyeFormatCanData(f371->data, f371->dlc, raw371, sizeof(raw371));
-        tempMaxSensor = deyeCanLe16(&f371->data[0]);
-        tempMinSensor = deyeCanLe16(&f371->data[2]);
-        cellMaxIdx = deyeCanLe16(&f371->data[4]);
-        cellMinIdx = deyeCanLe16(&f371->data[6]);
+        tempMaxSensor = deyeCanLe16(&f371->data[DEYE_CAN_371_OFF_TEMP_MAX_SENS]);
+        tempMinSensor = deyeCanLe16(&f371->data[DEYE_CAN_371_OFF_TEMP_MIN_SENS]);
+        cellMaxIdx = deyeCanLe16(&f371->data[DEYE_CAN_371_OFF_CELL_MAX_IDX]);
+        cellMinIdx = deyeCanLe16(&f371->data[DEYE_CAN_371_OFF_CELL_MIN_IDX]);
     }
 
     snap.valid = (f351 != NULL) && (f355 != NULL) && (f356 != NULL);

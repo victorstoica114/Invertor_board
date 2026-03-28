@@ -82,6 +82,7 @@
 #define PROTOCOL_CAN_PYLON 4
 #define PROTOCOL_CAN_DEYE 5
 #define PROTOCOL_RS485_JKBMS 6
+#define PROTOCOL_CAN_GOODWE 7
 
 #define BMS_line LINE_RS485
 #define Inverter_line LINE_CAN

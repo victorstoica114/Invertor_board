@@ -3,14 +3,11 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "../../protocols/pylon/pylon_can_map.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#define PYLON_CAN_ID_MIN 0x351u
-#define PYLON_CAN_ID_MAX 0x379u
-#define PYLON_CAN_CACHE_COUNT (PYLON_CAN_ID_MAX - PYLON_CAN_ID_MIN + 1u)
 
 typedef struct {
     bool valid;
