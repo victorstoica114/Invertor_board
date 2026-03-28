@@ -37,7 +37,7 @@
 #define RS485_BUF_SIZE     512
 
 /* --- Decoder / logging compile-time switches --- */
-#define CAN_DECODER_SHOW_RAW_FRAMES 0
+#define CAN_DECODER_SHOW_RAW_FRAMES 1
 #define REG_RAW_VALUES 0
 #define MODBUS_DECODER_SNAPSHOT_ONLY 1
 #define RS485_FORWARD_VERBOSE_LOGS 0

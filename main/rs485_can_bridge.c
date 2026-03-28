@@ -35,6 +35,10 @@ typedef struct {
     uint16_t packCv;
     bool hasCycles;
     uint16_t cycles;
+    bool hasLimits;
+    uint16_t chargeVoltLimitCv;
+    uint16_t chargeCurrentLimitCa;
+    uint16_t dischargeCurrentLimitCa;
     bool hasCellExtremes;
     uint16_t cellMaxMv;
     uint16_t cellMinMv;
@@ -162,6 +166,7 @@ static void cacheFromCanFrame(canRs485GrowattCtx_t *ctx, const twai_message_t *m
 
     const uint32_t id = (uint32_t)m->identifier;
     const uint8_t *d = m->data;
+    bool handled = false;
 
     switch (id) {
         case GROWATT_CAN_ID_313_V_I_SOC_SOH: {
@@ -180,11 +185,13 @@ static void cacheFromCanFrame(canRs485GrowattCtx_t *ctx, const twai_message_t *m
                 ctx->cache.sohPct = 100u;
             }
             ctx->cache.hasSoh = true;
+            handled = true;
             break;
         }
         case GROWATT_CAN_ID_314_RM_FCC_DV_CYCLES: {
             ctx->cache.cycles = be16(&d[6]);
             ctx->cache.hasCycles = true;
+            handled = true;
             break;
         }
         case GROWATT_CAN_ID_319_CELL_REF_FLAGS: {
@@ -193,6 +200,7 @@ static void cacheFromCanFrame(canRs485GrowattCtx_t *ctx, const twai_message_t *m
             ctx->cache.cellMaxIdx = d[5];
             ctx->cache.cellMinIdx = d[6];
             ctx->cache.hasCellExtremes = true;
+            handled = true;
             break;
         }
         case GROWATT_CAN_ID_322_TEMP_SOC_MIN_MAX: {
@@ -201,13 +209,74 @@ static void cacheFromCanFrame(canRs485GrowattCtx_t *ctx, const twai_message_t *m
             ctx->cache.hasTempC = true;
             ctx->cache.socPct = (uint8_t)((d[6] > 100u) ? 100u : d[6]);
             ctx->cache.hasSoc = true;
+            handled = true;
+            break;
+        }
+        case 0x351u: {
+            /* Pylon CAN: charge/discharge limits, little-endian 0.1 units. */
+            const uint16_t vLimDeciV = le16(&d[0]);
+            const uint16_t chgLimDeciA = le16(&d[2]);
+            const uint16_t disLimDeciA = le16(&d[4]);
+            ctx->cache.chargeVoltLimitCv = (uint16_t)(vLimDeciV * 10u);
+            ctx->cache.chargeCurrentLimitCa = (uint16_t)(chgLimDeciA * 10u);
+            ctx->cache.dischargeCurrentLimitCa = (uint16_t)(disLimDeciA * 10u);
+            ctx->cache.hasLimits = true;
+            handled = true;
+            break;
+        }
+        case 0x355u: {
+            /* Pylon CAN: SOC/SOH, little-endian integer percent. */
+            const uint16_t soc = le16(&d[0]);
+            const uint16_t soh = le16(&d[2]);
+            ctx->cache.socPct = (uint8_t)((soc > 100u) ? 100u : soc);
+            ctx->cache.sohPct = (uint8_t)((soh > 100u) ? 100u : soh);
+            ctx->cache.hasSoc = true;
+            ctx->cache.hasSoh = true;
+            handled = true;
+            break;
+        }
+        case 0x356u: {
+            /* Pylon CAN: pack voltage/current/average temp, little-endian. */
+            const uint16_t rawPackCv = le16(&d[0]);
+            uint16_t packCv = rawPackCv;
+            if (ctx->cache.hasLimits && ctx->cache.chargeVoltLimitCv >= 3000u) {
+                /* Some BMS variants publish half-pack in 0x356; infer by comparing against charge limit. */
+                if (rawPackCv < (uint16_t)((ctx->cache.chargeVoltLimitCv / 2u) + 200u)) {
+                    uint32_t scaled = (uint32_t)rawPackCv * 2u;
+                    packCv = (scaled > 65535u) ? 65535u : (uint16_t)scaled;
+                }
+            }
+            const int16_t tempDeci = (int16_t)le16(&d[4]);
+            ctx->cache.packCv = packCv;
+            ctx->cache.hasPackCv = true;
+            ctx->cache.tempC = (int16_t)(tempDeci / 10);
+            ctx->cache.hasTempC = true;
+            handled = true;
+            break;
+        }
+        case 0x373u: {
+            /* Pylon CAN: inferred min/max cell voltage in mV (little-endian). */
+            const uint16_t cellMinMv = le16(&d[0]);
+            const uint16_t cellMaxMv = le16(&d[2]);
+            if (cellMinMv >= 1500u && cellMinMv <= 5000u &&
+                cellMaxMv >= 1500u && cellMaxMv <= 5000u) {
+                ctx->cache.cellMinMv = cellMinMv;
+                ctx->cache.cellMaxMv = cellMaxMv;
+                /* No reliable per-cell index in 0x373; keep unknown. */
+                ctx->cache.cellMinIdx = 0u;
+                ctx->cache.cellMaxIdx = 0u;
+                ctx->cache.hasCellExtremes = true;
+            }
+            handled = true;
             break;
         }
         default:
             break;
     }
 
-    ctx->lastCanFrameUs = esp_timer_get_time();
+    if (handled) {
+        ctx->lastCanFrameUs = esp_timer_get_time();
+    }
 }
 
 static bool parseReadReq(const uint8_t *frame,
@@ -471,28 +540,28 @@ static uint16_t synthRegFromSnapshot(const growattSynthSnapshot_t *snap, uint16_
 
 static uint16_t synthReg(const canRs485GrowattCtx_t *ctx, uint16_t addr)
 {
-    const uint16_t soc = ctx->cache.hasSoc ? ctx->cache.socPct : (uint16_t)ctx->fakeSocPct;
-    const uint16_t soh = ctx->cache.hasSoh ? ctx->cache.sohPct : 100u;
-    const uint16_t packCv = ctx->cache.hasPackCv ? ctx->cache.packCv : 5120u;
-    const uint16_t tempC = (uint16_t)(ctx->cache.hasTempC ? ctx->cache.tempC : 25);
+    const uint16_t soc = ctx->cache.hasSoc ? ctx->cache.socPct : 0u;
+    const uint16_t soh = ctx->cache.hasSoh ? ctx->cache.sohPct : 0u;
+    const uint16_t packCv = ctx->cache.hasPackCv ? ctx->cache.packCv : 0u;
+    const uint16_t tempC = (uint16_t)(ctx->cache.hasTempC ? ctx->cache.tempC : 0);
     const uint16_t cycles = ctx->cache.hasCycles ? ctx->cache.cycles : 0u;
-    const uint16_t fullCap = 4000u; /* 40.00Ah in 0.01Ah units */
-    const uint16_t remCap = (uint16_t)(((uint32_t)fullCap * (uint32_t)soc) / 100u);
-    uint16_t cellMaxMv = ctx->cache.hasCellExtremes ? ctx->cache.cellMaxMv : 3452u;
-    uint16_t cellMinMv = ctx->cache.hasCellExtremes ? ctx->cache.cellMinMv : 3448u;
-    uint8_t cellMaxIdx = ctx->cache.hasCellExtremes ? ctx->cache.cellMaxIdx : 4u;
-    uint8_t cellMinIdx = ctx->cache.hasCellExtremes ? ctx->cache.cellMinIdx : 10u;
+    const uint16_t fullCap = ctx->cache.hasSoc ? 4000u : 0u; /* 40.00Ah in 0.01Ah units */
+    const uint16_t remCap = (fullCap > 0u) ? (uint16_t)(((uint32_t)fullCap * (uint32_t)soc) / 100u) : 0u;
+    uint16_t cellMaxMv = ctx->cache.hasCellExtremes ? ctx->cache.cellMaxMv : 0u;
+    uint16_t cellMinMv = ctx->cache.hasCellExtremes ? ctx->cache.cellMinMv : 0u;
+    uint8_t cellMaxIdx = ctx->cache.hasCellExtremes ? ctx->cache.cellMaxIdx : 0u;
+    uint8_t cellMinIdx = ctx->cache.hasCellExtremes ? ctx->cache.cellMinIdx : 0u;
 
-    if (cellMaxIdx < 1u || cellMaxIdx > 16u) {
-        cellMaxIdx = 4u;
+    if (cellMaxIdx > 16u) {
+        cellMaxIdx = 0u;
     }
-    if (cellMinIdx < 1u || cellMinIdx > 16u) {
-        cellMinIdx = 10u;
+    if (cellMinIdx > 16u) {
+        cellMinIdx = 0u;
     }
-    if (cellMaxMv < cellMinMv) {
-        uint16_t t = cellMaxMv;
+    if (cellMaxMv > 0u && cellMinMv > 0u && cellMaxMv < cellMinMv) {
+        uint16_t tMv = cellMaxMv;
         cellMaxMv = cellMinMv;
-        cellMinMv = t;
+        cellMinMv = tMv;
     }
 
     switch (addr) {
@@ -523,11 +592,11 @@ static uint16_t synthReg(const canRs485GrowattCtx_t *ctx, uint16_t addr)
         case GROWATT_MB_REG_SOH_PCT:
             return soh;
         case GROWATT_MB_REG_CV_TARGET_CV:
-            return packCv;
+            return ctx->cache.hasLimits ? ctx->cache.chargeVoltLimitCv : packCv;
         case GROWATT_MB_REG_ICHG_LIM_CA_TENTATIVE:
-            return 0u;
+            return ctx->cache.hasLimits ? ctx->cache.chargeCurrentLimitCa : 0u;
         case GROWATT_MB_REG_IDIS_LIM_CA_TENTATIVE:
-            return 0u;
+            return ctx->cache.hasLimits ? ctx->cache.dischargeCurrentLimitCa : 0u;
         case GROWATT_MB_REG_CELL_MAX_MV:
             return cellMaxMv;
         case GROWATT_MB_REG_CELL_MIN_MV:
@@ -541,13 +610,13 @@ static uint16_t synthReg(const canRs485GrowattCtx_t *ctx, uint16_t addr)
         default:
             if (addr >= GROWATT_MB_REG_CELL_BASE && addr <= GROWATT_MB_REG_CELL_LAST) {
                 uint8_t idx = (uint8_t)(addr - GROWATT_MB_REG_CELL_BASE);
-                if (idx == (uint8_t)(cellMaxIdx - 1u)) {
+                if (cellMaxIdx > 0u && idx == (uint8_t)(cellMaxIdx - 1u)) {
                     return cellMaxMv;
                 }
-                if (idx == (uint8_t)(cellMinIdx - 1u)) {
+                if (cellMinIdx > 0u && idx == (uint8_t)(cellMinIdx - 1u)) {
                     return cellMinMv;
                 }
-                return fallbackCell(idx);
+                return 0u;
             }
             return 0u;
     }
@@ -675,6 +744,19 @@ static bool canSourceFresh(const canRs485GrowattCtx_t *ctx)
     return ageUs <= ((int64_t)BRIDGE_SOURCE_STALE_MS * 1000LL);
 }
 
+static bool canSnapshotReadyForReply(const canRs485GrowattCtx_t *ctx)
+{
+    if (ctx == NULL) {
+        return false;
+    }
+
+    return ctx->cache.hasSoc &&
+           ctx->cache.hasSoh &&
+           ctx->cache.hasPackCv &&
+           ctx->cache.hasTempC &&
+           ctx->cache.hasCellExtremes;
+}
+
 static void canRs485GrowattTask(void *pv)
 {
     canRs485GrowattCtx_t *ctx = (canRs485GrowattCtx_t *)pv;
@@ -720,10 +802,21 @@ static void canRs485GrowattTask(void *pv)
                     uint16_t count = 0u;
                     if (parseReadReq(&streamBuf[off], 8, ctx->slaveId, &func, &start, &count)) {
                         ctx->reqCount++;
-                        bool sent = canSourceFresh(ctx) && sendGrowattResponse(ctx, func, start, count);
+                        const bool ready = canSnapshotReadyForReply(ctx);
+                        bool sent = ready && canSourceFresh(ctx) && sendGrowattResponse(ctx, func, start, count);
                         if (sent) {
                             ctx->rspCount++;
                             publishSnapshotFromCanCtx(ctx);
+                        } else if (ctx->reqCount <= 3u || (ctx->reqCount % 25u) == 0u) {
+                            ESP_LOGW(EXAMPLE_TAG,
+                                     "CAN->RS485 source not ready (ready=%s fresh=%s hasSoc=%u hasSoh=%u hasPack=%u hasTemp=%u hasCellExt=%u)",
+                                     ready ? "Y" : "N",
+                                     canSourceFresh(ctx) ? "Y" : "N",
+                                     (unsigned)ctx->cache.hasSoc,
+                                     (unsigned)ctx->cache.hasSoh,
+                                     (unsigned)ctx->cache.hasPackCv,
+                                     (unsigned)ctx->cache.hasTempC,
+                                     (unsigned)ctx->cache.hasCellExtremes);
                         }
                         if (ctx->reqCount <= 3u || (ctx->reqCount % 25u) == 0u) {
                             logDecodedRegisterSnapshot(ctx, start, count, sent);
