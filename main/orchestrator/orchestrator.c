@@ -109,6 +109,7 @@ static protocol_id_t protocolIdFromUiProtocol(uint8_t protocol)
         case PROTOCOL_CAN_GOODWE:
         case PROTOCOL_CAN_SOFAR:
         case PROTOCOL_CAN_SMA:
+        case PROTOCOL_CAN_VICTRON:
             return PROTOCOL_ID_GROWATT;
         case PROTOCOL_CAN_PYLON:
         case PROTOCOL_RS485_PYLON:
@@ -156,7 +157,8 @@ static bool isCanToRsGrowattRoute(const bridge_runtime_settings_t *settings)
         (settings->bms_protocol == PROTOCOL_CAN_PYLON) ||
         (settings->bms_protocol == PROTOCOL_CAN_GOODWE) ||
         (settings->bms_protocol == PROTOCOL_CAN_SOFAR) ||
-        (settings->bms_protocol == PROTOCOL_CAN_SMA);
+        (settings->bms_protocol == PROTOCOL_CAN_SMA) ||
+        (settings->bms_protocol == PROTOCOL_CAN_VICTRON);
 
     return (settings->bms_line == LINE_CAN) &&
            (settings->inverter_line == LINE_RS485) &&

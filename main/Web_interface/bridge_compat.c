@@ -55,6 +55,8 @@ static const char *protocolToStr(uint8_t protocol)
             return "CAN_SOFAR";
         case PROTOCOL_CAN_SMA:
             return "CAN_SMA";
+        case PROTOCOL_CAN_VICTRON:
+            return "CAN_VICTRON";
         case PROTOCOL_RS485_JKBMS:
             return "JKBMS_MODBUS";
         default:
@@ -201,7 +203,8 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out)
          (settings.bms_protocol == PROTOCOL_CAN_PYLON) ||
          (settings.bms_protocol == PROTOCOL_CAN_GOODWE) ||
          (settings.bms_protocol == PROTOCOL_CAN_SOFAR) ||
-         (settings.bms_protocol == PROTOCOL_CAN_SMA)) &&
+         (settings.bms_protocol == PROTOCOL_CAN_SMA) ||
+         (settings.bms_protocol == PROTOCOL_CAN_VICTRON)) &&
         (settings.inverter_protocol == PROTOCOL_RS485_GROWATT);
 
     if (canToRsGrowattRoute && canRs485GrowattBridgeGetLatestSnapshot(&canRsSnap)) {
