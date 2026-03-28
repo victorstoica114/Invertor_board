@@ -6,6 +6,7 @@
 #include "protocols/goodwe/goodwe_can_map.h"
 #include "protocols/growatt/growatt_register_map.h"
 #include "protocols/pylon/pylon_can_map.h"
+#include "protocols/sofar/sofar_can_map.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_bms_task.h"
 
 #include <stdbool.h>
@@ -167,6 +168,36 @@ static void putLe16(uint8_t *p, uint16_t v)
 {
     p[0] = (uint8_t)(v & 0xFFu);
     p[1] = (uint8_t)((v >> 8) & 0xFFu);
+}
+
+static void ensureCellExtremesFromPack(canGrowattCache_t *cache)
+{
+    if (cache == NULL) {
+        return;
+    }
+    if (cache->hasCellExtremes || !cache->hasPackCv) {
+        return;
+    }
+    if (cache->packCv < 3000u) {
+        return;
+    }
+
+    /*
+     * Some CAN profiles (including Sofar-compatible variants) do not expose
+     * per-cell min/max in dedicated frames. Derive a stable fallback from
+     * pack voltage so translator replies remain valid and inverter does not
+     * enter fault due to missing data.
+     */
+    uint16_t avgMv = (uint16_t)(((uint32_t)cache->packCv * 10u + 8u) / 16u);
+    if (avgMv < 1500u || avgMv > 5000u) {
+        return;
+    }
+
+    cache->cellMinMv = (avgMv > 2u) ? (uint16_t)(avgMv - 2u) : avgMv;
+    cache->cellMaxMv = (uint16_t)(avgMv + 2u);
+    cache->cellMinIdx = 1u;
+    cache->cellMaxIdx = 2u;
+    cache->hasCellExtremes = true;
 }
 
 static void cacheFromCanFrame(canRs485GrowattCtx_t *ctx, const twai_message_t *m)
@@ -359,6 +390,7 @@ static void cacheFromCanFrame(canRs485GrowattCtx_t *ctx, const twai_message_t *m
     }
 
     if (handled) {
+        ensureCellExtremesFromPack(&ctx->cache);
         ctx->lastCanFrameUs = esp_timer_get_time();
     }
 }
