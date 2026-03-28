@@ -196,17 +196,25 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out)
         (settings.inverter_protocol == PROTOCOL_RS485_GROWATT);
 
     if (canToRsGrowattRoute && canRs485GrowattBridgeGetLatestSnapshot(&canRsSnap)) {
+        const float tempAvgC = (float)canRsSnap.tempDeciC / 10.0f;
+        float tempMinC = tempAvgC;
+        float tempMaxC = tempAvgC;
+        if (canRsSnap.tempMinDeciC != 0 || canRsSnap.tempMaxDeciC != 0) {
+            tempMinC = (float)canRsSnap.tempMinDeciC / 10.0f;
+            tempMaxC = (float)canRsSnap.tempMaxDeciC / 10.0f;
+        }
+
         out->valid = true;
         snprintf(out->source, sizeof(out->source), "%s", "CAN_RS485_TRANSLATOR");
         snprintf(out->protocol, sizeof(out->protocol), "%s", protocolToStr(settings.bms_protocol));
 
         out->socPct = canRsSnap.socPct;
         out->sohPct = canRsSnap.sohPct;
-        out->tempMosC = (float)canRsSnap.tempC;
-        out->tempT1C = (float)canRsSnap.tempC;
-        out->tempT2C = (float)canRsSnap.tempC;
-        out->tempT4C = (float)canRsSnap.tempC;
-        out->tempT5C = (float)canRsSnap.tempC;
+        out->tempMosC = tempAvgC;
+        out->tempT1C = tempMinC;
+        out->tempT2C = tempMaxC;
+        out->tempT4C = tempAvgC;
+        out->tempT5C = tempAvgC;
         out->packVoltageV = (float)canRsSnap.packCv / 100.0f;
         out->cycles = canRsSnap.cycles;
         out->remainingAh = (float)canRsSnap.remainingCapCah / 100.0f;

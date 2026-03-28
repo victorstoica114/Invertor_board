@@ -31,6 +31,10 @@ typedef struct {
     uint8_t sohPct;
     bool hasTempC;
     int16_t tempC;
+    int16_t tempDeciC;
+    bool hasTempRangeDeciC;
+    int16_t tempMinDeciC;
+    int16_t tempMaxDeciC;
     bool hasPackCv;
     uint16_t packCv;
     bool hasCycles;
@@ -126,6 +130,11 @@ static inline uint16_t le16(const uint8_t *p)
     return (uint16_t)(((uint16_t)p[1] << 8) | (uint16_t)p[0]);
 }
 
+static inline int16_t deciCToIntC(int16_t tempDeciC)
+{
+    return (tempDeciC >= 0) ? (int16_t)((tempDeciC + 5) / 10) : (int16_t)((tempDeciC - 5) / 10);
+}
+
 static uint16_t crc16(const uint8_t *data, int len)
 {
     uint16_t crc = 0xFFFFu;
@@ -174,7 +183,8 @@ static void cacheFromCanFrame(canRs485GrowattCtx_t *ctx, const twai_message_t *m
             ctx->cache.hasPackCv = true;
 
             const int16_t tDeci = be16s(&d[4]);
-            ctx->cache.tempC = (int16_t)(tDeci / 10);
+            ctx->cache.tempDeciC = tDeci;
+            ctx->cache.tempC = deciCToIntC(tDeci);
             ctx->cache.hasTempC = true;
 
             ctx->cache.socPct = (uint8_t)((d[6] > 100u) ? 100u : d[6]);
@@ -205,7 +215,8 @@ static void cacheFromCanFrame(canRs485GrowattCtx_t *ctx, const twai_message_t *m
         }
         case GROWATT_CAN_ID_322_TEMP_SOC_MIN_MAX: {
             const int16_t tDeci = be16s(&d[0]);
-            ctx->cache.tempC = (int16_t)(tDeci / 10);
+            ctx->cache.tempDeciC = tDeci;
+            ctx->cache.tempC = deciCToIntC(tDeci);
             ctx->cache.hasTempC = true;
             ctx->cache.socPct = (uint8_t)((d[6] > 100u) ? 100u : d[6]);
             ctx->cache.hasSoc = true;
@@ -249,7 +260,8 @@ static void cacheFromCanFrame(canRs485GrowattCtx_t *ctx, const twai_message_t *m
             const int16_t tempDeci = (int16_t)le16(&d[4]);
             ctx->cache.packCv = packCv;
             ctx->cache.hasPackCv = true;
-            ctx->cache.tempC = (int16_t)(tempDeci / 10);
+            ctx->cache.tempDeciC = tempDeci;
+            ctx->cache.tempC = deciCToIntC(tempDeci);
             ctx->cache.hasTempC = true;
             handled = true;
             break;
@@ -266,6 +278,22 @@ static void cacheFromCanFrame(canRs485GrowattCtx_t *ctx, const twai_message_t *m
                 ctx->cache.cellMinIdx = 0u;
                 ctx->cache.cellMaxIdx = 0u;
                 ctx->cache.hasCellExtremes = true;
+            }
+            {
+                const int16_t t1Deci = (int16_t)le16(&d[4]);
+                const int16_t t2Deci = (int16_t)le16(&d[6]);
+                const bool t1Ok = (t1Deci >= -500 && t1Deci <= 1200);
+                const bool t2Ok = (t2Deci >= -500 && t2Deci <= 1200);
+                if (t1Ok && t2Ok) {
+                    if (t1Deci <= t2Deci) {
+                        ctx->cache.tempMinDeciC = t1Deci;
+                        ctx->cache.tempMaxDeciC = t2Deci;
+                    } else {
+                        ctx->cache.tempMinDeciC = t2Deci;
+                        ctx->cache.tempMaxDeciC = t1Deci;
+                    }
+                    ctx->cache.hasTempRangeDeciC = true;
+                }
             }
             handled = true;
             break;
@@ -419,6 +447,9 @@ static void synthCellMap16(uint16_t *cellsOut,
 static void publishCanRsGrowattSnapshot(uint8_t socPct,
                                         uint8_t sohPct,
                                         int16_t tempC,
+                                        int16_t tempDeciC,
+                                        int16_t tempMinDeciC,
+                                        int16_t tempMaxDeciC,
                                         uint16_t packCv,
                                         uint16_t cycles,
                                         uint16_t remCapCah,
@@ -434,6 +465,9 @@ static void publishCanRsGrowattSnapshot(uint8_t socPct,
     s.socPct = socPct;
     s.sohPct = sohPct;
     s.tempC = tempC;
+    s.tempDeciC = tempDeciC;
+    s.tempMinDeciC = tempMinDeciC;
+    s.tempMaxDeciC = tempMaxDeciC;
     s.packCv = packCv;
     s.cycles = cycles;
     s.remainingCapCah = remCapCah;
@@ -677,10 +711,18 @@ static void logDecodedRegisterSnapshot(const canRs485GrowattCtx_t *ctx,
     const uint16_t cMinMv = synthReg(ctx, GROWATT_MB_REG_CELL_MIN_MV);
     const uint16_t cMaxIdx = synthReg(ctx, GROWATT_MB_REG_CELL_MAX_IDX);
     const uint16_t cMinIdx = synthReg(ctx, GROWATT_MB_REG_CELL_MIN_IDX);
+    const float tempAvgC = (float)(ctx->cache.hasTempC ? ctx->cache.tempDeciC : (int16_t)(tempC * 10)) / 10.0f;
+    float tempMinC = tempAvgC;
+    float tempMaxC = tempAvgC;
+    if (ctx->cache.hasTempRangeDeciC) {
+        tempMinC = (float)ctx->cache.tempMinDeciC / 10.0f;
+        tempMaxC = (float)ctx->cache.tempMaxDeciC / 10.0f;
+    }
 
     ESP_LOGI(EXAMPLE_TAG,
              "CAN->RS485 req#%u on %s start=0x%04X count=%u sent=%s | "
-             "SOC=%u%% SOH=%u%% T=%dC Vpack=%.2fV Cycles=%u Rem/FCC=%.2f/%.2fAh "
+             "SOC=%u%% SOH=%u%% Tavg=%.1fC Tmin/Tmax=%.1f/%.1fC "
+             "Vpack=%.2fV Cycles=%u Rem/FCC=%.2f/%.2fAh "
              "Cmax=%.3fV(#%u) Cmin=%.3fV(#%u)",
              (unsigned)ctx->reqCount,
              ctx->ifName,
@@ -689,7 +731,9 @@ static void logDecodedRegisterSnapshot(const canRs485GrowattCtx_t *ctx,
              sent ? "Y" : "N",
              (unsigned)soc,
              (unsigned)soh,
-             (int)tempC,
+             (double)tempAvgC,
+             (double)tempMinC,
+             (double)tempMaxC,
              (double)packCv / 100.0,
              (unsigned)cycles,
              (double)remCap / 100.0,
@@ -717,10 +761,25 @@ static void publishSnapshotFromCanCtx(const canRs485GrowattCtx_t *ctx)
     const uint16_t cMinMv = synthReg(ctx, GROWATT_MB_REG_CELL_MIN_MV);
     const uint8_t cMaxIdx = (uint8_t)synthReg(ctx, GROWATT_MB_REG_CELL_MAX_IDX);
     const uint8_t cMinIdx = (uint8_t)synthReg(ctx, GROWATT_MB_REG_CELL_MIN_IDX);
+    const int16_t tempDeciC = ctx->cache.hasTempC ? ctx->cache.tempDeciC : (int16_t)(tempC * 10);
+    int16_t tempMinDeciC = tempDeciC;
+    int16_t tempMaxDeciC = tempDeciC;
+    if (ctx->cache.hasTempRangeDeciC) {
+        tempMinDeciC = ctx->cache.tempMinDeciC;
+        tempMaxDeciC = ctx->cache.tempMaxDeciC;
+    }
+    if (tempMinDeciC > tempMaxDeciC) {
+        int16_t t = tempMinDeciC;
+        tempMinDeciC = tempMaxDeciC;
+        tempMaxDeciC = t;
+    }
 
     publishCanRsGrowattSnapshot((uint8_t)soc,
                                 (uint8_t)soh,
                                 tempC,
+                                tempDeciC,
+                                tempMinDeciC,
+                                tempMaxDeciC,
                                 packCv,
                                 cycles,
                                 remCap,
@@ -940,6 +999,9 @@ static void jkbmsRs485GrowattTask(void *pv)
                             publishCanRsGrowattSnapshot((uint8_t)snap.soc,
                                                         (uint8_t)snap.soh,
                                                         snap.tempC,
+                                                        (int16_t)(snap.tempC * 10),
+                                                        (int16_t)(snap.tempC * 10),
+                                                        (int16_t)(snap.tempC * 10),
                                                         snap.packCv,
                                                         snap.cycles,
                                                         remCap,

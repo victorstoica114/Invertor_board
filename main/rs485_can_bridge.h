@@ -19,6 +19,9 @@ typedef struct {
     uint8_t socPct;
     uint8_t sohPct;
     int16_t tempC;
+    int16_t tempDeciC;
+    int16_t tempMinDeciC;
+    int16_t tempMaxDeciC;
     uint16_t packCv;
     uint16_t cycles;
     uint16_t remainingCapCah;
