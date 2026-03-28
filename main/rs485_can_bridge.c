@@ -629,20 +629,37 @@ static void logDecodedRegisterSnapshot(const canRs485GrowattCtx_t *ctx,
              (unsigned)cMaxIdx,
              (double)cMinMv / 1000.0,
              (unsigned)cMinIdx);
+}
 
-    if (sent) {
-        publishCanRsGrowattSnapshot((uint8_t)soc,
-                                    (uint8_t)soh,
-                                    tempC,
-                                    packCv,
-                                    cycles,
-                                    remCap,
-                                    fullCap,
-                                    cMaxMv,
-                                    cMinMv,
-                                    (uint8_t)cMaxIdx,
-                                    (uint8_t)cMinIdx);
+static void publishSnapshotFromCanCtx(const canRs485GrowattCtx_t *ctx)
+{
+    if (ctx == NULL) {
+        return;
     }
+
+    const uint16_t soc = synthReg(ctx, GROWATT_MB_REG_SOC_PCT);
+    const uint16_t soh = synthReg(ctx, GROWATT_MB_REG_SOH_PCT);
+    const int16_t tempC = (int16_t)synthReg(ctx, GROWATT_MB_REG_TEMP_C);
+    const uint16_t packCv = synthReg(ctx, GROWATT_MB_REG_PACK_V_CV);
+    const uint16_t cycles = synthReg(ctx, GROWATT_MB_REG_CYCLE_COUNT_TENTATIVE);
+    const uint16_t remCap = synthReg(ctx, GROWATT_MB_REG_REMAIN_CAP_CAH);
+    const uint16_t fullCap = synthReg(ctx, GROWATT_MB_REG_FULL_CAP_CAH);
+    const uint16_t cMaxMv = synthReg(ctx, GROWATT_MB_REG_CELL_MAX_MV);
+    const uint16_t cMinMv = synthReg(ctx, GROWATT_MB_REG_CELL_MIN_MV);
+    const uint8_t cMaxIdx = (uint8_t)synthReg(ctx, GROWATT_MB_REG_CELL_MAX_IDX);
+    const uint8_t cMinIdx = (uint8_t)synthReg(ctx, GROWATT_MB_REG_CELL_MIN_IDX);
+
+    publishCanRsGrowattSnapshot((uint8_t)soc,
+                                (uint8_t)soh,
+                                tempC,
+                                packCv,
+                                cycles,
+                                remCap,
+                                fullCap,
+                                cMaxMv,
+                                cMinMv,
+                                cMaxIdx,
+                                cMinIdx);
 }
 
 static bool canSourceFresh(const canRs485GrowattCtx_t *ctx)
@@ -706,6 +723,7 @@ static void canRs485GrowattTask(void *pv)
                         bool sent = canSourceFresh(ctx) && sendGrowattResponse(ctx, func, start, count);
                         if (sent) {
                             ctx->rspCount++;
+                            publishSnapshotFromCanCtx(ctx);
                         }
                         if (ctx->reqCount <= 3u || (ctx->reqCount % 25u) == 0u) {
                             logDecodedRegisterSnapshot(ctx, start, count, sent);
@@ -824,6 +842,19 @@ static void jkbmsRs485GrowattTask(void *pv)
                         bool sent = fresh && sendGrowattResponseFromSnapshot(ctx, &snap, func, start, count);
                         if (sent) {
                             ctx->rspCount++;
+                            const uint16_t fullCap = 4000u;
+                            const uint16_t remCap = (uint16_t)(((uint32_t)fullCap * (uint32_t)snap.soc) / 100u);
+                            publishCanRsGrowattSnapshot((uint8_t)snap.soc,
+                                                        (uint8_t)snap.soh,
+                                                        snap.tempC,
+                                                        snap.packCv,
+                                                        snap.cycles,
+                                                        remCap,
+                                                        fullCap,
+                                                        snap.cellMaxMv,
+                                                        snap.cellMinMv,
+                                                        snap.cellMaxIdx,
+                                                        snap.cellMinIdx);
                         }
 
                         if (ctx->reqCount <= 3u || (ctx->reqCount % 25u) == 0u) {
@@ -842,22 +873,6 @@ static void jkbmsRs485GrowattTask(void *pv)
                                      (unsigned)snap.cellMaxIdx,
                                      (double)snap.cellMinMv / 1000.0,
                                      (unsigned)snap.cellMinIdx);
-                        }
-
-                        if (sent) {
-                            const uint16_t fullCap = 4000u;
-                            const uint16_t remCap = (uint16_t)(((uint32_t)fullCap * (uint32_t)snap.soc) / 100u);
-                            publishCanRsGrowattSnapshot((uint8_t)snap.soc,
-                                                        (uint8_t)snap.soh,
-                                                        snap.tempC,
-                                                        snap.packCv,
-                                                        snap.cycles,
-                                                        remCap,
-                                                        fullCap,
-                                                        snap.cellMaxMv,
-                                                        snap.cellMinMv,
-                                                        snap.cellMaxIdx,
-                                                        snap.cellMinIdx);
                         }
 
                         const uint16_t consume = (uint16_t)(off + 8u);
