@@ -45,10 +45,10 @@ static bool validateSettings(const bridge_runtime_settings_t *s)
     if (s->inverter_line < LINE_CAN || s->inverter_line > LINE_RS485) {
         return false;
     }
-    if (s->bms_protocol < PROTOCOL_CAN_GROWATT || s->bms_protocol > PROTOCOL_CAN_SOFAR) {
+    if (s->bms_protocol < PROTOCOL_CAN_GROWATT || s->bms_protocol > PROTOCOL_CAN_SMA) {
         return false;
     }
-    if (s->inverter_protocol < PROTOCOL_CAN_GROWATT || s->inverter_protocol > PROTOCOL_CAN_SOFAR) {
+    if (s->inverter_protocol < PROTOCOL_CAN_GROWATT || s->inverter_protocol > PROTOCOL_CAN_SMA) {
         return false;
     }
     if (s->bms_port < 1u || s->bms_port > 2u) {
@@ -68,7 +68,8 @@ static bool validateSettings(const bridge_runtime_settings_t *s)
         (s->bms_protocol != PROTOCOL_CAN_PYLON) &&
         (s->bms_protocol != PROTOCOL_CAN_DEYE) &&
         (s->bms_protocol != PROTOCOL_CAN_GOODWE) &&
-        (s->bms_protocol != PROTOCOL_CAN_SOFAR)) {
+        (s->bms_protocol != PROTOCOL_CAN_SOFAR) &&
+        (s->bms_protocol != PROTOCOL_CAN_SMA)) {
         return false;
     }
     if ((s->inverter_line == LINE_CAN) &&
@@ -76,7 +77,8 @@ static bool validateSettings(const bridge_runtime_settings_t *s)
         (s->inverter_protocol != PROTOCOL_CAN_PYLON) &&
         (s->inverter_protocol != PROTOCOL_CAN_DEYE) &&
         (s->inverter_protocol != PROTOCOL_CAN_GOODWE) &&
-        (s->inverter_protocol != PROTOCOL_CAN_SOFAR)) {
+        (s->inverter_protocol != PROTOCOL_CAN_SOFAR) &&
+        (s->inverter_protocol != PROTOCOL_CAN_SMA)) {
         return false;
     }
     if ((s->bms_line == LINE_RS485) &&

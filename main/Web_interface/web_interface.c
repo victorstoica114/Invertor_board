@@ -99,6 +99,7 @@ static const char *protocolToStr(int protocol)
         case PROTOCOL_CAN_DEYE: return "CAN_DEYE";
         case PROTOCOL_CAN_GOODWE: return "CAN_GOODWE";
         case PROTOCOL_CAN_SOFAR: return "CAN_SOFAR";
+        case PROTOCOL_CAN_SMA: return "CAN_SMA";
         case PROTOCOL_RS485_JKBMS: return "JKBMS_MODBUS";
         default: return "UNKNOWN";
     }
@@ -372,9 +373,9 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "function sel(id,val,opts){return '<select id=\"'+id+'\">'+opts.map(o=>'<option value=\"'+o.value+'\"'+(String(o.value)===String(val)?' selected':'')+'>'+o.label+'</option>').join('')+'</select>';}"
         "const modeOpts=[{value:1,label:'sniffer'},{value:2,label:'forward'},{value:3,label:'bridge'}];"
         "const lineOpts=[{value:1,label:'CAN'},{value:2,label:'RS485'}];"
-        "const bmsCanProtoOpts=[{value:1,label:'CAN_GROWATT (CAN BMS)'},{value:4,label:'CAN_PYLON'},{value:5,label:'CAN_DEYE'},{value:7,label:'CAN_GOODWE'},{value:8,label:'CAN_SOFAR'}];"
+        "const bmsCanProtoOpts=[{value:1,label:'CAN_GROWATT (CAN BMS)'},{value:4,label:'CAN_PYLON'},{value:5,label:'CAN_DEYE'},{value:7,label:'CAN_GOODWE'},{value:8,label:'CAN_SOFAR'},{value:9,label:'CAN_SMA'}];"
         "const bmsRsProtoOpts=[{value:2,label:'RS485_GROWATT (Modbus Poller)'},{value:6,label:'JKBMS_MODBUS (RS485 Poller)'},{value:3,label:'RS485_PYLON'}];"
-        "const invCanProtoOpts=[{value:1,label:'CAN_GROWATT'},{value:4,label:'CAN_PYLON'},{value:5,label:'CAN_DEYE'},{value:7,label:'CAN_GOODWE'},{value:8,label:'CAN_SOFAR'}];"
+        "const invCanProtoOpts=[{value:1,label:'CAN_GROWATT'},{value:4,label:'CAN_PYLON'},{value:5,label:'CAN_DEYE'},{value:7,label:'CAN_GOODWE'},{value:8,label:'CAN_SOFAR'},{value:9,label:'CAN_SMA'}];"
         "const invRsProtoOpts=[{value:2,label:'RS485_GROWATT'},{value:3,label:'RS485_PYLON'}];"
         "const portOpts=[{value:1,label:'1'},{value:2,label:'2'}];"
         "const rows=["
@@ -418,6 +419,7 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "else if(bl===1&&bp===4&&il===2&&ip===2){txt='Special route active: CAN_PYLON -> RS485_GROWATT translator.';}"
         "else if(bl===1&&bp===7&&il===2&&ip===2){txt='Special route active: CAN_GOODWE -> RS485_GROWATT translator.';}"
         "else if(bl===1&&bp===8&&il===2&&ip===2){txt='Special route active: CAN_SOFAR -> RS485_GROWATT translator.';}"
+        "else if(bl===1&&bp===9&&il===2&&ip===2){txt='Special route active: CAN_SMA -> RS485_GROWATT translator.';}"
         "else{txt='Route: BMS '+lineLabel(bl)+'_'+bport+' / '+protoLabel(bp)+' -> Inverter '+lineLabel(il)+'_'+iport+' / '+protoLabel(ip);}"
         "document.getElementById('routeHint').textContent=txt;"
         "}"

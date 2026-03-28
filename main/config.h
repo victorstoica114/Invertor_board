@@ -84,6 +84,7 @@
 #define PROTOCOL_RS485_JKBMS 6
 #define PROTOCOL_CAN_GOODWE 7
 #define PROTOCOL_CAN_SOFAR 8
+#define PROTOCOL_CAN_SMA 9
 
 #define BMS_line LINE_RS485
 #define Inverter_line LINE_CAN
