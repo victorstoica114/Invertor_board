@@ -10,6 +10,7 @@
 #include "protocols/jkbms_modbus/jkbms_modbus_bms_task.h"
 #include "protocols/pylon/pylon_bms_task.h"
 #include "protocols/pylon/pylon_inverter_task.h"
+#include "BMS_Protocols/Pylon/pylon_can_protocol.h"
 #include "BMS_Protocols/Pylon/pylon_rs485_bridge.h"
 #include "rs485_can_bridge.h"
 
@@ -41,6 +42,7 @@ typedef struct {
 
 static orchestratorCtx_t g_orchestratorCtx;
 static TaskHandle_t g_orchestratorTaskHandle;
+static TaskHandle_t g_pylonCanSniffTask;
 
 const char *protocolIdToStr(protocol_id_t id)
 {
@@ -186,6 +188,27 @@ static bool isRsJkbmsToRsGrowattRoute(const bridge_runtime_settings_t *settings)
            (settings->inverter_line == LINE_RS485) &&
            (settings->bms_protocol == PROTOCOL_RS485_JKBMS) &&
            (settings->inverter_protocol == PROTOCOL_RS485_GROWATT);
+}
+
+static void pylonCanSnifferTask(void *pv)
+{
+    const char *ifname = (const char *)pv;
+    twai_handle_t bus = (strcmp(ifname, "CAN2") == 0) ? canGetBus1() : canGetBus0();
+    twai_message_t rx = {0};
+
+    pylonCanResetCaches();
+
+    while (1) {
+        if (twai_receive_v2(bus, &rx, portMAX_DELAY) != ESP_OK) {
+            continue;
+        }
+#ifdef TWAI_MSG_FLAG_SELF
+        if (rx.flags & TWAI_MSG_FLAG_SELF) {
+            continue;
+        }
+#endif
+        pylonCanOnFrame(ifname, &rx);
+    }
 }
 
 static void clearTransportBuffers(void)
@@ -389,6 +412,15 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
         g_orchestratorCtx.canRs485TranslatorActive = true;
         g_orchestratorCtx.bmsProtocol = protocolIdFromUiProtocol(settings->bms_protocol);
         g_orchestratorCtx.inverterProtocol = PROTOCOL_ID_PYLON;
+        if (g_pylonCanSniffTask == NULL) {
+            const char *ifname = canNameByPort(settings->bms_port);
+            (void)xTaskCreate(pylonCanSnifferTask,
+                              "pylon_can_sniff",
+                              4096,
+                              (void *)ifname,
+                              9,
+                              &g_pylonCanSniffTask);
+        }
         ESP_LOGI(EXAMPLE_TAG,
                  "Orchestrator started CAN->RS485 Pylon route: CAN(%s:%u prot=%u) -> RS485(%s:%u)",
                  canNameByPort(settings->bms_port),
@@ -455,6 +487,10 @@ esp_err_t orchestratorStop(void)
     if (g_orchestratorTaskHandle != NULL) {
         vTaskDelete(g_orchestratorTaskHandle);
         g_orchestratorTaskHandle = NULL;
+    }
+    if (g_pylonCanSniffTask != NULL) {
+        vTaskDelete(g_pylonCanSniffTask);
+        g_pylonCanSniffTask = NULL;
     }
 
     canRs485GrowattBridgeStop();
