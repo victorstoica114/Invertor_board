@@ -51,3 +51,22 @@ Please use the following feedback channels:
 * For a feature request or bug report, create a [GitHub issue](https://github.com/espressif/esp-idf/issues)
 
 We will get back to you as soon as possible.
+
+## GitLab CI integration tests
+
+This repository includes a GitLab pipeline (`.gitlab-ci.yml`) that builds the firmware with the `espressif/idf:release-v5.5` image and then runs integration checks with `pytest` against the generated artifacts.
+
+- Ensure your GitLab runner can use Docker images and has enough disk space to cache `.espressif`.
+- Set `IDF_TARGET` if you need to override the default `esp32c6`.
+- The pipeline stages are:
+  1. `build_firmware`: runs `idf.py build` and publishes the `build/` output as artifacts.
+  2. `integration_tests`: installs `pytest` from `tests/requirements.txt` and validates that the expected binaries and `sdkconfig` target are present.
+
+To run the same integration checks locally:
+
+```bash
+idf.py set-target esp32c6
+idf.py build
+python -m pip install -r tests/requirements.txt
+pytest tests/integration
+```

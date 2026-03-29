@@ -1,0 +1,50 @@
+image: $IDF_DOCKER_IMAGE
+
+variables:
+  IDF_DOCKER_IMAGE: espressif/idf:release-v5.5
+  IDF_TARGET: esp32c6
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+stages:
+  - build
+  - integration
+
+.common_setup:
+  before_script:
+    - export IDF_PATH=${IDF_PATH:-/opt/esp/idf}
+    - . "${IDF_PATH}/export.sh"
+    - python --version
+    - idf.py --version
+    - idf.py set-target "$IDF_TARGET"
+  cache:
+    key: "$CI_JOB_STAGE"
+    paths:
+      - .espressif
+      - ${PIP_CACHE_DIR}
+
+build_firmware:
+  stage: build
+  extends: .common_setup
+  script:
+    - idf.py build
+  artifacts:
+    when: always
+    paths:
+      - build
+      - sdkconfig
+    expire_in: 1 week
+
+integration_tests:
+  stage: integration
+  extends: .common_setup
+  needs:
+    - job: build_firmware
+      artifacts: true
+  script:
+    - pip install --upgrade pip
+    - pip install -r tests/requirements.txt
+    - pytest tests/integration
+  artifacts:
+    when: on_failure
+    paths:
+      - tests/integration/.pytest_cache
