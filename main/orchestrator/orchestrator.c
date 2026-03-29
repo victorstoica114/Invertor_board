@@ -110,6 +110,7 @@ static protocol_id_t protocolIdFromUiProtocol(uint8_t protocol)
             return PROTOCOL_ID_GROWATT;
         case PROTOCOL_CAN_PYLON:
         case PROTOCOL_RS485_PYLON:
+        case PROTOCOL_CAN_VICTRON:
             return PROTOCOL_ID_PYLON;
         case PROTOCOL_RS485_JKBMS:
             return PROTOCOL_ID_JKBMS;

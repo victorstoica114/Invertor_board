@@ -91,7 +91,8 @@ static bool pylonCanToRs485ModeEnabled(const bridge_runtime_settings_t *settings
     return (settings != NULL) &&
            (settings->bms_line == LINE_CAN) &&
            (settings->inverter_line == LINE_RS485) &&
-           (settings->bms_protocol == PROTOCOL_CAN_PYLON) &&
+           ((settings->bms_protocol == PROTOCOL_CAN_PYLON) ||
+            (settings->bms_protocol == PROTOCOL_CAN_VICTRON)) &&
            (settings->inverter_protocol == PROTOCOL_RS485_PYLON);
 }
 
