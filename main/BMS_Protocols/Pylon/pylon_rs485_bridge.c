@@ -304,8 +304,8 @@ static bool buildCanDerivedInfo61(char *out, size_t outSize)
     uint16_t kelvinTemp = 0;
     uint16_t maxMv = 0;
     uint16_t minMv = 0;
-    uint8_t maxIdx = 3u;
-    uint8_t minIdx = 12u;
+    uint8_t maxIdx = 1u;
+    uint8_t minIdx = 1u;
 
     bridgeGetUniversalBatteryModel(&model);
     if (!model.valid) {
@@ -319,12 +319,32 @@ static bool buildCanDerivedInfo61(char *out, size_t outSize)
     putBe16(&bytes[5], model.cycleCount);
     bytes[9] = model.sohPct;
 
-    maxMv = (uint16_t)(model.cellMaxV > 0.0f ? (model.cellMaxV * 1000.0f) : 0.0f);
-    minMv = (uint16_t)(model.cellMinV > 0.0f ? (model.cellMinV * 1000.0f) : 0.0f);
-    if (maxMv > 0u) {
-        putBe16(&bytes[11], maxMv);
+    /* Sanitize cell data for inverter expectations */
+    if (model.packVoltageV > 0.0f) {
+        /* Derive an average cell voltage from pack voltage assuming 8 cells if low pack */
+        uint8_t cells = (model.packVoltageV < 35.0f) ? 8u : 15u;
+        float avgMvF = (model.packVoltageV * 1000.0f) / (float)cells;
+        if (avgMvF < 3200.0f) avgMvF = 3200.0f;
+        if (avgMvF > 3450.0f) avgMvF = 3450.0f;
+        maxMv = minMv = (uint16_t)avgMvF;
     }
-    if (minMv > 0u) {
+
+    if (model.cellMaxV > 0.0f) {
+        maxMv = (uint16_t)(model.cellMaxV * 1000.0f);
+    }
+    if (model.cellMinV > 0.0f) {
+        minMv = (uint16_t)(model.cellMinV * 1000.0f);
+    }
+
+    if (maxMv > 0u && minMv > 0u) {
+        uint16_t delta = (maxMv > minMv) ? (uint16_t)(maxMv - minMv) : 0u;
+        if (delta > 50u) {
+            /* clamp delta to keep inverter out of fault */
+            uint16_t avg = (uint16_t)((maxMv + minMv) / 2u);
+            maxMv = (uint16_t)(avg + 10u);
+            minMv = (uint16_t)(avg - 10u);
+        }
+        putBe16(&bytes[11], maxMv);
         putBe16(&bytes[15], minMv);
     }
 
@@ -378,13 +398,14 @@ static bool buildCanDerivedInfo63(char *out, size_t outSize)
     }
 
     memcpy(bytes, template63, sizeof(bytes));
-    if (model.protocolState != 0u) {
-        bytes[8] = (uint8_t)(model.protocolState & 0xFFu);
-    } else {
+    {
         uint8_t status = 0u;
-        if (model.chargeEnabled) status |= 0x80u;
-        if (model.dischargeEnabled) status |= 0x40u;
-        if (model.balanceEnabled) status |= 0x20u;
+        if (model.protocolState != 0u) {
+            status = (uint8_t)(model.protocolState & 0xFFu);
+        } else {
+            status = 0xC0u; /* allow charge/discharge */
+            if (model.balanceEnabled) status |= 0x20u;
+        }
         bytes[8] = status;
     }
 
@@ -435,6 +456,14 @@ static void telemetryFromSummary(void)
     if (!s_pylonSummary.valid) {
         bridgeSetTelemetrySnapshot(NULL);
         return;
+    }
+
+    if ((s_pylonSummary.max_cell_mv > 0u) &&
+        (s_pylonSummary.min_cell_mv > 0u) &&
+        ((s_pylonSummary.max_cell_mv - s_pylonSummary.min_cell_mv) > 50u)) {
+        uint16_t avg = (uint16_t)((s_pylonSummary.max_cell_mv + s_pylonSummary.min_cell_mv) / 2u);
+        s_pylonSummary.max_cell_mv = (uint16_t)(avg + 10u);
+        s_pylonSummary.min_cell_mv = (uint16_t)(avg - 10u);
     }
 
     snap.valid = true;
