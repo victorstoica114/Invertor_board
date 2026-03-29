@@ -714,12 +714,14 @@ static bool buildCachedResponse(const uint8_t *request,
     bridge_runtime_settings_t settings = runtimeSettingsGet();
 
     if (!parsePylonHeader(request, requestLen, &ver, &adr, &cid1, &cid2) || cid1 != 0x46) {
+        ESP_LOGW(EXAMPLE_TAG, "PYLON cache: drop unknown frame (parse/cid1) len=%d", requestLen);
         return false;
     }
 
     maybeRefreshSyntheticCacheFromUniversal();
 
     if (!pylonBmsSourceFresh(&settings)) {
+        ESP_LOGW(EXAMPLE_TAG, "PYLON cache: source not fresh (mode=%u line=%u prot=%u)", settings.mode, settings.bms_line, settings.bms_protocol);
         return false;
     }
 
@@ -737,6 +739,7 @@ static bool buildCachedResponse(const uint8_t *request,
             infoAscii = s_pylonCache.info63;
             break;
         default:
+            ESP_LOGW(EXAMPLE_TAG, "PYLON cache: unsupported cid2=0x%02X", (unsigned)cid2);
             return false;
     }
 
@@ -763,6 +766,11 @@ static void sendCachedResponse(const pylonRs485BridgeCtx_t *ctx, const uint8_t *
     if (!ctx->isInverterSide) return;
 
     if (!buildCachedResponse(request, requestLen, response, sizeof(response), &outLen, &cid2, &adr)) {
+        ESP_LOGW(EXAMPLE_TAG,
+                 "RS485 PYLON cache could not answer req cid2=0x%02X addr=0x%02X (len=%d)",
+                 (unsigned)cid2,
+                 (unsigned)adr,
+                 requestLen);
         return;
     }
 
@@ -902,6 +910,11 @@ static void pylonBridgeTask(void *pv)
                     }
                 } else if (settings.mode == MODE_BRIDGE) {
                     if (ctx->isInverterSide) {
+                        ESP_LOGI(EXAMPLE_TAG,
+                                 "RS485 PYLON RX from inverter: len=%u ascii=[%.*s]",
+                                 (unsigned)frameLen,
+                                 frameLen,
+                                 frameBuf);
                         sendCachedResponse(ctx, frameBuf, frameLen);
                     }
                 }
