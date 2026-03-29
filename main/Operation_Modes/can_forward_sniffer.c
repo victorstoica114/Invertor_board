@@ -6,6 +6,7 @@
 #include "config.h"
 #include "CAN_Decoder.h"
 #include "Drivers/CAN/can_driver.h"
+#include "BMS_Protocols/Pylon/pylon_can_protocol.h"
 
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -20,6 +21,7 @@ typedef struct {
     bool          forwardEnabled;
     bool          rawLogEnabled;
     const char   *rawLogLabel;
+    bool          decodePylon;
 } canBridgeCtx_t;
 
 static TaskHandle_t s_canTaskA = NULL;
@@ -77,6 +79,7 @@ static const char *canProtocolLabel(int protocol)
     switch (protocol) {
         case PROTOCOL_CAN_PYLON: return "PYLON";
         case PROTOCOL_CAN_DEYE: return "DEYE";
+        case PROTOCOL_CAN_VICTRON: return "VICTRON";
         case PROTOCOL_CAN_GROWATT: return "GROWATT";
         default: return "CAN";
     }
@@ -142,6 +145,9 @@ static void canBridgeTask(void *pv)
         if (ctx->rawLogEnabled) {
             logRawCanFrameLabeled(ctx->rawLogLabel, ctx->rxName, &rx);
         }
+        if (ctx->decodePylon) {
+            pylonCanOnFrame(ctx->rxName, &rx);
+        }
 
         if (!ctx->forwardEnabled) {
             continue;
@@ -179,9 +185,15 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
     const bool bmsCanPylon = (settings != NULL) &&
                              (settings->bms_line == LINE_CAN) &&
                              (settings->bms_protocol == PROTOCOL_CAN_PYLON);
+    const bool bmsCanVictron = (settings != NULL) &&
+                               (settings->bms_line == LINE_CAN) &&
+                               (settings->bms_protocol == PROTOCOL_CAN_VICTRON);
     const bool invCanPylon = (settings != NULL) &&
                              (settings->inverter_line == LINE_CAN) &&
                              (settings->inverter_protocol == PROTOCOL_CAN_PYLON);
+    const bool invCanVictron = (settings != NULL) &&
+                               (settings->inverter_line == LINE_CAN) &&
+                               (settings->inverter_protocol == PROTOCOL_CAN_VICTRON);
     const bool bmsCanDeye = (settings != NULL) &&
                             (settings->bms_line == LINE_CAN) &&
                             (settings->bms_protocol == PROTOCOL_CAN_DEYE);
@@ -216,8 +228,9 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
         bmsToInv.txBus = canBusByPort(settings->inverter_port);
         bmsToInv.applyExcludeList = CAN_EXCLUDE_LIST_ENABLE;
         bmsToInv.forwardEnabled = canForwardEnabled;
-        bmsToInv.rawLogEnabled = bmsCanPylon || bmsCanDeye;
+        bmsToInv.rawLogEnabled = bmsCanPylon || bmsCanVictron || bmsCanDeye;
         bmsToInv.rawLogLabel = canProtocolLabel(settings->bms_protocol);
+        bmsToInv.decodePylon = bmsCanPylon || bmsCanVictron;
 
         invToBms.rxName = canNameByPort(settings->inverter_port);
         invToBms.txName = canNameByPort(settings->bms_port);
@@ -225,8 +238,9 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
         invToBms.txBus = canBusByPort(settings->bms_port);
         invToBms.applyExcludeList = false;
         invToBms.forwardEnabled = canForwardEnabled;
-        invToBms.rawLogEnabled = invCanPylon || invCanDeye;
+        invToBms.rawLogEnabled = invCanPylon || invCanVictron || invCanDeye;
         invToBms.rawLogLabel = canProtocolLabel(settings->inverter_protocol);
+        invToBms.decodePylon = invCanPylon || invCanVictron;
 
         createCanTask(canBridgeTask, "can_bms_to_inv", 4096, &bmsToInv, 10, &s_canTaskA);
         createCanTask(canBridgeTask, "can_inv_to_bms", 4096, &invToBms, 10, &s_canTaskB);
@@ -255,13 +269,18 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
         bmsSniff.txBus = canBusByPort(settings->bms_port);
         bmsSniff.applyExcludeList = false;
         bmsSniff.forwardEnabled = false;
-        bmsSniff.rawLogEnabled = bmsCanPylon || bmsCanDeye;
+        bmsSniff.rawLogEnabled = bmsCanPylon || bmsCanVictron || bmsCanDeye;
         bmsSniff.rawLogLabel = canProtocolLabel(settings->bms_protocol);
+        bmsSniff.decodePylon = bmsCanPylon || bmsCanVictron;
         if (createCanTask(canBridgeTask, "can_bms_sniff", 4096, &bmsSniff, 10, &s_canTaskA)) {
             ESP_LOGI(EXAMPLE_TAG, "CAN sniffer enabled on BMS side (%s[P%d])", bmsSniff.rxName, settings->bms_port);
         }
         if (bmsCanPylon) {
             ESP_LOGI(EXAMPLE_TAG, "CAN Pylon diagnostic logging enabled on BMS side (%s[P%d])",
+                     bmsSniff.rxName,
+                     settings->bms_port);
+        } else if (bmsCanVictron) {
+            ESP_LOGI(EXAMPLE_TAG, "CAN Victron diagnostic logging enabled on BMS side (%s[P%d])",
                      bmsSniff.rxName,
                      settings->bms_port);
         } else if (bmsCanDeye) {
@@ -278,13 +297,18 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
         invSniff.txBus = canBusByPort(settings->inverter_port);
         invSniff.applyExcludeList = false;
         invSniff.forwardEnabled = false;
-        invSniff.rawLogEnabled = invCanPylon || invCanDeye;
+        invSniff.rawLogEnabled = invCanPylon || invCanVictron || invCanDeye;
         invSniff.rawLogLabel = canProtocolLabel(settings->inverter_protocol);
+        invSniff.decodePylon = invCanPylon || invCanVictron;
         if (createCanTask(canBridgeTask, "can_inv_sniff", 4096, &invSniff, 10, &s_canTaskB)) {
             ESP_LOGI(EXAMPLE_TAG, "CAN sniffer enabled on inverter side (%s[P%d])", invSniff.rxName, settings->inverter_port);
         }
         if (invCanPylon) {
             ESP_LOGI(EXAMPLE_TAG, "CAN Pylon diagnostic logging enabled on inverter side (%s[P%d])",
+                     invSniff.rxName,
+                     settings->inverter_port);
+        } else if (invCanVictron) {
+            ESP_LOGI(EXAMPLE_TAG, "CAN Victron diagnostic logging enabled on inverter side (%s[P%d])",
                      invSniff.rxName,
                      settings->inverter_port);
         } else if (invCanDeye) {

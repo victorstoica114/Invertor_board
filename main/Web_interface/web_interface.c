@@ -97,6 +97,7 @@ static const char *protocolToStr(int protocol)
         case PROTOCOL_RS485_PYLON: return "RS485_PYLON";
         case PROTOCOL_CAN_PYLON: return "CAN_PYLON";
         case PROTOCOL_CAN_DEYE: return "CAN_DEYE";
+        case PROTOCOL_CAN_VICTRON: return "CAN_VICTRON";
         case PROTOCOL_RS485_JKBMS: return "JKBMS_MODBUS";
         default: return "UNKNOWN";
     }

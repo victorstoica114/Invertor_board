@@ -5,10 +5,13 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "driver/twai.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 
 static const char *TAG = "SNIFFER_BRIDGE";
 static char s_pylonCanLogText[2048];
+static pylon_can_frame_t s_cache[PYLON_CAN_CACHE_COUNT];
 
 static int pylonCanCacheIndex(uint32_t id)
 {
@@ -316,4 +319,34 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
              ascii376[0] ? ascii376 : "-",
              ascii377[0] ? ascii377 : "-");
     ESP_LOGI(TAG, "  undecoded/tentative: 0x359,0x35A,0x35C,0x372,0x373,0x374-0x377,0x379");
+}
+
+void pylonCanResetCaches(void)
+{
+    memset(s_cache, 0, sizeof(s_cache));
+}
+
+void pylonCanOnFrame(const char *ifname, const twai_message_t *m)
+{
+    int idx = 0;
+    if (m == NULL) {
+        return;
+    }
+    idx = pylonCanCacheIndex((uint32_t)m->identifier);
+    if (idx < 0 || (size_t)idx >= PYLON_CAN_CACHE_COUNT) {
+        return;
+    }
+
+    pylon_can_frame_t f = {0};
+    f.valid = true;
+    f.id = (uint32_t)m->identifier;
+    f.dlc = (uint8_t)m->data_length_code;
+    if (f.dlc > 8u) {
+        f.dlc = 8u;
+    }
+    memcpy(f.data, m->data, f.dlc);
+    f.updatedMs = (uint32_t)(esp_timer_get_time() / 1000ULL);
+
+    s_cache[idx] = f;
+    pylonCanDecodeSnapshot(ifname, s_cache, PYLON_CAN_CACHE_COUNT);
 }

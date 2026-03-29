@@ -23,6 +23,8 @@ idf_component_register(
         "protocols/rs485_growatt/rs485_growatt_bms_task.c"
         "protocols/pylon/pylon_bms_task.c"
         "protocols/pylon/pylon_inverter_task.c"
+        "BMS_Protocols/Pylon/pylon_rs485_bridge.c"
+        "BMS_Protocols/Pylon/pylon_can_protocol.c"
     INCLUDE_DIRS
         "."
     REQUIRES

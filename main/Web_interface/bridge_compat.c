@@ -9,6 +9,7 @@
 #include "orchestrator/protocol_types.h"
 #include "protocols/growatt/growatt_bms_task.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_bms_task.h"
+#include "Protocols/Common/universal_battery_model.h"
 #include "rs485_can_bridge.h"
 #include "runtime_settings.h"
 
@@ -21,6 +22,7 @@ static bridgeTelemetrySnapshot_t g_manualTelemetry;
 static bool g_haveManualTelemetry;
 static char g_decodedLog[2048];
 static portMUX_TYPE g_bridgeMux = portMUX_INITIALIZER_UNLOCKED;
+static universal_battery_model_t g_universalModel;
 
 static const char *modeToStr(uint8_t mode)
 {
@@ -49,6 +51,8 @@ static const char *protocolToStr(uint8_t protocol)
             return "CAN_PYLON";
         case PROTOCOL_CAN_DEYE:
             return "CAN_DEYE";
+        case PROTOCOL_CAN_VICTRON:
+            return "CAN_VICTRON";
         case PROTOCOL_RS485_JKBMS:
             return "JKBMS_MODBUS";
         default:
@@ -445,6 +449,27 @@ void bridgeSetDecodedLogSnapshot(const char *text)
         g_decodedLog[0] = '\0';
     } else {
         snprintf(g_decodedLog, sizeof(g_decodedLog), "%s", text);
+    }
+    portEXIT_CRITICAL(&g_bridgeMux);
+}
+
+void bridgeGetUniversalBatteryModel(universal_battery_model_t *out)
+{
+    if (out == NULL) {
+        return;
+    }
+    portENTER_CRITICAL(&g_bridgeMux);
+    *out = g_universalModel;
+    portEXIT_CRITICAL(&g_bridgeMux);
+}
+
+void bridgeSetUniversalBatteryModel(const universal_battery_model_t *in)
+{
+    portENTER_CRITICAL(&g_bridgeMux);
+    if (in == NULL) {
+        memset(&g_universalModel, 0, sizeof(g_universalModel));
+    } else {
+        g_universalModel = *in;
     }
     portEXIT_CRITICAL(&g_bridgeMux);
 }

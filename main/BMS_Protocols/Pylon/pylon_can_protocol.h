@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "driver/twai.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,6 +23,8 @@ typedef struct {
 
 bool pylonCanAnyValid(const pylon_can_frame_t *cache, size_t count);
 void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, size_t count);
+void pylonCanOnFrame(const char *ifname, const twai_message_t *m);
+void pylonCanResetCaches(void);
 
 #ifdef __cplusplus
 }

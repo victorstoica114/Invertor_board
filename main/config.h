@@ -32,6 +32,17 @@
 #define RS485_1_UART  UART_NUM_1
 #define RS485_2_UART  UART_NUM_0
 
+/* --- RS485 electrical/driver options --- */
+#define RS485_USE_HALF_DUPLEX    0
+#define RS485_1_USE_HALF_DUPLEX  0
+#define RS485_2_USE_HALF_DUPLEX  0
+#define RS485_1_DIR_TX_LEVEL     1
+#define RS485_2_DIR_TX_LEVEL     1
+#define RS485_1_TX_PRE_DELAY_MS  0
+#define RS485_2_TX_PRE_DELAY_MS  0
+#define RS485_1_TX_POST_DELAY_MS 0
+#define RS485_2_TX_POST_DELAY_MS 0
+
 /* --- UART settings --- */
 #define RS485_BAUDRATE     9600
 #define RS485_BUF_SIZE     512
@@ -82,6 +93,7 @@
 #define PROTOCOL_CAN_PYLON 4
 #define PROTOCOL_CAN_DEYE 5
 #define PROTOCOL_RS485_JKBMS 6
+#define PROTOCOL_CAN_VICTRON 7
 
 #define BMS_line LINE_RS485
 #define Inverter_line LINE_CAN
@@ -173,4 +185,3 @@ void led_blink_task(void *pvParameters);
 #ifdef __cplusplus
 }
 #endif
-
