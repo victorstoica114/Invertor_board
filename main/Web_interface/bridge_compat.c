@@ -547,6 +547,10 @@ void bridgeSetTelemetrySnapshot(const bridgeTelemetrySnapshot_t *in)
         g_haveManualTelemetry = false;
         g_manualTelemetryUpdatedMs = 0u;
     } else {
+        if (!in->valid && g_haveManualTelemetry && g_manualTelemetry.valid) {
+            portEXIT_CRITICAL(&g_bridgeMux);
+            return;
+        }
         g_manualTelemetry = *in;
         g_manualTelemetry.updatedMs = in->valid ? nowMs : 0u;
         g_manualTelemetry.ageMs = 0u;
