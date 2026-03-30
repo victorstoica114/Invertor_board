@@ -21,6 +21,7 @@
 static bridgeTelemetrySnapshot_t g_manualTelemetry;
 static universal_battery_model_t g_universalBatteryModel;
 static bool g_haveManualTelemetry;
+static uint32_t g_manualTelemetryUpdatedMs;
 static char g_decodedLog[2048];
 static portMUX_TYPE g_bridgeMux = portMUX_INITIALIZER_UNLOCKED;
 
@@ -206,13 +207,34 @@ static void fillTelemetryFromJkbmsSnapshot(const jkbms_modbus_snapshot_t *snapsh
              (unsigned)snapshot->cellCount);
 }
 
-static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out)
+static void bridgeFormatBmsInterface(char *out, size_t outSize, const bridge_runtime_settings_t *settings)
+{
+    uint8_t port = 1u;
+
+    if (out == NULL || outSize == 0u || settings == NULL) {
+        return;
+    }
+
+    if (settings->bms_port >= 1u && settings->bms_port <= 2u) {
+        port = settings->bms_port;
+    }
+
+    if (settings->bms_line == LINE_RS485) {
+        snprintf(out, outSize, "RS485_%u", (unsigned)port);
+        return;
+    }
+
+    snprintf(out, outSize, "CAN%u", (unsigned)port);
+}
+
+static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32_t *updatedMsOut)
 {
     bms_decoded_packet_t packet = {0};
     bridge_runtime_settings_t settings = runtimeSettingsGet();
     can_rs485_growatt_snapshot_t canRsSnap = {0};
 
     bool hasPacket = false;
+    uint32_t srcUpdatedMs = 0u;
     const bool canToRsGrowattRoute =
         (settings.bms_line == LINE_CAN) &&
         (settings.inverter_line == LINE_RS485) &&
@@ -240,6 +262,7 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out)
         const float tempAvgC = (float)canRsSnap.tempDeciC / 10.0f;
         float tempMinC = tempAvgC;
         float tempMaxC = tempAvgC;
+        srcUpdatedMs = (uint32_t)(canRsSnap.timestampUs / 1000ULL);
         if (canRsSnap.tempMinDeciC != 0 || canRsSnap.tempMaxDeciC != 0) {
             tempMinC = (float)canRsSnap.tempMinDeciC / 10.0f;
             tempMaxC = (float)canRsSnap.tempMaxDeciC / 10.0f;
@@ -271,18 +294,37 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out)
         for (uint8_t i = 0; i < canRsSnap.cellCount && i < 32u; i++) {
             out->cellVoltagesV[i] = (float)canRsSnap.cellMv[i] / 1000.0f;
         }
+        if (srcUpdatedMs != 0u) {
+            out->updatedMs = srcUpdatedMs;
+            if (updatedMsOut != NULL) {
+                *updatedMsOut = srcUpdatedMs;
+            }
+        }
         return;
     }
 
     if (settings.bms_protocol == PROTOCOL_RS485_JKBMS) {
         jkbms_modbus_snapshot_t snapshot = {0};
-        if (jkbmsModbusBmsTaskGetLatestSnapshot(&snapshot)) {
+        bool haveSnapshot = jkbmsModbusBmsTaskGetLatestSnapshot(&snapshot);
+        hasPacket = jkbmsModbusBmsTaskGetLatestPacket(&packet);
+        if (hasPacket) {
+            srcUpdatedMs = (uint32_t)(packet.timestampUs / 1000ULL);
+        }
+        if (haveSnapshot) {
             fillTelemetryFromJkbmsSnapshot(&snapshot, out);
+            if (srcUpdatedMs != 0u) {
+                out->updatedMs = srcUpdatedMs;
+                if (updatedMsOut != NULL) {
+                    *updatedMsOut = srcUpdatedMs;
+                }
+            }
             return;
         }
-        hasPacket = jkbmsModbusBmsTaskGetLatestPacket(&packet);
     } else {
         hasPacket = growattBmsTaskGetLatestPacket(&packet);
+        if (hasPacket) {
+            srcUpdatedMs = (uint32_t)(packet.timestampUs / 1000ULL);
+        }
     }
 
     if (!hasPacket) {
@@ -316,6 +358,13 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out)
     if (packet.hasPackVoltageCv) {
         out->packVoltageV = (float)packet.packVoltageCv / 100.0f;
         out->currentA = 0.0f;
+    }
+
+    if (srcUpdatedMs != 0u) {
+        out->updatedMs = srcUpdatedMs;
+        if (updatedMsOut != NULL) {
+            *updatedMsOut = srcUpdatedMs;
+        }
     }
 }
 
@@ -428,6 +477,9 @@ void bridgeReloadFromRuntimeSettings(void)
 void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
+    uint32_t nowMs = bridgeNowMs();
+    uint32_t updatedMs = 0u;
+    bool manualStale = false;
 
     if (out == NULL) {
         return;
@@ -439,11 +491,49 @@ void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
 
     portENTER_CRITICAL(&g_bridgeMux);
     if (g_haveManualTelemetry) {
-        *out = g_manualTelemetry;
+        updatedMs = g_manualTelemetryUpdatedMs;
+        if ((g_manualTelemetryUpdatedMs != 0u) &&
+            ((nowMs - g_manualTelemetryUpdatedMs) <= WEB_TELEMETRY_STALE_MS)) {
+            *out = g_manualTelemetry;
+        } else if (g_manualTelemetryUpdatedMs != 0u) {
+            manualStale = true;
+            g_haveManualTelemetry = false;
+        }
     }
     portEXIT_CRITICAL(&g_bridgeMux);
 
-    fillTelemetryFromLatestPacket(out);
+    fillTelemetryFromLatestPacket(out, &updatedMs);
+
+    if (updatedMs != 0u) {
+        out->updatedMs = updatedMs;
+        out->ageMs = (nowMs >= updatedMs) ? (nowMs - updatedMs) : 0u;
+    } else {
+        out->ageMs = 0u;
+    }
+
+    {
+        bool ageStale = (out->updatedMs != 0u) && (out->ageMs > WEB_TELEMETRY_STALE_MS);
+        out->stale = ageStale || (manualStale && (updatedMs == 0u));
+    }
+
+    if (out->stale) {
+        char protocol[sizeof(out->protocol)] = {0};
+        snprintf(protocol, sizeof(protocol), "%s", out->protocol);
+        memset(out, 0, sizeof(*out));
+        snprintf(out->protocol, sizeof(out->protocol), "%s", protocol);
+        out->stale = true;
+        out->updatedMs = updatedMs;
+        out->ageMs = (updatedMs != 0u && nowMs >= updatedMs) ? (nowMs - updatedMs) : 0u;
+        return;
+    }
+
+    if (out->valid) {
+        char iface[16] = {0};
+        bridgeFormatBmsInterface(iface, sizeof(iface), &settings);
+        if (iface[0] != '\0') {
+            snprintf(out->source, sizeof(out->source), "%s", iface);
+        }
+    }
 }
 
 void bridgeSetTelemetrySnapshot(const bridgeTelemetrySnapshot_t *in)
@@ -455,8 +545,17 @@ void bridgeSetTelemetrySnapshot(const bridgeTelemetrySnapshot_t *in)
         memset(&g_manualTelemetry, 0, sizeof(g_manualTelemetry));
         memset(&g_universalBatteryModel, 0, sizeof(g_universalBatteryModel));
         g_haveManualTelemetry = false;
+        g_manualTelemetryUpdatedMs = 0u;
     } else {
+        if (!in->valid && g_haveManualTelemetry && g_manualTelemetry.valid) {
+            portEXIT_CRITICAL(&g_bridgeMux);
+            return;
+        }
         g_manualTelemetry = *in;
+        g_manualTelemetry.updatedMs = in->valid ? nowMs : 0u;
+        g_manualTelemetry.ageMs = 0u;
+        g_manualTelemetry.stale = false;
+        g_manualTelemetryUpdatedMs = g_manualTelemetry.updatedMs;
         g_haveManualTelemetry = true;
         g_universalBatteryModel.valid = in->valid;
         g_universalBatteryModel.packVoltageV = in->packVoltageV;

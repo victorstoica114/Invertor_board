@@ -196,6 +196,8 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
     snprintf(snap.source, sizeof(snap.source), "%s", (ifname != NULL) ? ifname : "CAN1");
     snprintf(snap.protocol, sizeof(snap.protocol), "CAN_PYLON");
     snap.currentA = packCurrent;
+    snap.packVoltageV = packVolt;
+    snap.packPowerW = packVolt * packCurrent;
     snap.socPct = (soc <= 100u) ? (uint8_t)soc : 0u;
     snap.sohPct = (soh <= 100u) ? (uint8_t)soh : 0u;
     if (cellMaxTentative > 0.0f) {

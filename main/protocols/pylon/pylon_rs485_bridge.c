@@ -75,6 +75,23 @@ static void telemetryFromSummary(void);
 static void updateSummary61(void);
 static void updateSummary63(void);
 
+static const char *protocolToStrLocal(uint8_t protocol)
+{
+    switch (protocol) {
+        case PROTOCOL_CAN_GROWATT: return "CAN_GROWATT";
+        case PROTOCOL_RS485_GROWATT: return "RS485_GROWATT";
+        case PROTOCOL_RS485_PYLON: return "RS485_PYLON";
+        case PROTOCOL_CAN_PYLON: return "CAN_PYLON";
+        case PROTOCOL_CAN_DEYE: return "CAN_DEYE";
+        case PROTOCOL_RS485_JKBMS: return "JKBMS_MODBUS";
+        case PROTOCOL_CAN_GOODWE: return "CAN_GOODWE";
+        case PROTOCOL_CAN_SOFAR: return "CAN_SOFAR";
+        case PROTOCOL_CAN_SMA: return "CAN_SMA";
+        case PROTOCOL_CAN_VICTRON: return "CAN_VICTRON";
+        default: return "UNKNOWN";
+    }
+}
+
 static void deleteTaskIfRunning(TaskHandle_t *handle)
 {
     if (handle != NULL && *handle != NULL) {
@@ -545,15 +562,29 @@ static void maybeRefreshSyntheticCacheFromUniversal(void)
 static void telemetryFromSummary(void)
 {
     bridgeTelemetrySnapshot_t snap = {0};
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+    char iface[12] = {0};
 
     if (!s_pylonSummary.valid) {
         bridgeSetTelemetrySnapshot(NULL);
         return;
     }
 
+    if (settings.bms_port >= 1u && settings.bms_port <= 2u) {
+        if (settings.bms_line == LINE_RS485) {
+            snprintf(iface, sizeof(iface), "RS485_%u", (unsigned)settings.bms_port);
+        } else {
+            snprintf(iface, sizeof(iface), "CAN%u", (unsigned)settings.bms_port);
+        }
+    }
+
     snap.valid = true;
-    snprintf(snap.source, sizeof(snap.source), "BMS-cache");
-    snprintf(snap.protocol, sizeof(snap.protocol), "RS485_PYLON");
+    if (iface[0] != '\0') {
+        snprintf(snap.source, sizeof(snap.source), "%s", iface);
+    } else {
+        snprintf(snap.source, sizeof(snap.source), "BMS");
+    }
+    snprintf(snap.protocol, sizeof(snap.protocol), "%s", protocolToStrLocal(settings.bms_protocol));
     snap.currentA = s_pylonSummary.current_a;
     snap.cycles = s_pylonSummary.cycles;
     snap.socPct = s_pylonSummary.soc_pct;
