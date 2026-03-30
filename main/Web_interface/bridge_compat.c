@@ -207,6 +207,26 @@ static void fillTelemetryFromJkbmsSnapshot(const jkbms_modbus_snapshot_t *snapsh
              (unsigned)snapshot->cellCount);
 }
 
+static void bridgeFormatBmsInterface(char *out, size_t outSize, const bridge_runtime_settings_t *settings)
+{
+    uint8_t port = 1u;
+
+    if (out == NULL || outSize == 0u || settings == NULL) {
+        return;
+    }
+
+    if (settings->bms_port >= 1u && settings->bms_port <= 2u) {
+        port = settings->bms_port;
+    }
+
+    if (settings->bms_line == LINE_RS485) {
+        snprintf(out, outSize, "RS485_%u", (unsigned)port);
+        return;
+    }
+
+    snprintf(out, outSize, "CAN%u", (unsigned)port);
+}
+
 static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32_t *updatedMsOut)
 {
     bms_decoded_packet_t packet = {0};
@@ -504,6 +524,15 @@ void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
         out->stale = true;
         out->updatedMs = updatedMs;
         out->ageMs = (updatedMs != 0u && nowMs >= updatedMs) ? (nowMs - updatedMs) : 0u;
+        return;
+    }
+
+    if (out->valid) {
+        char iface[16] = {0};
+        bridgeFormatBmsInterface(iface, sizeof(iface), &settings);
+        if (iface[0] != '\0') {
+            snprintf(out->source, sizeof(out->source), "%s", iface);
+        }
     }
 }
 
