@@ -36,8 +36,19 @@
 #define RS485_BAUDRATE     9600
 #define RS485_BUF_SIZE     512
 
+/* --- RS485 line-control compatibility (used by Pylon RS485 bridge) --- */
+#define RS485_USE_HALF_DUPLEX     1
+#define RS485_1_USE_HALF_DUPLEX   1
+#define RS485_2_USE_HALF_DUPLEX   1
+#define RS485_1_DIR_TX_LEVEL      1
+#define RS485_2_DIR_TX_LEVEL      1
+#define RS485_1_TX_PRE_DELAY_MS   0
+#define RS485_1_TX_POST_DELAY_MS  0
+#define RS485_2_TX_PRE_DELAY_MS   0
+#define RS485_2_TX_POST_DELAY_MS  0
+
 /* --- Decoder / logging compile-time switches --- */
-#define CAN_DECODER_SHOW_RAW_FRAMES 1
+#define CAN_DECODER_SHOW_RAW_FRAMES 0
 #define REG_RAW_VALUES 0
 #define MODBUS_DECODER_SNAPSHOT_ONLY 1
 #define RS485_FORWARD_VERBOSE_LOGS 0
@@ -45,6 +56,7 @@
 /* --- Bridge mode switches --- */
 #define CAN_FORWARD_ENABLE 0
 #define RS485_FORWARD_ENABLE 0
+#define CAN_EXCLUDE_LIST_ENABLE 0
 
 /* --- RS485 -> CAN translator (uses RS485 SOC/TEMP to synthesize CAN 0x322) --- */
 #define RS485_CAN_322_TRANSLATOR_ENABLE 1
@@ -55,6 +67,10 @@
 #define CAN_RS485_SOC_SLAVE_ID 1u
 #define CAN_RS485_SOC_FAKE_PCT 99u
 #define CAN_RS485_SOC_RX_GAP_US 5000u
+
+/* --- Diagnostic step: force fake replies for CAN_PYLON -> RS485_PYLON route --- */
+#define PYLON_CAN_RS485_FORCE_FAKE_ENABLE 0
+
 /* Source freshness window for fail-safe (stop answering if source is stale). */
 #define BRIDGE_SOURCE_STALE_MS 2000u
 
@@ -82,6 +98,10 @@
 #define PROTOCOL_CAN_PYLON 4
 #define PROTOCOL_CAN_DEYE 5
 #define PROTOCOL_RS485_JKBMS 6
+#define PROTOCOL_CAN_GOODWE 7
+#define PROTOCOL_CAN_SOFAR 8
+#define PROTOCOL_CAN_SMA 9
+#define PROTOCOL_CAN_VICTRON 10
 
 #define BMS_line LINE_RS485
 #define Inverter_line LINE_CAN

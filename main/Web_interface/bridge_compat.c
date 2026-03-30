@@ -1,4 +1,4 @@
-#include "Web_interface/web_bridge_api.h"
+#include "bridge.h"
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -13,14 +13,31 @@
 #include "runtime_settings.h"
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 
 #define BRIDGE_TAG "BRIDGE_COMPAT"
 
 static bridgeTelemetrySnapshot_t g_manualTelemetry;
+static universal_battery_model_t g_universalBatteryModel;
 static bool g_haveManualTelemetry;
 static char g_decodedLog[2048];
 static portMUX_TYPE g_bridgeMux = portMUX_INITIALIZER_UNLOCKED;
+
+static uint32_t bridgeNowMs(void)
+{
+    return (uint32_t)(esp_timer_get_time() / 1000LL);
+}
+
+static bool bridgeUniversalBatteryModelIsFresh(const universal_battery_model_t *model)
+{
+    uint32_t nowMs = bridgeNowMs();
+
+    if (model == NULL || !model->valid || model->updatedMs == 0u) {
+        return false;
+    }
+    return (nowMs - model->updatedMs) <= BRIDGE_SOURCE_STALE_MS;
+}
 
 static const char *modeToStr(uint8_t mode)
 {
@@ -49,6 +66,14 @@ static const char *protocolToStr(uint8_t protocol)
             return "CAN_PYLON";
         case PROTOCOL_CAN_DEYE:
             return "CAN_DEYE";
+        case PROTOCOL_CAN_GOODWE:
+            return "CAN_GOODWE";
+        case PROTOCOL_CAN_SOFAR:
+            return "CAN_SOFAR";
+        case PROTOCOL_CAN_SMA:
+            return "CAN_SMA";
+        case PROTOCOL_CAN_VICTRON:
+            return "CAN_VICTRON";
         case PROTOCOL_RS485_JKBMS:
             return "JKBMS_MODBUS";
         default:
@@ -192,8 +217,24 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out)
         (settings.bms_line == LINE_CAN) &&
         (settings.inverter_line == LINE_RS485) &&
         ((settings.bms_protocol == PROTOCOL_CAN_GROWATT) ||
-         (settings.bms_protocol == PROTOCOL_CAN_PYLON)) &&
+         (settings.bms_protocol == PROTOCOL_CAN_PYLON) ||
+         (settings.bms_protocol == PROTOCOL_CAN_GOODWE) ||
+         (settings.bms_protocol == PROTOCOL_CAN_SOFAR) ||
+         (settings.bms_protocol == PROTOCOL_CAN_SMA) ||
+         (settings.bms_protocol == PROTOCOL_CAN_VICTRON)) &&
         (settings.inverter_protocol == PROTOCOL_RS485_GROWATT);
+    const bool pylonRs485Route =
+        (settings.inverter_line == LINE_RS485) &&
+        (((settings.bms_line == LINE_RS485) &&
+          (settings.bms_protocol == PROTOCOL_RS485_PYLON) &&
+          (settings.inverter_protocol == PROTOCOL_RS485_PYLON)) ||
+         ((settings.bms_line == LINE_CAN) &&
+          (settings.bms_protocol == PROTOCOL_CAN_PYLON) &&
+          (settings.inverter_protocol == PROTOCOL_RS485_PYLON)));
+
+    if (pylonRs485Route) {
+        return;
+    }
 
     if (canToRsGrowattRoute && canRs485GrowattBridgeGetLatestSnapshot(&canRsSnap)) {
         const float tempAvgC = (float)canRsSnap.tempDeciC / 10.0f;
@@ -407,13 +448,69 @@ void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
 
 void bridgeSetTelemetrySnapshot(const bridgeTelemetrySnapshot_t *in)
 {
+    uint32_t nowMs = bridgeNowMs();
+
     portENTER_CRITICAL(&g_bridgeMux);
     if (in == NULL) {
         memset(&g_manualTelemetry, 0, sizeof(g_manualTelemetry));
+        memset(&g_universalBatteryModel, 0, sizeof(g_universalBatteryModel));
         g_haveManualTelemetry = false;
     } else {
         g_manualTelemetry = *in;
         g_haveManualTelemetry = true;
+        g_universalBatteryModel.valid = in->valid;
+        g_universalBatteryModel.packVoltageV = in->packVoltageV;
+        g_universalBatteryModel.packCurrentA = in->currentA;
+        g_universalBatteryModel.socPct = in->socPct;
+        g_universalBatteryModel.sohPct = in->sohPct;
+        g_universalBatteryModel.cycleCount = in->cycles;
+        g_universalBatteryModel.cellMaxV = in->cellMaxV;
+        g_universalBatteryModel.cellMinV = in->cellMinV;
+        g_universalBatteryModel.cellMaxIdx = in->cellMaxIdx;
+        g_universalBatteryModel.cellMinIdx = in->cellMinIdx;
+        g_universalBatteryModel.cellDeltaV = in->deltaV;
+        g_universalBatteryModel.temperaturesC[0] = in->tempMosC;
+        g_universalBatteryModel.temperaturesC[1] = in->tempT1C;
+        g_universalBatteryModel.temperaturesC[2] = in->tempT2C;
+        g_universalBatteryModel.temperaturesC[3] = in->tempT4C;
+        g_universalBatteryModel.temperaturesC[4] = in->tempT5C;
+        g_universalBatteryModel.protocolState = in->pylonStatus63;
+        g_universalBatteryModel.updatedMs = in->valid ? nowMs : 0u;
+    }
+    portEXIT_CRITICAL(&g_bridgeMux);
+}
+
+void bridgeGetUniversalBatteryModel(universal_battery_model_t *out)
+{
+    if (out == NULL) {
+        return;
+    }
+
+    portENTER_CRITICAL(&g_bridgeMux);
+    *out = g_universalBatteryModel;
+    portEXIT_CRITICAL(&g_bridgeMux);
+
+    if (!bridgeUniversalBatteryModelIsFresh(out)) {
+        memset(out, 0, sizeof(*out));
+    }
+}
+
+void bridgeSetUniversalBatteryModel(const universal_battery_model_t *in)
+{
+    uint32_t nowMs = bridgeNowMs();
+
+    portENTER_CRITICAL(&g_bridgeMux);
+    if (in == NULL) {
+        memset(&g_universalBatteryModel, 0, sizeof(g_universalBatteryModel));
+    } else {
+        g_universalBatteryModel = *in;
+        if (g_universalBatteryModel.valid) {
+            if (g_universalBatteryModel.updatedMs == 0u) {
+                g_universalBatteryModel.updatedMs = nowMs;
+            }
+        } else {
+            g_universalBatteryModel.updatedMs = 0u;
+        }
     }
     portEXIT_CRITICAL(&g_bridgeMux);
 }

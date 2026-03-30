@@ -3,7 +3,10 @@
 #include "CAN_Decoder.h"
 #include "Drivers/rs485_driver.h"
 #include "config.h"
+#include "protocols/goodwe/goodwe_can_map.h"
 #include "protocols/growatt/growatt_register_map.h"
+#include "protocols/pylon/pylon_can_map.h"
+#include "protocols/sofar/sofar_can_map.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_bms_task.h"
 
 #include <stdbool.h>
@@ -167,6 +170,36 @@ static void putLe16(uint8_t *p, uint16_t v)
     p[1] = (uint8_t)((v >> 8) & 0xFFu);
 }
 
+static void ensureCellExtremesFromPack(canGrowattCache_t *cache)
+{
+    if (cache == NULL) {
+        return;
+    }
+    if (cache->hasCellExtremes || !cache->hasPackCv) {
+        return;
+    }
+    if (cache->packCv < 3000u) {
+        return;
+    }
+
+    /*
+     * Some CAN profiles (including Sofar-compatible variants) do not expose
+     * per-cell min/max in dedicated frames. Derive a stable fallback from
+     * pack voltage so translator replies remain valid and inverter does not
+     * enter fault due to missing data.
+     */
+    uint16_t avgMv = (uint16_t)(((uint32_t)cache->packCv * 10u + 8u) / 16u);
+    if (avgMv < 1500u || avgMv > 5000u) {
+        return;
+    }
+
+    cache->cellMinMv = (avgMv > 2u) ? (uint16_t)(avgMv - 2u) : avgMv;
+    cache->cellMaxMv = (uint16_t)(avgMv + 2u);
+    cache->cellMinIdx = 1u;
+    cache->cellMaxIdx = 2u;
+    cache->hasCellExtremes = true;
+}
+
 static void cacheFromCanFrame(canRs485GrowattCtx_t *ctx, const twai_message_t *m)
 {
     if (ctx == NULL || m == NULL || m->data_length_code != 8u) {
@@ -223,11 +256,65 @@ static void cacheFromCanFrame(canRs485GrowattCtx_t *ctx, const twai_message_t *m
             handled = true;
             break;
         }
-        case 0x351u: {
+        case GOODWE_CAN_ID_LIMITS_456: {
+            /* GoodWe CAN: limits are little-endian 0.1V/0.1A. */
+            const uint16_t vLimDeciV = le16(&d[GOODWE_CAN_456_OFF_CHG_VLIM_DV]);
+            const int16_t chgLimDeciA = (int16_t)le16(&d[GOODWE_CAN_456_OFF_CHG_ILIM_DA]);
+            const int16_t disLimDeciA = (int16_t)le16(&d[GOODWE_CAN_456_OFF_DIS_ILIM_DA]);
+            const uint16_t absChg = (uint16_t)((chgLimDeciA < 0) ? (-(int32_t)chgLimDeciA) : (int32_t)chgLimDeciA);
+            const uint16_t absDis = (uint16_t)((disLimDeciA < 0) ? (-(int32_t)disLimDeciA) : (int32_t)disLimDeciA);
+            ctx->cache.chargeVoltLimitCv = (uint16_t)(vLimDeciV * 10u);
+            ctx->cache.chargeCurrentLimitCa = (uint16_t)(absChg * 10u);
+            ctx->cache.dischargeCurrentLimitCa = (uint16_t)(absDis * 10u);
+            ctx->cache.hasLimits = true;
+            handled = true;
+            break;
+        }
+        case GOODWE_CAN_ID_SOC_SOH_457: {
+            /* GoodWe CAN: SOC/SOH encoded in 0.1%. */
+            const uint16_t socDeciPct = le16(&d[GOODWE_CAN_457_OFF_SOC_DECIPCT]);
+            const uint16_t sohDeciPct = le16(&d[GOODWE_CAN_457_OFF_SOH_DECIPCT]);
+            const uint16_t socPct = (uint16_t)((socDeciPct + 5u) / 10u);
+            const uint16_t sohPct = (uint16_t)((sohDeciPct + 5u) / 10u);
+            ctx->cache.socPct = (uint8_t)((socPct > 100u) ? 100u : socPct);
+            ctx->cache.sohPct = (uint8_t)((sohPct > 100u) ? 100u : sohPct);
+            ctx->cache.hasSoc = true;
+            ctx->cache.hasSoh = true;
+            handled = true;
+            break;
+        }
+        case GOODWE_CAN_ID_PACK_458: {
+            /* GoodWe CAN: pack V/I/T are little-endian in 0.1 units. */
+            const uint16_t packDeciV = le16(&d[GOODWE_CAN_458_OFF_PACK_V_DV]);
+            const int16_t tempDeci = (int16_t)le16(&d[GOODWE_CAN_458_OFF_TEMP_DECIC]);
+            ctx->cache.packCv = (uint16_t)(packDeciV * 10u);
+            ctx->cache.hasPackCv = true;
+            ctx->cache.tempDeciC = tempDeci;
+            ctx->cache.tempC = deciCToIntC(tempDeci);
+            ctx->cache.hasTempC = true;
+
+            if (!ctx->cache.hasCellExtremes && ctx->cache.packCv >= 3000u) {
+                /*
+                 * GoodWe payload has no explicit per-cell extremes.
+                 * Derive a neutral estimate from pack voltage to keep Modbus replies consistent.
+                 */
+                const uint16_t avgMv = (uint16_t)(((uint32_t)ctx->cache.packCv * 10u + 8u) / 16u);
+                if (avgMv >= 1500u && avgMv <= 5000u) {
+                    ctx->cache.cellMinMv = avgMv;
+                    ctx->cache.cellMaxMv = avgMv;
+                    ctx->cache.cellMinIdx = 0u;
+                    ctx->cache.cellMaxIdx = 0u;
+                    ctx->cache.hasCellExtremes = true;
+                }
+            }
+            handled = true;
+            break;
+        }
+        case PYLON_CAN_ID_LIMITS_351: {
             /* Pylon CAN: charge/discharge limits, little-endian 0.1 units. */
-            const uint16_t vLimDeciV = le16(&d[0]);
-            const uint16_t chgLimDeciA = le16(&d[2]);
-            const uint16_t disLimDeciA = le16(&d[4]);
+            const uint16_t vLimDeciV = le16(&d[PYLON_CAN_351_OFF_CHG_VLIM_DV]);
+            const uint16_t chgLimDeciA = le16(&d[PYLON_CAN_351_OFF_CHG_ILIM_DA]);
+            const uint16_t disLimDeciA = le16(&d[PYLON_CAN_351_OFF_DIS_ILIM_DA]);
             ctx->cache.chargeVoltLimitCv = (uint16_t)(vLimDeciV * 10u);
             ctx->cache.chargeCurrentLimitCa = (uint16_t)(chgLimDeciA * 10u);
             ctx->cache.dischargeCurrentLimitCa = (uint16_t)(disLimDeciA * 10u);
@@ -235,10 +322,10 @@ static void cacheFromCanFrame(canRs485GrowattCtx_t *ctx, const twai_message_t *m
             handled = true;
             break;
         }
-        case 0x355u: {
+        case PYLON_CAN_ID_SOC_SOH_355: {
             /* Pylon CAN: SOC/SOH, little-endian integer percent. */
-            const uint16_t soc = le16(&d[0]);
-            const uint16_t soh = le16(&d[2]);
+            const uint16_t soc = le16(&d[PYLON_CAN_355_OFF_SOC_PCT]);
+            const uint16_t soh = le16(&d[PYLON_CAN_355_OFF_SOH_PCT]);
             ctx->cache.socPct = (uint8_t)((soc > 100u) ? 100u : soc);
             ctx->cache.sohPct = (uint8_t)((soh > 100u) ? 100u : soh);
             ctx->cache.hasSoc = true;
@@ -246,9 +333,9 @@ static void cacheFromCanFrame(canRs485GrowattCtx_t *ctx, const twai_message_t *m
             handled = true;
             break;
         }
-        case 0x356u: {
+        case PYLON_CAN_ID_PACK_356: {
             /* Pylon CAN: pack voltage/current/average temp, little-endian. */
-            const uint16_t rawPackCv = le16(&d[0]);
+            const uint16_t rawPackCv = le16(&d[PYLON_CAN_356_OFF_PACK_V_CV]);
             uint16_t packCv = rawPackCv;
             if (ctx->cache.hasLimits && ctx->cache.chargeVoltLimitCv >= 3000u) {
                 /* Some BMS variants publish half-pack in 0x356; infer by comparing against charge limit. */
@@ -257,7 +344,7 @@ static void cacheFromCanFrame(canRs485GrowattCtx_t *ctx, const twai_message_t *m
                     packCv = (scaled > 65535u) ? 65535u : (uint16_t)scaled;
                 }
             }
-            const int16_t tempDeci = (int16_t)le16(&d[4]);
+            const int16_t tempDeci = (int16_t)le16(&d[PYLON_CAN_356_OFF_TEMP_DECIC]);
             ctx->cache.packCv = packCv;
             ctx->cache.hasPackCv = true;
             ctx->cache.tempDeciC = tempDeci;
@@ -266,10 +353,10 @@ static void cacheFromCanFrame(canRs485GrowattCtx_t *ctx, const twai_message_t *m
             handled = true;
             break;
         }
-        case 0x373u: {
+        case PYLON_CAN_ID_CELL_TEMP_373: {
             /* Pylon CAN: inferred min/max cell voltage in mV (little-endian). */
-            const uint16_t cellMinMv = le16(&d[0]);
-            const uint16_t cellMaxMv = le16(&d[2]);
+            const uint16_t cellMinMv = le16(&d[PYLON_CAN_373_OFF_CELL_MIN_MV]);
+            const uint16_t cellMaxMv = le16(&d[PYLON_CAN_373_OFF_CELL_MAX_MV]);
             if (cellMinMv >= 1500u && cellMinMv <= 5000u &&
                 cellMaxMv >= 1500u && cellMaxMv <= 5000u) {
                 ctx->cache.cellMinMv = cellMinMv;
@@ -280,8 +367,8 @@ static void cacheFromCanFrame(canRs485GrowattCtx_t *ctx, const twai_message_t *m
                 ctx->cache.hasCellExtremes = true;
             }
             {
-                const int16_t t1Deci = (int16_t)le16(&d[4]);
-                const int16_t t2Deci = (int16_t)le16(&d[6]);
+                const int16_t t1Deci = (int16_t)le16(&d[PYLON_CAN_373_OFF_TEMP1_DECIC]);
+                const int16_t t2Deci = (int16_t)le16(&d[PYLON_CAN_373_OFF_TEMP2_DECIC]);
                 const bool t1Ok = (t1Deci >= -500 && t1Deci <= 1200);
                 const bool t2Ok = (t2Deci >= -500 && t2Deci <= 1200);
                 if (t1Ok && t2Ok) {
@@ -303,6 +390,7 @@ static void cacheFromCanFrame(canRs485GrowattCtx_t *ctx, const twai_message_t *m
     }
 
     if (handled) {
+        ensureCellExtremesFromPack(&ctx->cache);
         ctx->lastCanFrameUs = esp_timer_get_time();
     }
 }
