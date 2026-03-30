@@ -8,7 +8,7 @@
 #include "modbusDecoder.h"
 #include "orchestrator/protocol_types.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_poller.h"
-#include "protocols/jkbms_modbus/jkbms_modbus_register_map.h"
+#include "protocols/jkbms_modbus/jkbms_modbus_registers_map.h"
 #include "runtime_settings.h"
 
 #include "driver/uart.h"

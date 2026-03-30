@@ -4,8 +4,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#include "protocols/growatt/growatt_register_map.h"
-#include "protocols/jkbms_modbus/jkbms_modbus_register_map.h"
+#include "protocols/growatt/growatt_registers_map.h"
+#include "protocols/jkbms_modbus/jkbms_modbus_registers_map.h"
 
 /* Common log tag */
 #define EXAMPLE_TAG "SNIFFER_BRIDGE"

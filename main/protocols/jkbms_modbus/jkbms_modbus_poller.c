@@ -4,7 +4,7 @@
 
 #include "Drivers/rs485_driver.h"
 #include "freertos/FreeRTOS.h"
-#include "protocols/jkbms_modbus/jkbms_modbus_register_map.h"
+#include "protocols/jkbms_modbus/jkbms_modbus_registers_map.h"
 
 static uint16_t jkbmsModbusCrc16(const uint8_t *data, int len)
 {

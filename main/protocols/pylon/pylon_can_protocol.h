@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include "../../protocols/pylon/pylon_can_map.h"
+#include "pylon_registers_map.h"
 
 #ifdef __cplusplus
 extern "C" {

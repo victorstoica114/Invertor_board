@@ -6,7 +6,7 @@
 #include "Drivers/can_driver.h"
 #include "config.h"
 #include "orchestrator/protocol_types.h"
-#include "protocols/growatt/growatt_register_map.h"
+#include "protocols/growatt/growatt_registers_map.h"
 
 #include "driver/twai.h"
 #include "esp_log.h"

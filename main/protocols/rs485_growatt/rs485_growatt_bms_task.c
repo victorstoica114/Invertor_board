@@ -8,7 +8,7 @@
 #include "modbusDecoder.h"
 #include "orchestrator/protocol_types.h"
 #include "protocols/rs485_growatt/rs485_growatt_modbus_poller.h"
-#include "protocols/rs485_growatt/rs485_growatt_register_map.h"
+#include "protocols/rs485_growatt/rs485_growatt_registers_map.h"
 
 #include "driver/uart.h"
 #include "esp_log.h"

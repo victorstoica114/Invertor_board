@@ -4,7 +4,7 @@
 
 #include "Drivers/can_driver.h"
 #include "Drivers/rs485_driver.h"
-#include "BMS_Protocols/Pylon/pylon_rs485_bridge.h"
+#include "protocols/pylon/pylon_rs485_bridge.h"
 #include "CAN_Decoder.h"
 #include "Operation_Modes/can_forward_sniffer.h"
 #include "config.h"

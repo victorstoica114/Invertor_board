@@ -3,10 +3,10 @@
 #include "CAN_Decoder.h"
 #include "Drivers/rs485_driver.h"
 #include "config.h"
-#include "protocols/goodwe/goodwe_can_map.h"
-#include "protocols/growatt/growatt_register_map.h"
-#include "protocols/pylon/pylon_can_map.h"
-#include "protocols/sofar/sofar_can_map.h"
+#include "protocols/goodwe/goodwe_registers_map.h"
+#include "protocols/growatt/growatt_registers_map.h"
+#include "protocols/pylon/pylon_registers_map.h"
+#include "protocols/sofar/sofar_registers_map.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_bms_task.h"
 
 #include <stdbool.h>

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Web_interface/web_bridge_api.h"
-#include "Protocols/Common/universal_battery_model.h"
+#include "protocols/common/universal_battery_model.h"
 
 #ifdef __cplusplus
 extern "C" {

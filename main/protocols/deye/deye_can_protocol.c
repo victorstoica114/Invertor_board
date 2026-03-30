@@ -1,5 +1,5 @@
 #include "deye_can_protocol.h"
-#include "deye_can_map.h"
+#include "deye_registers_map.h"
 
 #include "../../bridge.h"
 

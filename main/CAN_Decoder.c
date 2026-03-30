@@ -2,9 +2,9 @@
 
 #include "config.h"
 #include "bridge.h"
-#include "protocols/growatt/growatt_register_map.h"
-#include "BMS_Protocols/Deye/deye_can_protocol.h"
-#include "BMS_Protocols/Pylon/pylon_can_protocol.h"
+#include "protocols/growatt/growatt_registers_map.h"
+#include "protocols/deye/deye_can_protocol.h"
+#include "protocols/pylon/pylon_can_protocol.h"
 #include "runtime_settings.h"
 
 #include <inttypes.h>

@@ -3,7 +3,7 @@
 #include <string.h>
 
 #include "Drivers/rs485_driver.h"
-#include "protocols/rs485_growatt/rs485_growatt_register_map.h"
+#include "protocols/rs485_growatt/rs485_growatt_registers_map.h"
 #include "freertos/FreeRTOS.h"
 
 static uint16_t rs485GrowattModbusCrc16(const uint8_t *data, int len)
