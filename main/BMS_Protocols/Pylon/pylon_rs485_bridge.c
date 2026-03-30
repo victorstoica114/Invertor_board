@@ -68,6 +68,8 @@ static TaskHandle_t s_pylonProbeTaskHandle = NULL;
 static char s_pylonDecodedLog[2048];
 static int64_t s_lastPylonBmsTrafficUs = 0;
 static int64_t s_lastPylonInverterTrafficUs = 0;
+static int64_t s_lastCanSourceDiagUs = 0;
+static int64_t s_lastCacheBuildDiagUs = 0;
 
 static void telemetryFromSummary(void);
 static void updateSummary61(void);
@@ -95,6 +97,11 @@ static bool pylonCanToRs485ModeEnabled(const bridge_runtime_settings_t *settings
            (settings->inverter_protocol == PROTOCOL_RS485_PYLON);
 }
 
+static bool pylonDiagLogsEnabled(void)
+{
+    return CAN_DECODER_SHOW_RAW_FRAMES != 0;
+}
+
 static bool pylonBmsSourceFresh(const bridge_runtime_settings_t *settings)
 {
     int64_t nowUs = esp_timer_get_time();
@@ -105,7 +112,25 @@ static bool pylonBmsSourceFresh(const bridge_runtime_settings_t *settings)
 
     if (pylonCanToRs485ModeEnabled(settings)) {
         universal_battery_model_t model = {0};
+        uint32_t ageMs = 0u;
         bridgeGetUniversalBatteryModel(&model);
+        if (model.updatedMs != 0u) {
+            uint32_t nowMs = (uint32_t)(nowUs / 1000LL);
+            ageMs = nowMs - model.updatedMs;
+        }
+        if (pylonDiagLogsEnabled() && ((nowUs - s_lastCanSourceDiagUs) >= 1000000LL)) {
+            ESP_LOGI(EXAMPLE_TAG,
+                     "PYLON CAN->RS485 source check: model.valid=%s updatedMs=%" PRIu32 " ageMs=%" PRIu32 " soc=%u soh=%u I=%.2fA V=%.2fV status=0x%02X",
+                     model.valid ? "YES" : "NO",
+                     model.updatedMs,
+                     ageMs,
+                     (unsigned)model.socPct,
+                     (unsigned)model.sohPct,
+                     (double)model.packCurrentA,
+                     (double)model.packVoltageV,
+                     (unsigned)(model.protocolState & 0xFFu));
+            s_lastCanSourceDiagUs = nowUs;
+        }
         return model.valid;
     }
 
@@ -136,6 +161,22 @@ static TickType_t rs485PortPostDelayTicks(uart_port_t uart)
     if (uart == RS485_1_UART) return pdMS_TO_TICKS(RS485_1_TX_POST_DELAY_MS);
     if (uart == RS485_2_UART) return pdMS_TO_TICKS(RS485_2_TX_POST_DELAY_MS);
     return 0;
+}
+
+static TickType_t rs485TxTimeoutTicksForFrameLen(int len)
+{
+    if (len <= 0) {
+        return pdMS_TO_TICKS(100);
+    }
+
+    /* 8N1 framing + margin for scheduling jitter / turnaround. */
+    uint32_t bits = (uint32_t)len * 12u;
+    uint32_t txMs = (bits * 1000u + (uint32_t)RS485_BAUDRATE - 1u) / (uint32_t)RS485_BAUDRATE;
+    uint32_t timeoutMs = txMs + 50u;
+    if (timeoutMs < 100u) {
+        timeoutMs = 100u;
+    }
+    return pdMS_TO_TICKS(timeoutMs);
 }
 
 static int rs485PortTxLevel(uart_port_t uart)
@@ -299,6 +340,8 @@ static bool buildCanDerivedInfo61(char *out, size_t outSize)
         0xC0, 0x0B, 0xC0, 0x00, 0x00, 0x0B, 0xC0, 0x00, 0x00
     };
     universal_battery_model_t model;
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+    bool forceStaticPayload = pylonCanToRs485ModeEnabled(&settings) && PYLON_CAN_RS485_FORCE_FAKE_ENABLE;
     uint8_t bytes[sizeof(template61)];
     uint16_t kelvinTemp = 0;
     uint16_t maxMv = 0;
@@ -307,16 +350,29 @@ static bool buildCanDerivedInfo61(char *out, size_t outSize)
     uint8_t minIdx = 12u;
 
     bridgeGetUniversalBatteryModel(&model);
-    if (!model.valid) {
+    if (!forceStaticPayload && !model.valid) {
         return false;
     }
 
     memcpy(bytes, template61, sizeof(bytes));
-    bytes[1] = 0x90u;
-    putBe16(&bytes[2], (uint16_t)((int16_t)(model.packCurrentA * 100.0f)));
-    bytes[4] = model.socPct;
-    putBe16(&bytes[5], model.cycleCount);
-    bytes[9] = model.sohPct;
+    if (forceStaticPayload) {
+        if (model.valid && model.socPct <= 100u) {
+            bytes[4] = model.socPct;
+        } else {
+            bytes[4] = 95u;
+        }
+        if (model.valid && model.sohPct <= 100u) {
+            bytes[9] = model.sohPct;
+        } else {
+            bytes[9] = 100u;
+        }
+    } else if (model.valid) {
+        bytes[1] = 0x90u;
+        putBe16(&bytes[2], (uint16_t)((int16_t)(model.packCurrentA * 100.0f)));
+        bytes[4] = model.socPct;
+        putBe16(&bytes[5], model.cycleCount);
+        bytes[9] = model.sohPct;
+    }
 
     maxMv = (uint16_t)(model.cellMaxV > 0.0f ? (model.cellMaxV * 1000.0f) : 0.0f);
     minMv = (uint16_t)(model.cellMinV > 0.0f ? (model.cellMinV * 1000.0f) : 0.0f);
@@ -369,17 +425,21 @@ static bool buildCanDerivedInfo63(char *out, size_t outSize)
 {
     static const uint8_t template63[9] = {0x05, 0xE0, 0xB1, 0x80, 0x00, 0x00, 0x07, 0x6C, 0x40};
     universal_battery_model_t model;
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+    bool forceStaticPayload = pylonCanToRs485ModeEnabled(&settings) && PYLON_CAN_RS485_FORCE_FAKE_ENABLE;
     uint8_t bytes[sizeof(template63)];
 
     bridgeGetUniversalBatteryModel(&model);
-    if (!model.valid) {
+    if (!forceStaticPayload && !model.valid) {
         return false;
     }
 
     memcpy(bytes, template63, sizeof(bytes));
-    if (model.protocolState != 0u) {
+    if (forceStaticPayload) {
+        bytes[8] = 0xE0u; /* Diagnostic: permissive status (charge+discharge+balance) */
+    } else if (model.valid && model.protocolState != 0u) {
         bytes[8] = (uint8_t)(model.protocolState & 0xFFu);
-    } else {
+    } else if (model.valid) {
         uint8_t status = 0u;
         if (model.chargeEnabled) status |= 0x80u;
         if (model.dischargeEnabled) status |= 0x40u;
@@ -396,16 +456,53 @@ static void maybeRefreshSyntheticCacheFromUniversal(void)
     bridge_runtime_settings_t settings = runtimeSettingsGet();
     char info61[sizeof(s_pylonCache.info61)] = {0};
     char info63[sizeof(s_pylonCache.info63)] = {0};
+    int64_t nowUs = esp_timer_get_time();
 
     if (!pylonCanToRs485ModeEnabled(&settings)) {
         return;
     }
 
     if (!pylonBmsSourceFresh(&settings)) {
+        if (pylonCanToRs485ModeEnabled(&settings) && PYLON_CAN_RS485_FORCE_FAKE_ENABLE) {
+            if (buildCanDerivedInfo61(info61, sizeof(info61))) {
+                snprintf(s_pylonCache.info61, sizeof(s_pylonCache.info61), "%s", info61);
+                s_pylonCache.valid61 = true;
+            }
+
+            snprintf(s_pylonCache.info62, sizeof(s_pylonCache.info62), "00000000");
+            s_pylonCache.valid62 = true;
+
+            if (buildCanDerivedInfo63(info63, sizeof(info63))) {
+                snprintf(s_pylonCache.info63, sizeof(s_pylonCache.info63), "%s", info63);
+                s_pylonCache.valid63 = true;
+            }
+
+            memset(&s_pylonSummary, 0, sizeof(s_pylonSummary));
+            if (pylonDiagLogsEnabled()) {
+                ESP_LOGW(EXAMPLE_TAG,
+                         "PYLON CAN->RS485 source not fresh: using FORCED fake cache (v61=%s v62=%s v63=%s)",
+                         s_pylonCache.valid61 ? "YES" : "NO",
+                         s_pylonCache.valid62 ? "YES" : "NO",
+                         s_pylonCache.valid63 ? "YES" : "NO");
+            }
+            return;
+        }
+
+        bool old61 = s_pylonCache.valid61;
+        bool old62 = s_pylonCache.valid62;
+        bool old63 = s_pylonCache.valid63;
         s_pylonCache.valid61 = false;
         s_pylonCache.valid62 = false;
         s_pylonCache.valid63 = false;
         memset(&s_pylonSummary, 0, sizeof(s_pylonSummary));
+        if (pylonDiagLogsEnabled() && ((nowUs - s_lastCacheBuildDiagUs) >= 1000000LL)) {
+            ESP_LOGW(EXAMPLE_TAG,
+                     "PYLON CAN->RS485 synthetic cache cleared: source not fresh (v61=%s v62=%s v63=%s)",
+                     old61 ? "YES" : "NO",
+                     old62 ? "YES" : "NO",
+                     old63 ? "YES" : "NO");
+            s_lastCacheBuildDiagUs = nowUs;
+        }
         return;
     }
 
@@ -414,6 +511,9 @@ static void maybeRefreshSyntheticCacheFromUniversal(void)
         s_pylonCache.valid61 = true;
         updateSummary61();
         telemetryFromSummary();
+    } else if (pylonDiagLogsEnabled() && ((nowUs - s_lastCacheBuildDiagUs) >= 1000000LL)) {
+        ESP_LOGW(EXAMPLE_TAG, "PYLON CAN->RS485 failed to build synthetic 0x61 from universal model");
+        s_lastCacheBuildDiagUs = nowUs;
     }
 
     snprintf(s_pylonCache.info62, sizeof(s_pylonCache.info62), "00000000");
@@ -424,6 +524,21 @@ static void maybeRefreshSyntheticCacheFromUniversal(void)
         s_pylonCache.valid63 = true;
         updateSummary63();
         telemetryFromSummary();
+    } else if (pylonDiagLogsEnabled() && ((nowUs - s_lastCacheBuildDiagUs) >= 1000000LL)) {
+        ESP_LOGW(EXAMPLE_TAG, "PYLON CAN->RS485 failed to build synthetic 0x63 from universal model");
+        s_lastCacheBuildDiagUs = nowUs;
+    }
+
+    if (pylonDiagLogsEnabled() && ((nowUs - s_lastCacheBuildDiagUs) >= 1000000LL)) {
+        ESP_LOGI(EXAMPLE_TAG,
+                 "PYLON CAN->RS485 synthetic cache state: v61=%s v62=%s v63=%s len61=%u len62=%u len63=%u",
+                 s_pylonCache.valid61 ? "YES" : "NO",
+                 s_pylonCache.valid62 ? "YES" : "NO",
+                 s_pylonCache.valid63 ? "YES" : "NO",
+                 (unsigned)strlen(s_pylonCache.info61),
+                 (unsigned)strlen(s_pylonCache.info62),
+                 (unsigned)strlen(s_pylonCache.info63));
+        s_lastCacheBuildDiagUs = nowUs;
     }
 }
 
@@ -529,13 +644,15 @@ static void logPylonFrame(const char *prefix, const uint8_t *frame, int len)
     }
     ascii[asciiBytes] = 0;
 
-    ESP_LOGI(EXAMPLE_TAG,
-             "%s: len=%d ASCII=[%s] HEX=[%s]%s",
-             prefix,
-             len,
-             ascii,
-             hex,
-             (len > maxHexBytes) ? " ..." : "");
+    if (pylonDiagLogsEnabled()) {
+        ESP_LOGI(EXAMPLE_TAG,
+                 "%s: len=%d ASCII=[%s] HEX=[%s]%s",
+                 prefix,
+                 len,
+                 ascii,
+                 hex,
+                 (len > maxHexBytes) ? " ..." : "");
+    }
 }
 
 static void forwardFrame(const char *rxName,
@@ -553,15 +670,29 @@ static void forwardFrame(const char *rxName,
         rs485SetTxForPort(txUart, txDirPin, true);
         if (preDelay > 0) vTaskDelay(preDelay);
     }
-    uart_write_bytes(txUart, (const char *)frame, len);
-    uart_wait_tx_done(txUart, pdMS_TO_TICKS(100));
+    int written = uart_write_bytes(txUart, (const char *)frame, len);
+    if (written != len) {
+        ESP_LOGW(EXAMPLE_TAG,
+                 "RS485 TX short write on %s: wrote=%d expected=%d",
+                 txName ? txName : "RS485",
+                 written,
+                 len);
+    }
+    esp_err_t waitErr = uart_wait_tx_done(txUart, rs485TxTimeoutTicksForFrameLen(len));
+    if (waitErr != ESP_OK) {
+        ESP_LOGW(EXAMPLE_TAG,
+                 "RS485 TX wait timeout/error on %s: err=%d len=%d",
+                 txName ? txName : "RS485",
+                 (int)waitErr,
+                 len);
+    }
     if (!rs485PortUsesHalfDuplex(txUart)) {
         TickType_t postDelay = rs485PortPostDelayTicks(txUart);
         if (postDelay > 0) vTaskDelay(postDelay);
         rs485SetTxForPort(txUart, txDirPin, false);
     }
 
-    if (rxName != NULL && txName != NULL) {
+    if (pylonDiagLogsEnabled() && rxName != NULL && txName != NULL) {
         ESP_LOGI(EXAMPLE_TAG,
                  "RS485 FWD %s -> %s complete",
                  rxName,
@@ -577,16 +708,18 @@ static void logDecodedPylon(const uint8_t *frame, int len)
 
     if (!parsePylonHeader(frame, len, &ver, &adr, &cid1, &cid2)) return;
 
-    ESP_LOGI(EXAMPLE_TAG,
-             "PYLON: ver=0x%02X addr=0x%02X cid1=0x%02X cid2=0x%02X infoLen=0x%04X payloadHexLen=%d chk=OK",
-             (unsigned)ver,
-             (unsigned)adr,
-             (unsigned)cid1,
-             (unsigned)cid2,
-             (unsigned)pylonLengthField(infoAsciiLen),
-             infoAsciiLen);
-    if (infoAsciiLen > 0) {
-        ESP_LOGI(EXAMPLE_TAG, "  payload=[%.*s]", infoAsciiLen, payload);
+    if (pylonDiagLogsEnabled()) {
+        ESP_LOGI(EXAMPLE_TAG,
+                 "PYLON: ver=0x%02X addr=0x%02X cid1=0x%02X cid2=0x%02X infoLen=0x%04X payloadHexLen=%d chk=OK",
+                 (unsigned)ver,
+                 (unsigned)adr,
+                 (unsigned)cid1,
+                 (unsigned)cid2,
+                 (unsigned)pylonLengthField(infoAsciiLen),
+                 infoAsciiLen);
+        if (infoAsciiLen > 0) {
+            ESP_LOGI(EXAMPLE_TAG, "  payload=[%.*s]", infoAsciiLen, payload);
+        }
     }
 }
 
@@ -615,29 +748,31 @@ static void updateSummary61(void)
     s_pylonSummary.temp_t4_c10 = (int16_t)(be16(&bytes[29]) - 2731);
     s_pylonSummary.temp_t5_c10 = (int16_t)(be16(&bytes[31]) - 2731);
 
-    ESP_LOGI(EXAMPLE_TAG, "RS485 PYLON 0x61");
-    ESP_LOGI(EXAMPLE_TAG,
-             "  pack : I~=%.2fA  SOC~=%u%%  SOH?~=%u%%  cycles~=%u  w0=0x%04X",
-             (double)s_pylonSummary.current_a,
-             (unsigned)s_pylonSummary.soc_pct,
-             (unsigned)s_pylonSummary.soh_pct,
-             (unsigned)s_pylonSummary.cycles,
-             (unsigned)s_pylonSummary.raw_word0);
-    ESP_LOGI(EXAMPLE_TAG,
-             "  cells: max=%.3fV#%02u  min=%.3fV#%02u  dV=%.3fV",
-             (double)s_pylonSummary.max_cell_mv / 1000.0,
-             (unsigned)s_pylonSummary.max_cell_idx,
-             (double)s_pylonSummary.min_cell_mv / 1000.0,
-             (unsigned)s_pylonSummary.min_cell_idx,
-             ((double)s_pylonSummary.max_cell_mv - (double)s_pylonSummary.min_cell_mv) / 1000.0);
-    ESP_LOGI(EXAMPLE_TAG,
-             "  temps: MOS?=%.1fC  T1?=%.1fC  T2?=%.1fC  T4?=%.1fC  T5?=%.1fC",
-             (double)s_pylonSummary.temp_mos_c10 / 10.0,
-             (double)s_pylonSummary.temp_t1_c10 / 10.0,
-             (double)s_pylonSummary.temp_t2_c10 / 10.0,
-             (double)s_pylonSummary.temp_t4_c10 / 10.0,
-             (double)s_pylonSummary.temp_t5_c10 / 10.0);
-    ESP_LOGI(EXAMPLE_TAG, "  raw  : [%s]", s_pylonCache.info61);
+    if (pylonDiagLogsEnabled()) {
+        ESP_LOGI(EXAMPLE_TAG, "RS485 PYLON 0x61");
+        ESP_LOGI(EXAMPLE_TAG,
+                 "  pack : I~=%.2fA  SOC~=%u%%  SOH?~=%u%%  cycles~=%u  w0=0x%04X",
+                 (double)s_pylonSummary.current_a,
+                 (unsigned)s_pylonSummary.soc_pct,
+                 (unsigned)s_pylonSummary.soh_pct,
+                 (unsigned)s_pylonSummary.cycles,
+                 (unsigned)s_pylonSummary.raw_word0);
+        ESP_LOGI(EXAMPLE_TAG,
+                 "  cells: max=%.3fV#%02u  min=%.3fV#%02u  dV=%.3fV",
+                 (double)s_pylonSummary.max_cell_mv / 1000.0,
+                 (unsigned)s_pylonSummary.max_cell_idx,
+                 (double)s_pylonSummary.min_cell_mv / 1000.0,
+                 (unsigned)s_pylonSummary.min_cell_idx,
+                 ((double)s_pylonSummary.max_cell_mv - (double)s_pylonSummary.min_cell_mv) / 1000.0);
+        ESP_LOGI(EXAMPLE_TAG,
+                 "  temps: MOS?=%.1fC  T1?=%.1fC  T2?=%.1fC  T4?=%.1fC  T5?=%.1fC",
+                 (double)s_pylonSummary.temp_mos_c10 / 10.0,
+                 (double)s_pylonSummary.temp_t1_c10 / 10.0,
+                 (double)s_pylonSummary.temp_t2_c10 / 10.0,
+                 (double)s_pylonSummary.temp_t4_c10 / 10.0,
+                 (double)s_pylonSummary.temp_t5_c10 / 10.0);
+        ESP_LOGI(EXAMPLE_TAG, "  raw  : [%s]", s_pylonCache.info61);
+    }
     updateDecodedLogSnapshot();
 }
 
@@ -651,11 +786,13 @@ static void updateSummary63(void)
     }
 
     s_pylonSummary.status_63 = bytes[8];
-    ESP_LOGI(EXAMPLE_TAG, "RS485 PYLON 0x63");
-    ESP_LOGI(EXAMPLE_TAG,
-             "  flags: status=0x%02X  likely(discharge=ON charge/balance=OFF)",
-             (unsigned)s_pylonSummary.status_63);
-    ESP_LOGI(EXAMPLE_TAG, "  raw  : [%s]", s_pylonCache.info63);
+    if (pylonDiagLogsEnabled()) {
+        ESP_LOGI(EXAMPLE_TAG, "RS485 PYLON 0x63");
+        ESP_LOGI(EXAMPLE_TAG,
+                 "  flags: status=0x%02X  likely(discharge=ON charge/balance=OFF)",
+                 (unsigned)s_pylonSummary.status_63);
+        ESP_LOGI(EXAMPLE_TAG, "  raw  : [%s]", s_pylonCache.info63);
+    }
     updateDecodedLogSnapshot();
 }
 
@@ -680,8 +817,10 @@ static void cacheResponse(uint8_t requestedCid2, const uint8_t *frame, int len)
             memcpy(s_pylonCache.info62, payload, (size_t)payloadLen);
             s_pylonCache.info62[payloadLen] = '\0';
             s_pylonCache.valid62 = true;
-            ESP_LOGI(EXAMPLE_TAG, "RS485 PYLON 0x62");
-            ESP_LOGI(EXAMPLE_TAG, "  raw  : [%s]", s_pylonCache.info62);
+            if (pylonDiagLogsEnabled()) {
+                ESP_LOGI(EXAMPLE_TAG, "RS485 PYLON 0x62");
+                ESP_LOGI(EXAMPLE_TAG, "  raw  : [%s]", s_pylonCache.info62);
+            }
             updateDecodedLogSnapshot();
             break;
         case 0x63:
@@ -716,26 +855,43 @@ static bool buildCachedResponse(const uint8_t *request,
         return false;
     }
 
+    bool sourceFresh = pylonBmsSourceFresh(&settings);
+    bool forceFake = pylonCanToRs485ModeEnabled(&settings) && PYLON_CAN_RS485_FORCE_FAKE_ENABLE;
+
     maybeRefreshSyntheticCacheFromUniversal();
 
-    if (!pylonBmsSourceFresh(&settings)) {
+    if (!sourceFresh && !forceFake) {
+        ESP_LOGW(EXAMPLE_TAG,
+                 "RS485 PYLON FAKE BMS skip: source not fresh for cid2=0x%02X addr=0x%02X",
+                 (unsigned)cid2,
+                 (unsigned)adr);
         return false;
     }
 
     switch (cid2) {
         case 0x61:
-            if (!s_pylonCache.valid61) return false;
+            if (!s_pylonCache.valid61) {
+                ESP_LOGW(EXAMPLE_TAG, "RS485 PYLON FAKE BMS skip: missing cache 0x61");
+                return false;
+            }
             infoAscii = s_pylonCache.info61;
             break;
         case 0x62:
-            if (!s_pylonCache.valid62) return false;
+            if (!s_pylonCache.valid62) {
+                ESP_LOGW(EXAMPLE_TAG, "RS485 PYLON FAKE BMS skip: missing cache 0x62");
+                return false;
+            }
             infoAscii = s_pylonCache.info62;
             break;
         case 0x63:
-            if (!s_pylonCache.valid63) return false;
+            if (!s_pylonCache.valid63) {
+                ESP_LOGW(EXAMPLE_TAG, "RS485 PYLON FAKE BMS skip: missing cache 0x63");
+                return false;
+            }
             infoAscii = s_pylonCache.info63;
             break;
         default:
+            ESP_LOGW(EXAMPLE_TAG, "RS485 PYLON FAKE BMS skip: unsupported cid2=0x%02X", (unsigned)cid2);
             return false;
     }
 
@@ -765,13 +921,15 @@ static void sendCachedResponse(const pylonRs485BridgeCtx_t *ctx, const uint8_t *
         return;
     }
 
-    ESP_LOGI(EXAMPLE_TAG,
-             "RS485 PYLON FAKE BMS on %s: req cid2=0x%02X addr=0x%02X -> rtn=0x00 len=%d reason=cache-or-fallback",
-             ctx->rxName,
-             (unsigned)cid2,
-             (unsigned)adr,
-             outLen);
-    logPylonFrame("RS485 FWD PYLON_FAKE_BMS -> inverter", response, outLen);
+    if (pylonDiagLogsEnabled()) {
+        ESP_LOGI(EXAMPLE_TAG,
+                 "RS485 PYLON FAKE BMS on %s: req cid2=0x%02X addr=0x%02X -> rtn=0x00 len=%d reason=cache-or-fallback",
+                 ctx->rxName,
+                 (unsigned)cid2,
+                 (unsigned)adr,
+                 outLen);
+        logPylonFrame("RS485 FWD PYLON_FAKE_BMS -> inverter", response, outLen);
+    }
     forwardFrame("PYLON_FAKE_BMS", ctx->rxName, ctx->rxUart, ctx->rxDirPin, response, outLen);
 }
 
@@ -787,21 +945,25 @@ static bool maybeHandleProbeResponse(const pylonRs485BridgeCtx_t *ctx, const uin
     if (adr != s_probePending.adr) return false;
     if (code != 0x00 && code != 0x90 && code != 0x91) return false;
 
-    ESP_LOGI(EXAMPLE_TAG,
-             "RS485 PYLON PROBE RX on %s: ver=0x%02X addr=0x%02X cid1=0x%02X code=0x%02X len=%d",
-             ctx->rxName,
-             (unsigned)ver,
-             (unsigned)adr,
-             (unsigned)cid1,
-             (unsigned)code,
-             len);
+    if (pylonDiagLogsEnabled()) {
+        ESP_LOGI(EXAMPLE_TAG,
+                 "RS485 PYLON PROBE RX on %s: ver=0x%02X addr=0x%02X cid1=0x%02X code=0x%02X len=%d",
+                 ctx->rxName,
+                 (unsigned)ver,
+                 (unsigned)adr,
+                 (unsigned)cid1,
+                 (unsigned)code,
+                 len);
+    }
     cacheResponse(s_probePending.cid2, frame, len);
-    ESP_LOGI(EXAMPLE_TAG,
-             "RS485 PYLON CACHE update from %s: reqCid2=0x%02X respAddr=0x%02X len=%d",
-             ctx->rxName,
-             (unsigned)s_probePending.cid2,
-             (unsigned)adr,
-             len);
+    if (pylonDiagLogsEnabled()) {
+        ESP_LOGI(EXAMPLE_TAG,
+                 "RS485 PYLON CACHE update from %s: reqCid2=0x%02X respAddr=0x%02X len=%d",
+                 ctx->rxName,
+                 (unsigned)s_probePending.cid2,
+                 (unsigned)adr,
+                 len);
+    }
     s_probePending.active = false;
     return true;
 }
@@ -812,11 +974,13 @@ static void maybeCheckProbeTimeout(const pylonRs485BridgeCtx_t *ctx, int64_t now
     if (!ctx->isBmsSide || !pylonProbeModeEnabled(settings.mode)) return;
     if (!s_probePending.active || nowUs < s_probePending.dueUs) return;
 
-    ESP_LOGI(EXAMPLE_TAG,
-             "RS485 PYLON PROBE timeout on %s: cid2=0x%02X addr=0x%02X reason=no-response",
-             ctx->rxName,
-             (unsigned)s_probePending.cid2,
-             (unsigned)s_probePending.adr);
+    if (pylonDiagLogsEnabled()) {
+        ESP_LOGI(EXAMPLE_TAG,
+                 "RS485 PYLON PROBE timeout on %s: cid2=0x%02X addr=0x%02X reason=no-response",
+                 ctx->rxName,
+                 (unsigned)s_probePending.cid2,
+                 (unsigned)s_probePending.adr);
+    }
     s_probePending.active = false;
 }
 
@@ -949,12 +1113,14 @@ static void pylonProbeTask(void *pv)
             s_probePending.adr = adr;
             s_probePending.cid2 = cid2;
             s_probePending.dueUs = nowUs + 250000;
-            ESP_LOGI(EXAMPLE_TAG,
-                     "RS485 FWD PYLON_PROBE -> %s: len=%d ASCII=[%.*s]",
-                     ctx->probeName,
-                     frameLen,
-                     frameLen,
-                     frame);
+            if (pylonDiagLogsEnabled()) {
+                ESP_LOGI(EXAMPLE_TAG,
+                         "RS485 FWD PYLON_PROBE -> %s: len=%d ASCII=[%.*s]",
+                         ctx->probeName,
+                         frameLen,
+                         frameLen,
+                         frame);
+            }
             forwardFrame("PYLON_PROBE", ctx->probeName, ctx->probeUart, ctx->probeDirPin, frame, frameLen);
         }
 

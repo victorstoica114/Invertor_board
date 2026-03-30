@@ -4,6 +4,9 @@
 
 #include "Drivers/can_driver.h"
 #include "Drivers/rs485_driver.h"
+#include "BMS_Protocols/Pylon/pylon_rs485_bridge.h"
+#include "CAN_Decoder.h"
+#include "Operation_Modes/can_forward_sniffer.h"
 #include "config.h"
 #include "protocols/growatt/growatt_bms_task.h"
 #include "protocols/growatt/growatt_inverter_task.h"
@@ -317,8 +320,9 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
 
     const bool canToRsGrowatt = isCanToRsGrowattRoute(settings);
     const bool rsJkbmsToRsGrowatt = isRsJkbmsToRsGrowattRoute(settings);
+    const bool pylonRs485Route = pylonRs485BridgeHandlesCurrentConfig();
     ESP_LOGI(EXAMPLE_TAG,
-             "Orchestrator runtime start: bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) canToRsGrowatt=%s rsJkbmsToRsGrowatt=%s",
+             "Orchestrator runtime start: bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) canToRsGrowatt=%s rsJkbmsToRsGrowatt=%s pylonRs485=%s",
              (unsigned)settings->bms_line,
              (unsigned)settings->bms_protocol,
              (unsigned)settings->bms_port,
@@ -326,7 +330,8 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
              (unsigned)settings->inverter_protocol,
              (unsigned)settings->inverter_port,
              canToRsGrowatt ? "YES" : "NO",
-             rsJkbmsToRsGrowatt ? "YES" : "NO");
+             rsJkbmsToRsGrowatt ? "YES" : "NO",
+             pylonRs485Route ? "YES" : "NO");
 
     if (canToRsGrowatt) {
         if (g_orchestratorTaskHandle != NULL || g_orchestratorCtx.canRs485TranslatorActive) {
@@ -409,6 +414,29 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
         return ESP_OK;
     }
 
+    if (pylonRs485Route) {
+        if (g_orchestratorTaskHandle != NULL || g_orchestratorCtx.canRs485TranslatorActive) {
+            ESP_LOGW(EXAMPLE_TAG, "Orchestrator already running");
+            return ESP_ERR_INVALID_STATE;
+        }
+
+        canDecoderResetCaches();
+        pylonRs485BridgeEnable();
+        canForwardSnifferStart(settings);
+        g_orchestratorCtx.canRs485TranslatorActive = true;
+        g_orchestratorCtx.bmsProtocol = protocolIdFromUiProtocol(settings->bms_protocol);
+        g_orchestratorCtx.inverterProtocol = protocolIdFromUiProtocol(settings->inverter_protocol);
+        ESP_LOGI(EXAMPLE_TAG,
+                 "Orchestrator started Pylon RS485 bridge route: BMS(line=%u prot=%u port=%u) -> Inverter(line=%u prot=%u port=%u)",
+                 (unsigned)settings->bms_line,
+                 (unsigned)settings->bms_protocol,
+                 (unsigned)settings->bms_port,
+                 (unsigned)settings->inverter_line,
+                 (unsigned)settings->inverter_protocol,
+                 (unsigned)settings->inverter_port);
+        return ESP_OK;
+    }
+
     return orchestratorStart(protocolIdFromUiProtocol(settings->bms_protocol),
                              protocolIdFromUiProtocol(settings->inverter_protocol));
 }
@@ -421,6 +449,9 @@ esp_err_t orchestratorStop(void)
     }
 
     canRs485GrowattBridgeStop();
+    pylonRs485BridgeStop();
+    canForwardSnifferStop();
+    canDecoderResetCaches();
     g_orchestratorCtx.canRs485TranslatorActive = false;
 
     (void)growattBmsTaskStop();

@@ -418,6 +418,8 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "else if(bl===2&&bp===2){txt='Testing RS485_GROWATT poller on RS485_'+bport+'.';}"
         "else if(bl===1&&bp===1&&il===2&&ip===2){txt='Special route active: CAN_GROWATT -> RS485_GROWATT translator.';}"
         "else if(bl===1&&bp===4&&il===2&&ip===2){txt='Special route active: CAN_PYLON -> RS485_GROWATT translator.';}"
+        "else if(bl===1&&bp===4&&il===2&&ip===3){txt='Special route active: CAN_PYLON -> RS485_PYLON translator.';}"
+        "else if(bl===2&&bp===3&&il===2&&ip===3){txt='Special route active: RS485_PYLON bridge (bidirectional pass-through + cache).';}"
         "else if(bl===1&&bp===7&&il===2&&ip===2){txt='Special route active: CAN_GOODWE -> RS485_GROWATT translator.';}"
         "else if(bl===1&&bp===8&&il===2&&ip===2){txt='Special route active: CAN_SOFAR -> RS485_GROWATT translator.';}"
         "else if(bl===1&&bp===9&&il===2&&ip===2){txt='Special route active: CAN_SMA -> RS485_GROWATT translator.';}"
