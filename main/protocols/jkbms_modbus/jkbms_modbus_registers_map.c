@@ -1,4 +1,4 @@
-#include "protocols/jkbms_modbus/jkbms_modbus_register_map.h"
+#include "protocols/jkbms_modbus/jkbms_modbus_registers_map.h"
 
 /*
  * Keep poll blocks compact and explicit. Some JK firmwares are sensitive to large

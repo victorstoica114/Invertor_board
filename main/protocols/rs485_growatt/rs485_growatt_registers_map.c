@@ -1,4 +1,4 @@
-#include "protocols/rs485_growatt/rs485_growatt_register_map.h"
+#include "protocols/rs485_growatt/rs485_growatt_registers_map.h"
 
 const rs485_growatt_poll_block_t g_rs485GrowattPollBlocks[] = {
     { .start = RS485_GROWATT_MB_REG_INFO_0001,  .count = 0x000Fu },

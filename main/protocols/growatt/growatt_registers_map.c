@@ -1,4 +1,4 @@
-#include "protocols/growatt/growatt_register_map.h"
+#include "protocols/growatt/growatt_registers_map.h"
 
 const growatt_modbus_poll_block_t g_growattModbusPollBlocks[] = {
     { .start = GROWATT_MB_REG_INFO_0001,  .count = 0x000Fu },
