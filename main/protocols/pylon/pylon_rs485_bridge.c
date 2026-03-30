@@ -545,15 +545,29 @@ static void maybeRefreshSyntheticCacheFromUniversal(void)
 static void telemetryFromSummary(void)
 {
     bridgeTelemetrySnapshot_t snap = {0};
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+    char iface[12] = {0};
 
     if (!s_pylonSummary.valid) {
         bridgeSetTelemetrySnapshot(NULL);
         return;
     }
 
+    if (settings.bms_port >= 1u && settings.bms_port <= 2u) {
+        if (settings.bms_line == LINE_RS485) {
+            snprintf(iface, sizeof(iface), "RS485_%u", (unsigned)settings.bms_port);
+        } else {
+            snprintf(iface, sizeof(iface), "CAN%u", (unsigned)settings.bms_port);
+        }
+    }
+
     snap.valid = true;
-    snprintf(snap.source, sizeof(snap.source), "RS485_PYLON");
-    snprintf(snap.protocol, sizeof(snap.protocol), "RS485_PYLON");
+    if (iface[0] != '\0') {
+        snprintf(snap.source, sizeof(snap.source), "%s", iface);
+    } else {
+        snprintf(snap.source, sizeof(snap.source), "BMS");
+    }
+    snprintf(snap.protocol, sizeof(snap.protocol), "%s", protocolToStr(settings.bms_protocol));
     snap.currentA = s_pylonSummary.current_a;
     snap.cycles = s_pylonSummary.cycles;
     snap.socPct = s_pylonSummary.soc_pct;
