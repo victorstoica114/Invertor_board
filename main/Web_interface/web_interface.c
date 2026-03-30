@@ -14,6 +14,7 @@
 #include "esp_netif.h"
 #include "esp_wifi.h"
 #include "nvs_flash.h"
+#include "cJSON.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -116,55 +117,59 @@ static const char *modeToStr(int mode)
     }
 }
 
-static bool extractJsonInt(const char *json, const char *key, int *out)
+static bool jsonGetUInt8(const cJSON *root, const char *key, uint8_t *out)
 {
-    char pattern[32];
-    const char *p = NULL;
-
-    if (json == NULL || key == NULL || out == NULL) {
+    const cJSON *item = NULL;
+    if (root == NULL || key == NULL || out == NULL) {
         return false;
     }
 
-    snprintf(pattern, sizeof(pattern), "\"%s\":", key);
-    p = strstr(json, pattern);
-    if (p == NULL) {
+    item = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (!cJSON_IsNumber(item)) {
         return false;
     }
-    p += strlen(pattern);
-    while (*p == ' ' || *p == '\t') {
-        p++;
+    if (item->valuedouble < 0.0 || item->valuedouble > 255.0) {
+        return false;
     }
-    *out = atoi(p);
+
+    *out = (uint8_t)item->valueint;
     return true;
 }
 
-static bool extractJsonString(const char *json, const char *key, char *out, size_t outSize)
+static bool jsonGetUInt16(const cJSON *root, const char *key, uint16_t *out)
 {
-    char pattern[32];
-    const char *p = NULL;
-    const char *end = NULL;
+    const cJSON *item = NULL;
+    if (root == NULL || key == NULL || out == NULL) {
+        return false;
+    }
+
+    item = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (!cJSON_IsNumber(item)) {
+        return false;
+    }
+    if (item->valuedouble < 0.0 || item->valuedouble > 65535.0) {
+        return false;
+    }
+
+    *out = (uint16_t)item->valueint;
+    return true;
+}
+
+static bool jsonCopyString(const cJSON *root, const char *key, char *out, size_t outSize)
+{
+    const cJSON *item = NULL;
     size_t len = 0;
-
-    if (json == NULL || key == NULL || out == NULL || outSize == 0) {
+    if (root == NULL || key == NULL || out == NULL || outSize == 0u) {
         return false;
     }
 
-    snprintf(pattern, sizeof(pattern), "\"%s\":\"", key);
-    p = strstr(json, pattern);
-    if (p == NULL) {
-        return false;
-    }
-    p += strlen(pattern);
-    end = strchr(p, '"');
-    if (end == NULL) {
+    item = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (!cJSON_IsString(item) || item->valuestring == NULL) {
         return false;
     }
 
-    len = (size_t)(end - p);
-    if (len >= outSize) {
-        len = outSize - 1;
-    }
-    memcpy(out, p, len);
+    len = strnlen(item->valuestring, outSize - 1u);
+    memcpy(out, item->valuestring, len);
     out[len] = '\0';
     return true;
 }
@@ -648,33 +653,82 @@ static esp_err_t settingsHandler(httpd_req_t *req)
 
 static esp_err_t settingsPostHandler(httpd_req_t *req)
 {
-    char buf[256];
-    int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    char *buf = NULL;
+    int receivedTotal = 0;
+    int contentLen = 0;
+    int remaining = 0;
     bridge_runtime_settings_t settings = runtimeSettingsGet();
     bridge_runtime_settings_t oldSettings = settings;
-    int v = 0;
+    cJSON *root = NULL;
+    bool parseError = false;
     const char *okResp = "{\"ok\":true,\"message\":\"Saved and applied\"}";
     const char *errResp = "{\"ok\":false,\"message\":\"Invalid settings\"}";
+    const int kMaxSettingsBodyLen = 4096;
 
-    if (received <= 0) {
+    if (req == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    contentLen = req->content_len;
+    if (contentLen <= 0 || contentLen > kMaxSettingsBodyLen) {
         httpd_resp_set_status(req, "400 Bad Request");
         setNoCacheHeaders(req);
         httpd_resp_set_type(req, "application/json");
         return httpd_resp_send(req, errResp, HTTPD_RESP_USE_STRLEN);
     }
 
-    buf[received] = '\0';
+    buf = (char *)calloc((size_t)contentLen + 1u, sizeof(char));
+    if (buf == NULL) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        setNoCacheHeaders(req);
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_send(req,
+                               "{\"ok\":false,\"message\":\"Out of memory\"}",
+                               HTTPD_RESP_USE_STRLEN);
+    }
 
-    if (extractJsonInt(buf, "mode", &v)) settings.mode = (uint8_t)v;
-    if (extractJsonInt(buf, "bms_line", &v)) settings.bms_line = (uint8_t)v;
-    if (extractJsonInt(buf, "inverter_line", &v)) settings.inverter_line = (uint8_t)v;
-    if (extractJsonInt(buf, "bms_protocol", &v)) settings.bms_protocol = (uint8_t)v;
-    if (extractJsonInt(buf, "inverter_protocol", &v)) settings.inverter_protocol = (uint8_t)v;
-    if (extractJsonInt(buf, "bms_port", &v)) settings.bms_port = (uint8_t)v;
-    if (extractJsonInt(buf, "inverter_port", &v)) settings.inverter_port = (uint8_t)v;
-    (void)extractJsonString(buf, "wifi_ssid", settings.wifi_ssid, sizeof(settings.wifi_ssid));
-    (void)extractJsonString(buf, "wifi_password", settings.wifi_password, sizeof(settings.wifi_password));
-    if (extractJsonInt(buf, "web_port", &v)) settings.web_port = (uint16_t)v;
+    remaining = contentLen;
+    while (remaining > 0) {
+        int received = httpd_req_recv(req, buf + receivedTotal, remaining);
+        if (received <= 0) {
+            parseError = true;
+            break;
+        }
+        receivedTotal += received;
+        remaining -= received;
+    }
+
+    if (!parseError) {
+        root = cJSON_ParseWithLength(buf, (size_t)receivedTotal);
+        if (root == NULL || !cJSON_IsObject(root)) {
+            parseError = true;
+        }
+    }
+
+    if (parseError) {
+        cJSON_Delete(root);
+        free(buf);
+        httpd_resp_set_status(req, "400 Bad Request");
+        setNoCacheHeaders(req);
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_send(req,
+                               "{\"ok\":false,\"message\":\"Invalid JSON payload\"}",
+                               HTTPD_RESP_USE_STRLEN);
+    }
+
+    (void)jsonGetUInt8(root, "mode", &settings.mode);
+    (void)jsonGetUInt8(root, "bms_line", &settings.bms_line);
+    (void)jsonGetUInt8(root, "inverter_line", &settings.inverter_line);
+    (void)jsonGetUInt8(root, "bms_protocol", &settings.bms_protocol);
+    (void)jsonGetUInt8(root, "inverter_protocol", &settings.inverter_protocol);
+    (void)jsonGetUInt8(root, "bms_port", &settings.bms_port);
+    (void)jsonGetUInt8(root, "inverter_port", &settings.inverter_port);
+    (void)jsonCopyString(root, "wifi_ssid", settings.wifi_ssid, sizeof(settings.wifi_ssid));
+    (void)jsonCopyString(root, "wifi_password", settings.wifi_password, sizeof(settings.wifi_password));
+    (void)jsonGetUInt16(root, "web_port", &settings.web_port);
+
+    cJSON_Delete(root);
+    free(buf);
 
     if (!runtimeSettingsSave(&settings)) {
         httpd_resp_set_status(req, "400 Bad Request");
