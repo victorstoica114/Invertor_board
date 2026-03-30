@@ -1,14 +1,14 @@
-#include "Working_modes.h"
+#include "modes/mode_manager.h"
 
 #include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 
-#include "CAN_Decoder.h"
+#include "decoders/CAN_Decoder.h"
 #include "Drivers/can_driver.h"
 #include "Drivers/rs485_driver.h"
 #include "config.h"
-#include "modbusDecoder.h"
+#include "decoders/modbusDecoder.h"
 #include "orchestrator/orchestrator.h"
 #include "runtime_settings.h"
 

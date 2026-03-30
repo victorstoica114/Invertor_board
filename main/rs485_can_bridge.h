@@ -4,7 +4,7 @@
 #include "driver/twai.h"
 #include "driver/uart.h"
 #include "esp_err.h"
-#include "modbusDecoder.h"
+#include "decoders/modbusDecoder.h"
 
 #include <stdbool.h>
 #include <stdint.h>

@@ -5,7 +5,7 @@
 
 #include "Drivers/rs485_driver.h"
 #include "config.h"
-#include "modbusDecoder.h"
+#include "decoders/modbusDecoder.h"
 #include "orchestrator/protocol_types.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_poller.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_registers_map.h"

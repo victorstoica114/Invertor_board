@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "Working_modes.h"
+#include "modes/mode_manager.h"
 #include "config.h"
 #include "orchestrator/protocol_types.h"
 #include "protocols/growatt/growatt_bms_task.h"

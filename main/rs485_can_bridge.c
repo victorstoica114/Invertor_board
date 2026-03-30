@@ -1,6 +1,6 @@
 #include "rs485_can_bridge.h"
 
-#include "CAN_Decoder.h"
+#include "decoders/CAN_Decoder.h"
 #include "Drivers/rs485_driver.h"
 #include "config.h"
 #include "protocols/goodwe/goodwe_registers_map.h"

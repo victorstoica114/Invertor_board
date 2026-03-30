@@ -1,4 +1,4 @@
-#include "CAN_Decoder.h"
+#include "decoders/CAN_Decoder.h"
 
 #include "config.h"
 #include "bridge.h"

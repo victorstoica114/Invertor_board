@@ -4,11 +4,11 @@
 #include <string.h>
 
 #include "config.h"
-#include "CAN_Decoder.h"
+#include "decoders/CAN_Decoder.h"
 #include "runtime_settings.h"
 #include "Drivers/CAN/can_driver.h"
 #include "Drivers/RS485/rs485_driver.h"
-#include "Operation_Modes/can_forward_sniffer.h"
+#include "modes/can_forward_sniffer.h"
 #include "Operation_Modes/rs485_forward_sniffer.h"
 #include "BMS_Protocols/Pylon/pylon_rs485_bridge.h"
 #include "rs485_can_bridge.h"

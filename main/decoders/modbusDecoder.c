@@ -1,4 +1,4 @@
-#include "modbusDecoder.h"
+#include "decoders/modbusDecoder.h"
 #include "config.h"
 #include "protocols/growatt/growatt_registers_map.h"
 

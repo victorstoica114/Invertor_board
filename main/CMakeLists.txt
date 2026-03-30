@@ -1,7 +1,7 @@
 idf_component_register(
     SRCS
         "main.c"
-        "Working_modes.c"
+        "modes/mode_manager.c"
         "Web_interface/bridge_compat.c"
         "runtime_settings.c"
         "rs485_can_bridge.c"
@@ -9,10 +9,10 @@ idf_component_register(
         "config.c"
         "Drivers/can_driver.c"
         "Drivers/rs485_driver.c"
-        "CAN_Decoder.c"
-        "modbusDecoder.c"
+        "decoders/CAN_Decoder.c"
+        "decoders/modbusDecoder.c"
         "orchestrator/orchestrator.c"
-        "Operation_Modes/can_forward_sniffer.c"
+        "modes/can_forward_sniffer.c"
         "protocols/pylon/pylon_rs485_bridge.c"
         "protocols/pylon/pylon_can_protocol.c"
         "protocols/deye/deye_can_protocol.c"

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "modbusDecoder.h"
+#include "decoders/modbusDecoder.h"
 #include "runtime_settings.h"
 
 #ifdef __cplusplus

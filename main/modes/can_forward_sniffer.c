@@ -1,10 +1,10 @@
-#include "Operation_Modes/can_forward_sniffer.h"
+#include "modes/can_forward_sniffer.h"
 
 #include <inttypes.h>
 #include <stdio.h>
 
 #include "config.h"
-#include "CAN_Decoder.h"
+#include "decoders/CAN_Decoder.h"
 #include "Drivers/CAN/can_driver.h"
 
 #include "esp_log.h"
