@@ -74,6 +74,9 @@
 /* Source freshness window for fail-safe (stop answering if source is stale). */
 #define BRIDGE_SOURCE_STALE_MS 2000u
 
+/* Telemetry cache max age before UI hides stale values. */
+#define WEB_TELEMETRY_STALE_MS 30000u
+
 /* --- Global working mode --- */
 #define ACTIVE_WORKING_MODE 0 /* 0=bridge, 1=forward, 2=sniffer */
 
@@ -193,4 +196,3 @@ void led_blink_task(void *pvParameters);
 #ifdef __cplusplus
 }
 #endif
-

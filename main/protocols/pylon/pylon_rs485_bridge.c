@@ -552,7 +552,7 @@ static void telemetryFromSummary(void)
     }
 
     snap.valid = true;
-    snprintf(snap.source, sizeof(snap.source), "BMS-cache");
+    snprintf(snap.source, sizeof(snap.source), "RS485_PYLON");
     snprintf(snap.protocol, sizeof(snap.protocol), "RS485_PYLON");
     snap.currentA = s_pylonSummary.current_a;
     snap.cycles = s_pylonSummary.cycles;

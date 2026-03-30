@@ -9,6 +9,9 @@ extern "C" {
 
 typedef struct {
     bool valid;
+    bool stale;
+    uint32_t updatedMs;
+    uint32_t ageMs;
     char source[24];
     char protocol[24];
     float currentA;
