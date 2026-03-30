@@ -249,15 +249,48 @@ static void canSnifferTask(void *pv)
 
 static void logRs485Frame(const char *ifName, const uint8_t *frame, int len)
 {
-    char hex[3 * WORKING_MODE_HEX_PRINT_LIMIT + 1];
-    bytesToHex(frame, len, hex, sizeof(hex));
+    const int chunkBytes = 24;
+    int offset = 0;
 
-    ESP_LOGI(EXAMPLE_TAG,
-             "SNIFFER %s: LEN=%d DATA=[%s]%s",
-             ifName,
-             len,
-             hex,
-             (len > WORKING_MODE_HEX_PRINT_LIMIT) ? " ..." : "");
+    ESP_LOGI(EXAMPLE_TAG, "SNIFFER %s: LEN=%d FRAME_BEGIN", ifName, len);
+
+    while (offset < len) {
+        char hex[3 * chunkBytes + 1];
+        char ascii[chunkBytes + 1];
+        int n = len - offset;
+        int pos = 0;
+
+        if (n > chunkBytes) {
+            n = chunkBytes;
+        }
+
+        for (int i = 0; i < n; i++) {
+            uint8_t ch = frame[offset + i];
+            ascii[i] = (char)((ch >= 32u && ch <= 126u) ? ch : '.');
+            pos += snprintf(&hex[pos], sizeof(hex) - (size_t)pos, "%02X ", ch);
+            if (pos >= (int)sizeof(hex)) {
+                break;
+            }
+        }
+        ascii[n] = '\0';
+        if (pos > 0) {
+            hex[pos - 1] = '\0';
+        } else {
+            hex[0] = '\0';
+        }
+
+        ESP_LOGI(EXAMPLE_TAG,
+                 "SNIFFER %s: CHUNK[%03d..%03d] ASCII=[%s] DATA=[%s]",
+                 ifName,
+                 offset,
+                 offset + n - 1,
+                 ascii,
+                 hex);
+
+        offset += n;
+    }
+
+    ESP_LOGI(EXAMPLE_TAG, "SNIFFER %s: LEN=%d FRAME_END", ifName, len);
 }
 
 static void rs485SnifferTask(void *pv)
