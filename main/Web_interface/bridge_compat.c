@@ -499,26 +499,43 @@ void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
     snprintf(out->source, sizeof(out->source), "runtime");
     snprintf(out->protocol, sizeof(out->protocol), "%s", protocolToStr(settings.bms_protocol));
 
+    bool usedManualCache = false;
+    bool manualCacheStale = false;
+    bool noManualCache = false;
+    uint32_t manualAge = 0u;
+    char manualSource[32] = {0};
+    uint8_t manualSoc = 0;
+
     portENTER_CRITICAL(&g_bridgeMux);
     if (g_haveManualTelemetry) {
         updatedMs = g_manualTelemetryUpdatedMs;
-        uint32_t manualAge = (nowMs >= g_manualTelemetryUpdatedMs) ? (nowMs - g_manualTelemetryUpdatedMs) : 0u;
+        manualAge = (nowMs >= g_manualTelemetryUpdatedMs) ? (nowMs - g_manualTelemetryUpdatedMs) : 0u;
         if ((g_manualTelemetryUpdatedMs != 0u) &&
             ((nowMs - g_manualTelemetryUpdatedMs) <= WEB_TELEMETRY_STALE_MS)) {
             *out = g_manualTelemetry;
-            ESP_LOGD(BRIDGE_TAG, "[TELEM] Using manual cache: age=%u ms, source=%s, valid=%s, soc=%u%%",
-                     manualAge, g_manualTelemetry.source, g_manualTelemetry.valid ? "YES" : "NO",
-                     g_manualTelemetry.socPct);
+            usedManualCache = true;
+            snprintf(manualSource, sizeof(manualSource), "%s", g_manualTelemetry.source);
+            manualSoc = g_manualTelemetry.socPct;
         } else if (g_manualTelemetryUpdatedMs != 0u) {
             manualStale = true;
+            manualCacheStale = true;
             g_haveManualTelemetry = false;
-            ESP_LOGD(BRIDGE_TAG, "[TELEM] Manual cache STALE: age=%u ms > threshold=%d ms",
-                     manualAge, WEB_TELEMETRY_STALE_MS);
         }
     } else {
-        ESP_LOGD(BRIDGE_TAG, "[TELEM] No manual cache available");
+        noManualCache = true;
     }
     portEXIT_CRITICAL(&g_bridgeMux);
+
+    /* Log after exiting critical section to avoid potential deadlock */
+    if (usedManualCache) {
+        ESP_LOGD(BRIDGE_TAG, "[TELEM] Using manual cache: age=%u ms, source=%s, valid=%s, soc=%u%%",
+                 manualAge, manualSource, out->valid ? "YES" : "NO", manualSoc);
+    } else if (manualCacheStale) {
+        ESP_LOGD(BRIDGE_TAG, "[TELEM] Manual cache STALE: age=%u ms > threshold=%d ms",
+                 manualAge, WEB_TELEMETRY_STALE_MS);
+    } else if (noManualCache) {
+        ESP_LOGD(BRIDGE_TAG, "[TELEM] No manual cache available");
+    }
 
     ESP_LOGD(BRIDGE_TAG, "[TELEM] Before fill: valid=%s, source=%s",
              out->valid ? "YES" : "NO", out->source);
@@ -573,22 +590,31 @@ void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
 void bridgeSetTelemetrySnapshot(const bridgeTelemetrySnapshot_t *in)
 {
     uint32_t nowMs = bridgeNowMs();
+    bool didClear = false;
+    bool didUpdate = false;
+    bool didIgnore = false;
+    char logSource[32] = {0};
+    uint8_t logSoc = 0;
+    float logVoltage = 0.0f;
 
     portENTER_CRITICAL(&g_bridgeMux);
     if (in == NULL) {
-        ESP_LOGI(BRIDGE_TAG, "[TELEM_SET] Clearing manual cache (NULL input)");
+        didClear = true;
         memset(&g_manualTelemetry, 0, sizeof(g_manualTelemetry));
         memset(&g_universalBatteryModel, 0, sizeof(g_universalBatteryModel));
         g_haveManualTelemetry = false;
         g_manualTelemetryUpdatedMs = 0u;
     } else {
         if (!in->valid && g_haveManualTelemetry && g_manualTelemetry.valid) {
-            ESP_LOGD(BRIDGE_TAG, "[TELEM_SET] Ignoring invalid update (existing cache is valid)");
+            didIgnore = true;
             portEXIT_CRITICAL(&g_bridgeMux);
+            ESP_LOGD(BRIDGE_TAG, "[TELEM_SET] Ignoring invalid update (existing cache is valid)");
             return;
         }
-        ESP_LOGI(BRIDGE_TAG, "[TELEM_SET] Updating manual cache: source=%s, valid=%s, soc=%u%%, v=%.2fV",
-                 in->source, in->valid ? "YES" : "NO", in->socPct, (double)in->packVoltageV);
+        didUpdate = true;
+        snprintf(logSource, sizeof(logSource), "%s", in->source);
+        logSoc = in->socPct;
+        logVoltage = in->packVoltageV;
         g_manualTelemetry = *in;
         g_manualTelemetry.updatedMs = in->valid ? nowMs : 0u;
         g_manualTelemetry.ageMs = 0u;
@@ -615,6 +641,14 @@ void bridgeSetTelemetrySnapshot(const bridgeTelemetrySnapshot_t *in)
         g_universalBatteryModel.updatedMs = in->valid ? nowMs : 0u;
     }
     portEXIT_CRITICAL(&g_bridgeMux);
+
+    /* Log after exiting critical section to avoid potential deadlock */
+    if (didClear) {
+        ESP_LOGI(BRIDGE_TAG, "[TELEM_SET] Clearing manual cache (NULL input)");
+    } else if (didUpdate) {
+        ESP_LOGI(BRIDGE_TAG, "[TELEM_SET] Updating manual cache: source=%s, valid=%s, soc=%u%%, v=%.2fV",
+                 logSource, in->valid ? "YES" : "NO", logSoc, (double)logVoltage);
+    }
 }
 
 void bridgeGetUniversalBatteryModel(universal_battery_model_t *out)
