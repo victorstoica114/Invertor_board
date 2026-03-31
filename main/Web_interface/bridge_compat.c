@@ -479,30 +479,45 @@ void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
     bridge_runtime_settings_t settings = runtimeSettingsGet();
     uint32_t nowMs = bridgeNowMs();
     uint32_t updatedMs = 0u;
-    bool manualStale = false;
+    uint32_t manualStaleMs = 0u;
+    bool manualFresh = false;
+    bridgeTelemetrySnapshot_t manual = {0};
+    bridgeTelemetrySnapshot_t live = {0};
+    uint32_t liveUpdatedMs = 0u;
 
     if (out == NULL) {
         return;
     }
 
     memset(out, 0, sizeof(*out));
-    snprintf(out->source, sizeof(out->source), "runtime");
-    snprintf(out->protocol, sizeof(out->protocol), "%s", protocolToStr(settings.bms_protocol));
 
     portENTER_CRITICAL(&g_bridgeMux);
     if (g_haveManualTelemetry) {
         updatedMs = g_manualTelemetryUpdatedMs;
         if ((g_manualTelemetryUpdatedMs != 0u) &&
             ((nowMs - g_manualTelemetryUpdatedMs) <= WEB_TELEMETRY_STALE_MS)) {
-            *out = g_manualTelemetry;
+            manual = g_manualTelemetry;
+            manualFresh = true;
         } else if (g_manualTelemetryUpdatedMs != 0u) {
-            manualStale = true;
+            manualStaleMs = g_manualTelemetryUpdatedMs;
             g_haveManualTelemetry = false;
         }
     }
     portEXIT_CRITICAL(&g_bridgeMux);
 
-    fillTelemetryFromLatestPacket(out, &updatedMs);
+    fillTelemetryFromLatestPacket(&live, &liveUpdatedMs);
+
+    if (live.valid) {
+        *out = live;
+        updatedMs = liveUpdatedMs;
+    } else if (manualFresh) {
+        *out = manual;
+        updatedMs = g_manualTelemetryUpdatedMs;
+    } else {
+        snprintf(out->source, sizeof(out->source), "runtime");
+        snprintf(out->protocol, sizeof(out->protocol), "%s", protocolToStr(settings.bms_protocol));
+        updatedMs = manualStaleMs;
+    }
 
     if (updatedMs != 0u) {
         out->updatedMs = updatedMs;
@@ -513,12 +528,14 @@ void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
 
     {
         bool ageStale = (out->updatedMs != 0u) && (out->ageMs > WEB_TELEMETRY_STALE_MS);
-        out->stale = ageStale || (manualStale && (updatedMs == 0u));
+        out->stale = ageStale || ((manualStaleMs != 0u) && (updatedMs == manualStaleMs));
     }
 
     if (out->stale) {
         char protocol[sizeof(out->protocol)] = {0};
-        snprintf(protocol, sizeof(protocol), "%s", out->protocol);
+        const char *fallbackProtocol = protocolToStr(settings.bms_protocol);
+
+        snprintf(protocol, sizeof(protocol), "%s", out->protocol[0] != '\0' ? out->protocol : fallbackProtocol);
         memset(out, 0, sizeof(*out));
         snprintf(out->protocol, sizeof(out->protocol), "%s", protocol);
         out->stale = true;
