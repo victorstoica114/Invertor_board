@@ -213,6 +213,12 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
     snap.tempT1C = tempMinTentative;
     snap.tempT2C = tempMaxTentative;
     snap.pylonStatus63 = status35C;
+
+    ESP_LOGI("PYLON_CAN", "[PYLON_DECODE] Setting manual cache: valid=%s, source=%s, soc=%u%%, "
+             "v=%.2fV, i=%.1fA, modules=%u",
+             snap.valid ? "YES" : "NO", snap.source, snap.socPct,
+             (double)packVolt, (double)packCurrent, moduleCount);
+
     bridgeSetTelemetrySnapshot(&snap);
 
     model.valid = snap.valid;

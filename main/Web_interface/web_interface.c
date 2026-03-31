@@ -521,6 +521,11 @@ static esp_err_t telemetryHandler(httpd_req_t *req)
 
     bridgeGetTelemetrySnapshot(&snap);
 
+    ESP_LOGI(WEB_TAG, "[API_TELEMETRY] Returning: valid=%s, stale=%s, source=%s, soc=%u%%, "
+             "v=%.2fV, age=%u ms",
+             snap.valid ? "YES" : "NO", snap.stale ? "YES" : "NO",
+             snap.source, snap.socPct, (double)snap.packVoltageV, snap.ageMs);
+
     pos += snprintf(json + pos,
                     sizeof(json) - pos,
                     "{"
