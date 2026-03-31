@@ -511,6 +511,15 @@ void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
         out->ageMs = 0u;
     }
 
+    /* Override source with user-friendly interface name (CAN1, RS485_1, etc.) before stale check */
+    if (out->valid) {
+        char iface[16] = {0};
+        bridgeFormatBmsInterface(iface, sizeof(iface), &settings);
+        if (iface[0] != '\0') {
+            snprintf(out->source, sizeof(out->source), "%s", iface);
+        }
+    }
+
     {
         bool ageStale = (out->updatedMs != 0u) && (out->ageMs > WEB_TELEMETRY_STALE_MS);
         out->stale = ageStale || (manualStale && (updatedMs == 0u));
@@ -525,14 +534,6 @@ void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
         out->updatedMs = updatedMs;
         out->ageMs = (updatedMs != 0u && nowMs >= updatedMs) ? (nowMs - updatedMs) : 0u;
         return;
-    }
-
-    if (out->valid) {
-        char iface[16] = {0};
-        bridgeFormatBmsInterface(iface, sizeof(iface), &settings);
-        if (iface[0] != '\0') {
-            snprintf(out->source, sizeof(out->source), "%s", iface);
-        }
     }
 }
 
