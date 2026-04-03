@@ -15,6 +15,7 @@ typedef struct {
 typedef struct {
     bool valid;
     float current_a;
+    uint16_t pack_voltage_cv;
     uint16_t cycles;
     uint8_t soc_pct;
     uint8_t soh_pct;

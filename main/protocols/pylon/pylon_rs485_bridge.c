@@ -566,6 +566,7 @@ static void telemetryFromSummary(void)
     char iface[12] = {0};
 
     if (!s_pylonSummary.valid) {
+        ESP_LOGD("PYLON_RS485", "[TELEM_FROM_SUMMARY] Summary invalid, clearing telemetry");
         bridgeSetTelemetrySnapshot(NULL);
         return;
     }
@@ -586,6 +587,7 @@ static void telemetryFromSummary(void)
     }
     snprintf(snap.protocol, sizeof(snap.protocol), "%s", protocolToStrLocal(settings.bms_protocol));
     snap.currentA = s_pylonSummary.current_a;
+    snap.packVoltageV = (float)s_pylonSummary.pack_voltage_cv / 100.0f;
     snap.cycles = s_pylonSummary.cycles;
     snap.socPct = s_pylonSummary.soc_pct;
     snap.sohPct = s_pylonSummary.soh_pct;
@@ -600,6 +602,11 @@ static void telemetryFromSummary(void)
     snap.tempT4C = (float)s_pylonSummary.temp_t4_c10 / 10.0f;
     snap.tempT5C = (float)s_pylonSummary.temp_t5_c10 / 10.0f;
     snap.pylonStatus63 = s_pylonSummary.status_63;
+
+    ESP_LOGI("PYLON_RS485", "[TELEM_FROM_SUMMARY] Setting telemetry from RS485 summary: "
+             "valid=%s, soc=%u%%, v=%.2fV (cv=%u), i=%.1fA",
+             snap.valid ? "YES" : "NO", snap.socPct, (double)snap.packVoltageV,
+             s_pylonSummary.pack_voltage_cv, (double)snap.currentA);
 
     bridgeSetTelemetrySnapshot(&snap);
 }
@@ -765,6 +772,7 @@ static void updateSummary61(void)
 
     s_pylonSummary.valid = true;
     s_pylonSummary.raw_word0 = be16(&bytes[0]);
+    s_pylonSummary.pack_voltage_cv = be16(&bytes[0]);
     s_pylonSummary.current_a = (float)be16s(&bytes[2]) / 100.0f;
     s_pylonSummary.soc_pct = bytes[4];
     s_pylonSummary.cycles = be16(&bytes[5]);
@@ -782,7 +790,8 @@ static void updateSummary61(void)
     if (pylonDiagLogsEnabled()) {
         ESP_LOGI(EXAMPLE_TAG, "RS485 PYLON 0x61");
         ESP_LOGI(EXAMPLE_TAG,
-                 "  pack : I~=%.2fA  SOC~=%u%%  SOH?~=%u%%  cycles~=%u  w0=0x%04X",
+                 "  pack : V~=%.2fV I~=%.2fA  SOC~=%u%%  SOH?~=%u%%  cycles~=%u  w0=0x%04X",
+                 (double)s_pylonSummary.pack_voltage_cv / 100.0,
                  (double)s_pylonSummary.current_a,
                  (unsigned)s_pylonSummary.soc_pct,
                  (unsigned)s_pylonSummary.soh_pct,
