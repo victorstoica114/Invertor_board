@@ -592,7 +592,6 @@ void bridgeSetTelemetrySnapshot(const bridgeTelemetrySnapshot_t *in)
     uint32_t nowMs = bridgeNowMs();
     bool didClear = false;
     bool didUpdate = false;
-    bool didIgnore = false;
     char logSource[32] = {0};
     uint8_t logSoc = 0;
     float logVoltage = 0.0f;
@@ -606,7 +605,6 @@ void bridgeSetTelemetrySnapshot(const bridgeTelemetrySnapshot_t *in)
         g_manualTelemetryUpdatedMs = 0u;
     } else {
         if (!in->valid && g_haveManualTelemetry && g_manualTelemetry.valid) {
-            didIgnore = true;
             portEXIT_CRITICAL(&g_bridgeMux);
             ESP_LOGD(BRIDGE_TAG, "[TELEM_SET] Ignoring invalid update (existing cache is valid)");
             return;
