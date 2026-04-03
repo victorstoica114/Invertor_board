@@ -310,14 +310,18 @@ static void logCellDebug(const modbusDecoder_t *decoder,
                          const jkbms_modbus_snapshot_t *snapshot,
                          int64_t nowUs)
 {
-    char decA[320];
-    char decB[320];
-    char decC[320];
-    char decD[320];
-    char rawA[320];
-    char rawB[320];
-    char rawC[320];
-    char rawD[320];
+    /*
+     * Keep these buffers static so periodic debug formatting does not consume
+     * several kilobytes of task stack inside the JKBMS polling task.
+     */
+    static char decA[320];
+    static char decB[320];
+    static char decC[320];
+    static char decD[320];
+    static char rawA[320];
+    static char rawB[320];
+    static char rawC[320];
+    static char rawD[320];
 
     if (decoder == NULL || snapshot == NULL) {
         return;

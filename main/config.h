@@ -137,7 +137,7 @@
 #define JKBMS_BMS_MODBUS_GAP_US        5000
 #define JKBMS_BMS_QUERY_PERIOD_MS      250
 #define JKBMS_BMS_PUBLISH_PERIOD_MS    250
-#define JKBMS_BMS_TASK_STACK           4096
+#define JKBMS_BMS_TASK_STACK           6144
 #define JKBMS_BMS_TASK_PRIORITY        10
 
 /* --- Pylon placeholders --- */

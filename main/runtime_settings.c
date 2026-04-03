@@ -33,6 +33,14 @@ static bridge_runtime_settings_t defaultSettings(void)
 
 static bool validateSettings(const bridge_runtime_settings_t *s)
 {
+    const bool unsupportedJkbmsToPylon =
+        (s != NULL) &&
+        (s->mode == MODE_BRIDGE) &&
+        (s->bms_line == LINE_RS485) &&
+        (s->bms_protocol == PROTOCOL_RS485_JKBMS) &&
+        (s->inverter_line == LINE_RS485) &&
+        (s->inverter_protocol == PROTOCOL_RS485_PYLON);
+
     if (s == NULL) {
         return false;
     }
@@ -92,6 +100,9 @@ static bool validateSettings(const bridge_runtime_settings_t *s)
     if ((s->inverter_line == LINE_RS485) &&
         (s->inverter_protocol != PROTOCOL_RS485_GROWATT) &&
         (s->inverter_protocol != PROTOCOL_RS485_PYLON)) {
+        return false;
+    }
+    if (unsupportedJkbmsToPylon) {
         return false;
     }
     return true;
