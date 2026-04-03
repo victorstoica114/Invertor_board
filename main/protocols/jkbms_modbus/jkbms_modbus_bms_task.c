@@ -7,6 +7,7 @@
 #include "config.h"
 #include "decoders/modbusDecoder.h"
 #include "orchestrator/protocol_types.h"
+#include "protocols/common/battery_model.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_poller.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_registers_map.h"
 #include "runtime_settings.h"
@@ -67,6 +68,64 @@ static void jkbmsStoreLatestSnapshot(const jkbms_modbus_snapshot_t *snapshot)
     g_latestSnapshot = *snapshot;
     g_haveLatestSnapshot = true;
     portEXIT_CRITICAL(&g_latestPacketMux);
+}
+
+static void jkbmsPublishBatteryModel(const jkbms_modbus_snapshot_t *snapshot, int64_t nowUs)
+{
+    battery_model_t model = {0};
+
+    if (snapshot == NULL || !snapshot->valid) {
+        return;
+    }
+
+    model.valid = true;
+    model.updatedMs = (uint32_t)(nowUs / 1000LL);
+
+    if (snapshot->hasPackVoltageMv) {
+        model.packVoltageV = (float)snapshot->packVoltageMv / 1000.0f;
+    }
+    if (snapshot->hasPackCurrentMa) {
+        model.packCurrentA = (float)snapshot->packCurrentMa / 1000.0f;
+    }
+    if (snapshot->hasSoc) {
+        model.socPct = snapshot->socPct;
+    }
+    if (snapshot->hasSoh) {
+        model.sohPct = snapshot->sohPct;
+    }
+    if (snapshot->hasCycles) {
+        model.cycleCount = (snapshot->cycles > UINT16_MAX) ? UINT16_MAX : (uint16_t)snapshot->cycles;
+    }
+    if (snapshot->hasCellExtremes) {
+        model.cellMaxV = (float)snapshot->maxCellMv / 1000.0f;
+        model.cellMinV = (float)snapshot->minCellMv / 1000.0f;
+        model.cellMaxIdx = snapshot->maxCellIndex;
+        model.cellMinIdx = snapshot->minCellIndex;
+    }
+    if (snapshot->hasCellDiffMaxMv) {
+        model.cellDeltaV = (float)snapshot->cellDiffMaxMv / 1000.0f;
+    } else if (snapshot->hasCellExtremes && snapshot->maxCellMv >= snapshot->minCellMv) {
+        model.cellDeltaV = (float)(snapshot->maxCellMv - snapshot->minCellMv) / 1000.0f;
+    }
+    if (snapshot->hasTempMosC) {
+        model.temperaturesC[0] = (float)snapshot->tempMosC;
+    }
+    if (snapshot->hasTempBat1C) {
+        model.temperaturesC[1] = (float)snapshot->tempBat1C;
+    }
+    if (snapshot->hasTempBat2C) {
+        model.temperaturesC[2] = (float)snapshot->tempBat2C;
+    }
+    if (snapshot->hasBalanceCurrentMa) {
+        model.balanceEnabled = (snapshot->balanceCurrentMa != 0);
+    }
+    if (snapshot->hasAlarmBits) {
+        model.alarmsMask = snapshot->alarmBits & 0x0000FFFFu;
+        model.warningsMask = snapshot->alarmBits >> 16;
+        model.protocolState = snapshot->alarmBits;
+    }
+
+    batteryModelSet(&model);
 }
 
 static bool decoderGetU16(const modbusDecoder_t *decoder, uint16_t reg, uint16_t *out)
@@ -1101,6 +1160,7 @@ static void jkbmsModbusBmsTask(void *pv)
             jkbms_modbus_snapshot_t snapshot = {0};
             if (buildDecodedSnapshot(&ctx->decoder, &snapshot)) {
                 jkbmsStoreLatestSnapshot(&snapshot);
+                jkbmsPublishBatteryModel(&snapshot, nowUs);
                 logCellDebug(&ctx->decoder, &snapshot, nowUs);
 
                 bms_decoded_packet_t packet = {0};
@@ -1129,6 +1189,7 @@ esp_err_t jkbmsModbusBmsTaskStart(QueueHandle_t outQueue)
     g_jkbmsModbusBmsCtx.outQueue = outQueue;
     g_lastCellDebugLogUs = 0;
     memset(&g_lastGoodCellMap, 0, sizeof(g_lastGoodCellMap));
+    batteryModelClear();
 
     portENTER_CRITICAL(&g_latestPacketMux);
     g_haveLatestPacket = false;
@@ -1203,6 +1264,7 @@ esp_err_t jkbmsModbusBmsTaskStop(void)
     memset(&g_jkbmsModbusBmsCtx, 0, sizeof(g_jkbmsModbusBmsCtx));
     g_lastCellDebugLogUs = 0;
     memset(&g_lastGoodCellMap, 0, sizeof(g_lastGoodCellMap));
+    batteryModelClear();
 
     portENTER_CRITICAL(&g_latestPacketMux);
     g_haveLatestPacket = false;

@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "protocols/common/battery_model.h"
+
 #include "esp_log.h"
 
 /*
@@ -259,7 +261,7 @@ void deyeCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, s
     model.dischargeEnabled = dischargeEnabled;
     model.balanceEnabled = balanceEnabled;
     model.protocolState = status35C;
-    bridgeSetUniversalBatteryModel(&model);
+    batteryModelSet(&model);
 
     snprintf(s_deyeCanLogText,
              sizeof(s_deyeCanLogText),
