@@ -131,7 +131,7 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
     memcpy(local, src, sizeof(local));
     portEXIT_CRITICAL(&g_canBmsCacheMux);
 
-    batteryModelGet(&model);
+    batteryModelGetReal(&model);
 
     if (canPylonGetFrameById(local, 0x355u, &f355) && f355->dlc >= 4u) {
         uint16_t soc = can_le16(&f355->data[0]);

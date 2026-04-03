@@ -14,6 +14,7 @@
 #include "protocols/pylon/pylon_bms_task.h"
 #include "protocols/pylon/pylon_inverter_task.h"
 #include "protocols/rs485_growatt/rs485_growatt_bridge.h"
+#include "protocols/common/battery_model.h"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -181,6 +182,50 @@ static bool isRsJkbmsToRsGrowattRoute(const bridge_runtime_settings_t *settings)
            (settings->inverter_protocol == PROTOCOL_RS485_GROWATT);
 }
 
+static bool buildPacketFromBatteryModel(bms_decoded_packet_t *out)
+{
+    battery_model_t model = {0};
+
+    if (out == NULL) {
+        return false;
+    }
+
+    batteryModelGet(&model);
+    if (!model.valid || model.updatedMs == 0u) {
+        return false;
+    }
+
+    memset(out, 0, sizeof(*out));
+    out->sourceProtocol = PROTOCOL_ID_JKBMS;
+    out->timestampUs = esp_timer_get_time();
+
+    out->hasSoc = true;
+    out->socPct = model.socPct;
+
+    if (model.temperaturesC[0] > -100.0f) {
+        out->hasTemperatureC = true;
+        out->temperatureC = (int16_t)model.temperaturesC[0];
+    }
+
+    if (model.packVoltageV > 0.0f) {
+        uint32_t packCv = (uint32_t)(model.packVoltageV * 100.0f + 0.5f);
+        out->hasPackVoltageCv = true;
+        out->packVoltageCv = (uint16_t)((packCv > UINT16_MAX) ? UINT16_MAX : packCv);
+    }
+
+    if (model.cellMaxV > 0.0f && model.cellMinV > 0.0f) {
+        uint32_t maxMv = (uint32_t)(model.cellMaxV * 1000.0f + 0.5f);
+        uint32_t minMv = (uint32_t)(model.cellMinV * 1000.0f + 0.5f);
+        out->hasCellExtremes = true;
+        out->maxCellMv = (uint16_t)((maxMv > UINT16_MAX) ? UINT16_MAX : maxMv);
+        out->minCellMv = (uint16_t)((minMv > UINT16_MAX) ? UINT16_MAX : minMv);
+        out->maxCellIndex = model.cellMaxIdx;
+        out->minCellIndex = model.cellMinIdx;
+    }
+
+    return out->hasSoc || out->hasTemperatureC || out->hasPackVoltageCv || out->hasCellExtremes;
+}
+
 static bool isRsJkbmsToRsPylonRoute(const bridge_runtime_settings_t *settings)
 {
     if (settings == NULL) {
@@ -224,6 +269,13 @@ static void orchestratorTask(void *pv)
         bms_decoded_packet_t packet = {0};
         if (xQueueReceive(ctx->bmsQueue, &packet, portMAX_DELAY) != pdTRUE) {
             continue;
+        }
+
+        if (batteryModelIsDebugOverrideEnabled()) {
+            bms_decoded_packet_t fakePacket = {0};
+            if (buildPacketFromBatteryModel(&fakePacket)) {
+                packet = fakePacket;
+            }
         }
 
         const int64_t nowUs = esp_timer_get_time();
