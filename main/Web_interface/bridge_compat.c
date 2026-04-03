@@ -7,6 +7,7 @@
 #include "modes/mode_manager.h"
 #include "config.h"
 #include "orchestrator/protocol_types.h"
+#include "protocols/common/battery_model.h"
 #include "protocols/growatt/growatt_bms_task.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_bms_task.h"
 #include "rs485_can_bridge.h"
@@ -19,7 +20,6 @@
 #define BRIDGE_TAG "BRIDGE_COMPAT"
 
 static bridgeTelemetrySnapshot_t g_manualTelemetry;
-static universal_battery_model_t g_universalBatteryModel;
 static bool g_haveManualTelemetry;
 static uint32_t g_manualTelemetryUpdatedMs;
 static char g_decodedLog[2048];
@@ -30,14 +30,31 @@ static uint32_t bridgeNowMs(void)
     return (uint32_t)(esp_timer_get_time() / 1000LL);
 }
 
-static bool bridgeUniversalBatteryModelIsFresh(const universal_battery_model_t *model)
+static void fillBatteryModelFromTelemetry(const bridgeTelemetrySnapshot_t *in,
+                                          universal_battery_model_t *out)
 {
-    uint32_t nowMs = bridgeNowMs();
-
-    if (model == NULL || !model->valid || model->updatedMs == 0u) {
-        return false;
+    if (in == NULL || out == NULL) {
+        return;
     }
-    return (nowMs - model->updatedMs) <= BRIDGE_SOURCE_STALE_MS;
+
+    memset(out, 0, sizeof(*out));
+    out->valid = in->valid;
+    out->packVoltageV = in->packVoltageV;
+    out->packCurrentA = in->currentA;
+    out->socPct = in->socPct;
+    out->sohPct = in->sohPct;
+    out->cycleCount = in->cycles;
+    out->cellMaxV = in->cellMaxV;
+    out->cellMinV = in->cellMinV;
+    out->cellMaxIdx = in->cellMaxIdx;
+    out->cellMinIdx = in->cellMinIdx;
+    out->cellDeltaV = in->deltaV;
+    out->temperaturesC[0] = in->tempMosC;
+    out->temperaturesC[1] = in->tempT1C;
+    out->temperaturesC[2] = in->tempT2C;
+    out->temperaturesC[3] = in->tempT4C;
+    out->temperaturesC[4] = in->tempT5C;
+    out->protocolState = in->pylonStatus63;
 }
 
 static const char *modeToStr(uint8_t mode)
@@ -600,7 +617,6 @@ void bridgeSetTelemetrySnapshot(const bridgeTelemetrySnapshot_t *in)
     if (in == NULL) {
         didClear = true;
         memset(&g_manualTelemetry, 0, sizeof(g_manualTelemetry));
-        memset(&g_universalBatteryModel, 0, sizeof(g_universalBatteryModel));
         g_haveManualTelemetry = false;
         g_manualTelemetryUpdatedMs = 0u;
     } else {
@@ -619,26 +635,16 @@ void bridgeSetTelemetrySnapshot(const bridgeTelemetrySnapshot_t *in)
         g_manualTelemetry.stale = false;
         g_manualTelemetryUpdatedMs = g_manualTelemetry.updatedMs;
         g_haveManualTelemetry = true;
-        g_universalBatteryModel.valid = in->valid;
-        g_universalBatteryModel.packVoltageV = in->packVoltageV;
-        g_universalBatteryModel.packCurrentA = in->currentA;
-        g_universalBatteryModel.socPct = in->socPct;
-        g_universalBatteryModel.sohPct = in->sohPct;
-        g_universalBatteryModel.cycleCount = in->cycles;
-        g_universalBatteryModel.cellMaxV = in->cellMaxV;
-        g_universalBatteryModel.cellMinV = in->cellMinV;
-        g_universalBatteryModel.cellMaxIdx = in->cellMaxIdx;
-        g_universalBatteryModel.cellMinIdx = in->cellMinIdx;
-        g_universalBatteryModel.cellDeltaV = in->deltaV;
-        g_universalBatteryModel.temperaturesC[0] = in->tempMosC;
-        g_universalBatteryModel.temperaturesC[1] = in->tempT1C;
-        g_universalBatteryModel.temperaturesC[2] = in->tempT2C;
-        g_universalBatteryModel.temperaturesC[3] = in->tempT4C;
-        g_universalBatteryModel.temperaturesC[4] = in->tempT5C;
-        g_universalBatteryModel.protocolState = in->pylonStatus63;
-        g_universalBatteryModel.updatedMs = in->valid ? nowMs : 0u;
     }
     portEXIT_CRITICAL(&g_bridgeMux);
+
+    if (in == NULL) {
+        batteryModelClear();
+    } else {
+        universal_battery_model_t model = {0};
+        fillBatteryModelFromTelemetry(in, &model);
+        batteryModelSet(&model);
+    }
 
     /* Log after exiting critical section to avoid potential deadlock */
     if (didClear) {
@@ -651,37 +657,12 @@ void bridgeSetTelemetrySnapshot(const bridgeTelemetrySnapshot_t *in)
 
 void bridgeGetUniversalBatteryModel(universal_battery_model_t *out)
 {
-    if (out == NULL) {
-        return;
-    }
-
-    portENTER_CRITICAL(&g_bridgeMux);
-    *out = g_universalBatteryModel;
-    portEXIT_CRITICAL(&g_bridgeMux);
-
-    if (!bridgeUniversalBatteryModelIsFresh(out)) {
-        memset(out, 0, sizeof(*out));
-    }
+    batteryModelGet(out);
 }
 
 void bridgeSetUniversalBatteryModel(const universal_battery_model_t *in)
 {
-    uint32_t nowMs = bridgeNowMs();
-
-    portENTER_CRITICAL(&g_bridgeMux);
-    if (in == NULL) {
-        memset(&g_universalBatteryModel, 0, sizeof(g_universalBatteryModel));
-    } else {
-        g_universalBatteryModel = *in;
-        if (g_universalBatteryModel.valid) {
-            if (g_universalBatteryModel.updatedMs == 0u) {
-                g_universalBatteryModel.updatedMs = nowMs;
-            }
-        } else {
-            g_universalBatteryModel.updatedMs = 0u;
-        }
-    }
-    portEXIT_CRITICAL(&g_bridgeMux);
+    batteryModelSet(in);
 }
 
 void bridgeGetDecodedLogSnapshot(char *out, uint32_t outSize)

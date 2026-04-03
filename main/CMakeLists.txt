@@ -13,6 +13,7 @@ idf_component_register(
         "decoders/modbusDecoder.c"
         "orchestrator/orchestrator.c"
         "modes/can_forward_sniffer.c"
+        "protocols/common/battery_model.c"
         "protocols/pylon/pylon_rs485_bridge.c"
         "protocols/pylon/pylon_can_protocol.c"
         "protocols/deye/deye_can_protocol.c"
