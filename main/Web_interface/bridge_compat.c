@@ -7,7 +7,6 @@
 #include "modes/mode_manager.h"
 #include "config.h"
 #include "orchestrator/protocol_types.h"
-#include "protocols/common/battery_model.h"
 #include "protocols/growatt/growatt_bms_task.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_bms_task.h"
 #include "protocols/rs485_growatt/rs485_growatt_bridge.h"
@@ -28,33 +27,6 @@ static portMUX_TYPE g_bridgeMux = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t bridgeNowMs(void)
 {
     return (uint32_t)(esp_timer_get_time() / 1000LL);
-}
-
-static void fillBatteryModelFromTelemetry(const bridgeTelemetrySnapshot_t *in,
-                                          universal_battery_model_t *out)
-{
-    if (in == NULL || out == NULL) {
-        return;
-    }
-
-    memset(out, 0, sizeof(*out));
-    out->valid = in->valid;
-    out->packVoltageV = in->packVoltageV;
-    out->packCurrentA = in->currentA;
-    out->socPct = in->socPct;
-    out->sohPct = in->sohPct;
-    out->cycleCount = in->cycles;
-    out->cellMaxV = in->cellMaxV;
-    out->cellMinV = in->cellMinV;
-    out->cellMaxIdx = in->cellMaxIdx;
-    out->cellMinIdx = in->cellMinIdx;
-    out->cellDeltaV = in->deltaV;
-    out->temperaturesC[0] = in->tempMosC;
-    out->temperaturesC[1] = in->tempT1C;
-    out->temperaturesC[2] = in->tempT2C;
-    out->temperaturesC[3] = in->tempT4C;
-    out->temperaturesC[4] = in->tempT5C;
-    out->protocolState = in->pylonStatus63;
 }
 
 static const char *modeToStr(uint8_t mode)
@@ -627,14 +599,6 @@ void bridgeSetTelemetrySnapshot(const bridgeTelemetrySnapshot_t *in)
         g_haveManualTelemetry = true;
     }
     portEXIT_CRITICAL(&g_bridgeMux);
-
-    if (in == NULL) {
-        batteryModelClear();
-    } else {
-        universal_battery_model_t model = {0};
-        fillBatteryModelFromTelemetry(in, &model);
-        batteryModelSet(&model);
-    }
 
     /* Log after exiting critical section to avoid potential deadlock */
     if (didClear) {
