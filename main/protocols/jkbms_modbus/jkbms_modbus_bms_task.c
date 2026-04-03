@@ -220,6 +220,8 @@ typedef struct {
     uint16_t cellMv[JKBMS_MAX_CELLS];
 } cell_decode_candidate_t;
 
+#define JKBMS_CELL_OFFSET_CORRECTION_MV 1200u
+
 /*
  * Current JK setup used with this bridge is 16S. When pack-derived hint is
  * missing/noisy, keep a stable default to avoid sparse maps drifting to 32 cells.
@@ -285,6 +287,110 @@ static bool normalizeCellMv(uint16_t raw, uint16_t *mvOut)
     if (mvOut != NULL) {
         *mvOut = best;
     }
+    return true;
+}
+
+static void recomputeCellStats(jkbms_modbus_snapshot_t *snapshot)
+{
+    uint32_t sumMv = 0u;
+    uint8_t validCells = 0u;
+    uint16_t minMv = UINT16_MAX;
+    uint16_t maxMv = 0u;
+    uint8_t minIdx = 0u;
+    uint8_t maxIdx = 0u;
+
+    if (snapshot == NULL || snapshot->cellCount == 0u) {
+        return;
+    }
+
+    for (uint8_t i = 0u; i < snapshot->cellCount; i++) {
+        const uint16_t mv = snapshot->cellMv[i];
+        if (mv < 2000u || mv > 5000u) {
+            continue;
+        }
+        validCells++;
+        sumMv += mv;
+        if (mv < minMv) {
+            minMv = mv;
+            minIdx = (uint8_t)(i + 1u);
+        }
+        if (mv > maxMv) {
+            maxMv = mv;
+            maxIdx = (uint8_t)(i + 1u);
+        }
+    }
+
+    if (validCells >= 2u && minIdx != 0u && maxIdx != 0u) {
+        snapshot->hasCellExtremes = true;
+        snapshot->minCellMv = minMv;
+        snapshot->maxCellMv = maxMv;
+        snapshot->minCellIndex = minIdx;
+        snapshot->maxCellIndex = maxIdx;
+    } else {
+        snapshot->hasCellExtremes = false;
+        snapshot->minCellMv = 0u;
+        snapshot->maxCellMv = 0u;
+        snapshot->minCellIndex = 0u;
+        snapshot->maxCellIndex = 0u;
+    }
+
+    if (validCells > 0u) {
+        snapshot->hasCellAvgMv = true;
+        snapshot->cellAvgMv = (uint16_t)(sumMv / (uint32_t)validCells);
+    }
+
+    if (snapshot->hasCellExtremes && snapshot->maxCellMv >= snapshot->minCellMv) {
+        snapshot->hasCellDiffMaxMv = true;
+        snapshot->cellDiffMaxMv = (uint16_t)(snapshot->maxCellMv - snapshot->minCellMv);
+    }
+}
+
+static bool applyHighCellOffsetCorrectionIfNeeded(jkbms_modbus_snapshot_t *snapshot)
+{
+    uint8_t validCells = 0u;
+    uint16_t minMv = UINT16_MAX;
+    uint16_t maxMv = 0u;
+
+    if (snapshot == NULL || snapshot->cellCount < 4u) {
+        return false;
+    }
+
+    for (uint8_t i = 0u; i < snapshot->cellCount; i++) {
+        const uint16_t mv = snapshot->cellMv[i];
+        if (mv < 2000u || mv > 5000u) {
+            continue;
+        }
+        validCells++;
+        if (mv < minMv) {
+            minMv = mv;
+        }
+        if (mv > maxMv) {
+            maxMv = mv;
+        }
+    }
+
+    /*
+     * Some JK Modbus firmwares appear to expose cell voltages with an added
+     * ~1.2V offset. Values in the 4.4-4.7V range are impossible for the packs
+     * we bridge here, but subtracting 1.2V yields realistic ~3.2-3.5V cells.
+     */
+    if (validCells < 4u || minMv < 4200u || maxMv > 5000u) {
+        return false;
+    }
+
+    for (uint8_t i = 0u; i < snapshot->cellCount; i++) {
+        uint16_t mv = snapshot->cellMv[i];
+        if (mv < JKBMS_CELL_OFFSET_CORRECTION_MV || mv > 6000u) {
+            continue;
+        }
+        snapshot->cellMv[i] = (uint16_t)(mv - JKBMS_CELL_OFFSET_CORRECTION_MV);
+    }
+
+    if (snapshot->hasCellAvgMv && snapshot->cellAvgMv > JKBMS_CELL_OFFSET_CORRECTION_MV) {
+        snapshot->cellAvgMv = (uint16_t)(snapshot->cellAvgMv - JKBMS_CELL_OFFSET_CORRECTION_MV);
+    }
+
+    recomputeCellStats(snapshot);
     return true;
 }
 
@@ -979,6 +1085,28 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
         out->cellCount = 0u;
         memset(out->cellMv, 0, sizeof(out->cellMv));
         out->hasCellExtremes = false;
+    }
+
+    if (applyHighCellOffsetCorrectionIfNeeded(out)) {
+        ESP_LOGW(EXAMPLE_TAG,
+                 "JKBMS cell decode applied %umV offset correction: avg=%.3fV min=%.3fV max=%.3fV count=%u",
+                 (unsigned)JKBMS_CELL_OFFSET_CORRECTION_MV,
+                 (double)out->cellAvgMv / 1000.0,
+                 out->hasCellExtremes ? (double)out->minCellMv / 1000.0 : 0.0,
+                 out->hasCellExtremes ? (double)out->maxCellMv / 1000.0 : 0.0,
+                 (unsigned)out->cellCount);
+
+        if (out->cellCount >= 4u) {
+            g_lastGoodCellMap.valid = true;
+            g_lastGoodCellMap.cellCount = out->cellCount;
+            memcpy(g_lastGoodCellMap.cellMv, out->cellMv, sizeof(out->cellMv));
+            g_lastGoodCellMap.minCellMv = out->minCellMv;
+            g_lastGoodCellMap.maxCellMv = out->maxCellMv;
+            g_lastGoodCellMap.minCellIndex = out->minCellIndex;
+            g_lastGoodCellMap.maxCellIndex = out->maxCellIndex;
+            g_lastGoodCellMap.cellAvgMv = out->cellAvgMv;
+            g_lastGoodCellMap.cellDiffMaxMv = out->cellDiffMaxMv;
+        }
     }
 
     int16_t i16 = 0;
