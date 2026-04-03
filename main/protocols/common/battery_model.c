@@ -1,16 +1,47 @@
 #include "protocols/common/battery_model.h"
 
+#include <inttypes.h>
 #include <string.h>
 
 #include "config.h"
 
 #include "esp_timer.h"
+#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static battery_model_t g_batteryModel;
 static battery_model_t g_debugBatteryModel;
 static bool g_debugBatteryModelEnabled;
 static portMUX_TYPE g_batteryModelMux = portMUX_INITIALIZER_UNLOCKED;
+static int64_t g_lastBatteryModelTraceUs;
+
+static void batteryModelTraceWrite(const char *action, const battery_model_t *model)
+{
+    const int64_t nowUs = esp_timer_get_time();
+    const char *taskName = pcTaskGetName(NULL);
+
+    if ((nowUs - g_lastBatteryModelTraceUs) < 200000LL) {
+        return;
+    }
+    g_lastBatteryModelTraceUs = nowUs;
+
+    ESP_LOGI("BATTERY_MODEL",
+             "%s by task=%s valid=%s V=%.2fV I=%.2fA soc=%u soh=%u cyc=%u chg=%u dis=%u bal=%u state=0x%02X upd=%" PRIu32,
+             (action != NULL) ? action : "set",
+             (taskName != NULL) ? taskName : "(null)",
+             (model != NULL && model->valid) ? "YES" : "NO",
+             (double)((model != NULL) ? model->packVoltageV : 0.0f),
+             (double)((model != NULL) ? model->packCurrentA : 0.0f),
+             (unsigned)((model != NULL) ? model->socPct : 0u),
+             (unsigned)((model != NULL) ? model->sohPct : 0u),
+             (unsigned)((model != NULL) ? model->cycleCount : 0u),
+             (unsigned)((model != NULL && model->chargeEnabled) ? 1u : 0u),
+             (unsigned)((model != NULL && model->dischargeEnabled) ? 1u : 0u),
+             (unsigned)((model != NULL && model->balanceEnabled) ? 1u : 0u),
+             (unsigned)((model != NULL) ? (model->protocolState & 0xFFu) : 0u),
+             (uint32_t)((model != NULL) ? model->updatedMs : 0u));
+}
 
 static uint32_t batteryModelNowMs(void)
 {
@@ -69,10 +100,12 @@ void batteryModelGetReal(battery_model_t *out)
 void batteryModelSet(const battery_model_t *in)
 {
     const uint32_t nowMs = batteryModelNowMs();
+    battery_model_t logged = {0};
 
     portENTER_CRITICAL(&g_batteryModelMux);
     if (in == NULL) {
         memset(&g_batteryModel, 0, sizeof(g_batteryModel));
+        logged = g_batteryModel;
     } else {
         g_batteryModel = *in;
         if (g_batteryModel.valid) {
@@ -82,8 +115,11 @@ void batteryModelSet(const battery_model_t *in)
         } else {
             g_batteryModel.updatedMs = 0u;
         }
+        logged = g_batteryModel;
     }
     portEXIT_CRITICAL(&g_batteryModelMux);
+
+    batteryModelTraceWrite((in == NULL) ? "clear" : "set", &logged);
 }
 
 void batteryModelClear(void)
@@ -113,10 +149,12 @@ void batteryModelGetDebugOverride(battery_model_t *out, bool *enabledOut)
 void batteryModelSetDebugOverride(const battery_model_t *in)
 {
     const uint32_t nowMs = batteryModelNowMs();
+    battery_model_t logged = {0};
 
     portENTER_CRITICAL(&g_batteryModelMux);
     if (in == NULL) {
         memset(&g_debugBatteryModel, 0, sizeof(g_debugBatteryModel));
+        logged = g_debugBatteryModel;
     } else {
         g_debugBatteryModel = *in;
         if (g_debugBatteryModel.valid) {
@@ -124,8 +162,11 @@ void batteryModelSetDebugOverride(const battery_model_t *in)
         } else {
             g_debugBatteryModel.updatedMs = 0u;
         }
+        logged = g_debugBatteryModel;
     }
     portEXIT_CRITICAL(&g_batteryModelMux);
+
+    batteryModelTraceWrite((in == NULL) ? "debug_clear" : "debug_set", &logged);
 }
 
 void batteryModelSetDebugOverrideEnabled(bool enabled)
