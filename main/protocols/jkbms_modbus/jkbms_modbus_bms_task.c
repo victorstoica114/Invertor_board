@@ -83,6 +83,12 @@ static void jkbmsPublishBatteryModel(const jkbms_modbus_snapshot_t *snapshot, in
 
     if (snapshot->hasPackVoltageMv) {
         model.packVoltageV = (float)snapshot->packVoltageMv / 1000.0f;
+    } else if (snapshot->hasCellAvgMv && snapshot->cellCount > 0u) {
+        model.packVoltageV = ((float)snapshot->cellAvgMv * (float)snapshot->cellCount) / 1000.0f;
+    } else if (snapshot->hasCellExtremes && snapshot->cellCount > 0u) {
+        const float avgCellV =
+            ((float)snapshot->maxCellMv + (float)snapshot->minCellMv) / 2000.0f;
+        model.packVoltageV = avgCellV * (float)snapshot->cellCount;
     }
     if (snapshot->hasPackCurrentMa) {
         model.packCurrentA = (float)snapshot->packCurrentMa / 1000.0f;

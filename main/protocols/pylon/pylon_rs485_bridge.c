@@ -380,6 +380,7 @@ static bool buildCanDerivedInfo61(char *out, size_t outSize)
     bool forceStaticPayload = pylonCanToRs485ModeEnabled(&settings) && PYLON_CAN_RS485_FORCE_FAKE_ENABLE;
     uint8_t bytes[sizeof(template61)];
     uint16_t kelvinTemp = 0;
+    uint16_t packCv = 0;
     uint16_t maxMv = 0;
     uint16_t minMv = 0;
     uint8_t maxIdx = 3u;
@@ -403,7 +404,11 @@ static bool buildCanDerivedInfo61(char *out, size_t outSize)
             bytes[9] = 100u;
         }
     } else if (model.valid) {
-        bytes[1] = 0x90u;
+        if (model.packVoltageV > 0.0f) {
+            uint32_t cv = (uint32_t)(model.packVoltageV * 100.0f + 0.5f);
+            packCv = (cv > UINT16_MAX) ? UINT16_MAX : (uint16_t)cv;
+            putBe16(&bytes[0], packCv);
+        }
         putBe16(&bytes[2], (uint16_t)((int16_t)(model.packCurrentA * 100.0f)));
         bytes[4] = model.socPct;
         putBe16(&bytes[5], model.cycleCount);
