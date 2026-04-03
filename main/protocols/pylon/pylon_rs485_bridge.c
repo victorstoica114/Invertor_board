@@ -423,10 +423,24 @@ static bool buildCanDerivedInfo61(char *out, size_t outSize)
          * treating bytes[0..1] as plain pack voltage caused faults.
          */
         bytes[1] = 0x90u;
-        putBe16(&bytes[2], (uint16_t)((int16_t)(model.packCurrentA * 100.0f)));
-        bytes[4] = model.socPct;
-        putBe16(&bytes[5], model.cycleCount);
-        bytes[9] = model.sohPct;
+        if (nativePayloadSource) {
+            putBe16(&bytes[2], (uint16_t)((int16_t)(model.packCurrentA * 100.0f)));
+            bytes[4] = model.socPct;
+            putBe16(&bytes[5], model.cycleCount);
+            bytes[9] = model.sohPct;
+        } else {
+            /*
+             * For generic sources like JK Modbus, keep the Pylon-specific
+             * current/cycle words stable and only project the least ambiguous
+             * percentage-style fields.
+             */
+            if (model.socPct <= 100u) {
+                bytes[4] = model.socPct;
+            }
+            if (model.sohPct <= 100u) {
+                bytes[9] = model.sohPct;
+            }
+        }
     }
 
     /*
