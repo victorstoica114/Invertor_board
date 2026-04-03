@@ -13,7 +13,7 @@
 #include "protocols/jkbms_modbus/jkbms_modbus_bms_task.h"
 #include "protocols/pylon/pylon_bms_task.h"
 #include "protocols/pylon/pylon_inverter_task.h"
-#include "rs485_can_bridge.h"
+#include "protocols/rs485_growatt/rs485_growatt_bridge.h"
 
 #include "esp_log.h"
 #include "esp_timer.h"
