@@ -75,6 +75,11 @@ static int64_t s_lastCacheBuildDiagUs = 0;
 static void telemetryFromSummary(void);
 static void updateSummary61(void);
 static void updateSummary63(void);
+static void logSyntheticPayloadBuild(const char *label,
+                                     const universal_battery_model_t *model,
+                                     const char *info61,
+                                     const char *info62,
+                                     const char *info63);
 
 static const char *protocolToStrLocal(uint8_t protocol)
 {
@@ -505,9 +510,54 @@ static bool buildCanDerivedInfo63(char *out, size_t outSize)
     return out[0] != '\0';
 }
 
+static void logSyntheticPayloadBuild(const char *label,
+                                     const universal_battery_model_t *model,
+                                     const char *info61,
+                                     const char *info62,
+                                     const char *info63)
+{
+    if (!pylonDiagLogsEnabled() || model == NULL) {
+        return;
+    }
+
+    ESP_LOGI(EXAMPLE_TAG,
+             "%s model: valid=%s V=%.2fV I=%.2fA soc=%u soh=%u cyc=%u max=%.3fV#%u min=%.3fV#%u T=[%.1f %.1f %.1f %.1f %.1f] flags(c=%u d=%u b=%u state=0x%02X)",
+             label != NULL ? label : "PYLON synthetic",
+             model->valid ? "YES" : "NO",
+             (double)model->packVoltageV,
+             (double)model->packCurrentA,
+             (unsigned)model->socPct,
+             (unsigned)model->sohPct,
+             (unsigned)model->cycleCount,
+             (double)model->cellMaxV,
+             (unsigned)model->cellMaxIdx,
+             (double)model->cellMinV,
+             (unsigned)model->cellMinIdx,
+             (double)model->temperaturesC[0],
+             (double)model->temperaturesC[1],
+             (double)model->temperaturesC[2],
+             (double)model->temperaturesC[3],
+             (double)model->temperaturesC[4],
+             model->chargeEnabled ? 1u : 0u,
+             model->dischargeEnabled ? 1u : 0u,
+             model->balanceEnabled ? 1u : 0u,
+             (unsigned)(model->protocolState & 0xFFu));
+
+    if (info61 != NULL && info61[0] != '\0') {
+        ESP_LOGI(EXAMPLE_TAG, "%s 0x61=[%s]", label != NULL ? label : "PYLON synthetic", info61);
+    }
+    if (info62 != NULL && info62[0] != '\0') {
+        ESP_LOGI(EXAMPLE_TAG, "%s 0x62=[%s]", label != NULL ? label : "PYLON synthetic", info62);
+    }
+    if (info63 != NULL && info63[0] != '\0') {
+        ESP_LOGI(EXAMPLE_TAG, "%s 0x63=[%s]", label != NULL ? label : "PYLON synthetic", info63);
+    }
+}
+
 static void maybeRefreshSyntheticCacheFromUniversal(void)
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
+    universal_battery_model_t model = {0};
     char info61[sizeof(s_pylonCache.info61)] = {0};
     char info63[sizeof(s_pylonCache.info63)] = {0};
     int64_t nowUs = esp_timer_get_time();
@@ -515,6 +565,8 @@ static void maybeRefreshSyntheticCacheFromUniversal(void)
     if (!pylonSyntheticSourceModeEnabled(&settings)) {
         return;
     }
+
+    batteryModelGet(&model);
 
     if (!pylonBmsSourceFresh(&settings)) {
         if (pylonSyntheticSourceModeEnabled(&settings) && PYLON_CAN_RS485_FORCE_FAKE_ENABLE) {
@@ -533,6 +585,7 @@ static void maybeRefreshSyntheticCacheFromUniversal(void)
 
             memset(&s_pylonSummary, 0, sizeof(s_pylonSummary));
             if (pylonDiagLogsEnabled()) {
+                logSyntheticPayloadBuild("PYLON synthetic forced-fake", &model, info61, s_pylonCache.info62, info63);
                 ESP_LOGW(EXAMPLE_TAG,
                          "PYLON synthetic source not fresh: using FORCED fake cache (v61=%s v62=%s v63=%s)",
                          s_pylonCache.valid61 ? "YES" : "NO",
@@ -584,6 +637,7 @@ static void maybeRefreshSyntheticCacheFromUniversal(void)
     }
 
     if (pylonDiagLogsEnabled() && ((nowUs - s_lastCacheBuildDiagUs) >= 1000000LL)) {
+        logSyntheticPayloadBuild("PYLON synthetic cache", &model, s_pylonCache.info61, s_pylonCache.info62, s_pylonCache.info63);
         ESP_LOGI(EXAMPLE_TAG,
                  "PYLON synthetic cache state: v61=%s v62=%s v63=%s len61=%u len62=%u len63=%u",
                  s_pylonCache.valid61 ? "YES" : "NO",
@@ -650,9 +704,12 @@ static void telemetryFromSummary(void)
     snap.pylonStatus63 = s_pylonSummary.status_63;
 
     ESP_LOGI("PYLON_RS485", "[TELEM_FROM_SUMMARY] Setting telemetry from RS485 summary: "
-             "valid=%s, soc=%u%%, v=%.2fV (cv=%u), i=%.1fA",
+             "valid=%s, soc=%u%%, v=%.2fV (cv=%u), i=%.1fA, preferModel=%s, modelV=%.2fV, raw61=%s",
              snap.valid ? "YES" : "NO", snap.socPct, (double)snap.packVoltageV,
-             s_pylonSummary.pack_voltage_cv, (double)snap.currentA);
+             s_pylonSummary.pack_voltage_cv, (double)snap.currentA,
+             preferModelTelemetry ? "YES" : "NO",
+             (double)(model.valid ? model.packVoltageV : 0.0f),
+             s_pylonCache.valid61 ? s_pylonCache.info61 : "");
 
     bridgeSetTelemetrySnapshot(&snap);
 }
@@ -987,6 +1044,14 @@ static bool buildCachedResponse(const uint8_t *request,
     *outLen = snprintf((char *)response, (size_t)responseSize, "~%s%04X\r", body, checksum);
     if (*outLen <= 0 || *outLen >= responseSize) {
         return false;
+    }
+
+    if (pylonDiagLogsEnabled()) {
+        ESP_LOGI(EXAMPLE_TAG,
+                 "PYLON cached response build: req cid2=0x%02X addr=0x%02X info=[%s]",
+                 (unsigned)cid2,
+                 (unsigned)adr,
+                 infoAscii);
     }
 
     if (outCid2) *outCid2 = cid2;
