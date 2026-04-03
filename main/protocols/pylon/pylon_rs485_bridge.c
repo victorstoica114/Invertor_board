@@ -133,6 +133,14 @@ static bool pylonSyntheticSourceModeEnabled(const bridge_runtime_settings_t *set
            !pylonRs485PassthroughModeEnabled(settings);
 }
 
+static bool pylonSourceUsesNativePayloadEncoding(const bridge_runtime_settings_t *settings)
+{
+    return (settings != NULL) &&
+           ((settings->bms_protocol == PROTOCOL_CAN_PYLON) ||
+            (settings->bms_protocol == PROTOCOL_RS485_PYLON) ||
+            (settings->bms_protocol == PROTOCOL_CAN_DEYE));
+}
+
 static bool pylonDiagLogsEnabled(void)
 {
     return CAN_DECODER_SHOW_RAW_FRAMES != 0;
@@ -380,7 +388,6 @@ static bool buildCanDerivedInfo61(char *out, size_t outSize)
     bool forceStaticPayload = pylonCanToRs485ModeEnabled(&settings) && PYLON_CAN_RS485_FORCE_FAKE_ENABLE;
     uint8_t bytes[sizeof(template61)];
     uint16_t kelvinTemp = 0;
-    uint16_t packCv = 0;
     uint16_t maxMv = 0;
     uint16_t minMv = 0;
     uint8_t maxIdx = 3u;
@@ -404,11 +411,12 @@ static bool buildCanDerivedInfo61(char *out, size_t outSize)
             bytes[9] = 100u;
         }
     } else if (model.valid) {
-        if (model.packVoltageV > 0.0f) {
-            uint32_t cv = (uint32_t)(model.packVoltageV * 100.0f + 0.5f);
-            packCv = (cv > UINT16_MAX) ? UINT16_MAX : (uint16_t)cv;
-            putBe16(&bytes[0], packCv);
-        }
+        /*
+         * Preserve the legacy word0 layout for synthetic Pylon 0x61 frames.
+         * Older inverter behaviour proved stable with 0x2190 here, while
+         * treating bytes[0..1] as plain pack voltage caused faults.
+         */
+        bytes[1] = 0x90u;
         putBe16(&bytes[2], (uint16_t)((int16_t)(model.packCurrentA * 100.0f)));
         bytes[4] = model.socPct;
         putBe16(&bytes[5], model.cycleCount);
@@ -468,6 +476,7 @@ static bool buildCanDerivedInfo63(char *out, size_t outSize)
     universal_battery_model_t model;
     bridge_runtime_settings_t settings = runtimeSettingsGet();
     bool forceStaticPayload = pylonCanToRs485ModeEnabled(&settings) && PYLON_CAN_RS485_FORCE_FAKE_ENABLE;
+    bool nativeStatusSource = pylonSourceUsesNativePayloadEncoding(&settings);
     uint8_t bytes[sizeof(template63)];
 
     batteryModelGet(&model);
@@ -478,13 +487,17 @@ static bool buildCanDerivedInfo63(char *out, size_t outSize)
     memcpy(bytes, template63, sizeof(bytes));
     if (forceStaticPayload) {
         bytes[8] = 0xE0u; /* Diagnostic: permissive status (charge+discharge+balance) */
-    } else if (model.valid && model.protocolState != 0u) {
+    } else if (model.valid && nativeStatusSource && model.protocolState != 0u) {
         bytes[8] = (uint8_t)(model.protocolState & 0xFFu);
     } else if (model.valid) {
         uint8_t status = 0u;
         if (model.chargeEnabled) status |= 0x80u;
         if (model.dischargeEnabled) status |= 0x40u;
         if (model.balanceEnabled) status |= 0x20u;
+        if (status == 0u && !nativeStatusSource) {
+            /* Generic sources like JK do not expose native Pylon 0x63 bits. */
+            status = (uint8_t)(0xC0u | (model.balanceEnabled ? 0x20u : 0u));
+        }
         bytes[8] = status;
     }
 
@@ -587,7 +600,10 @@ static void telemetryFromSummary(void)
 {
     bridgeTelemetrySnapshot_t snap = {0};
     bridge_runtime_settings_t settings = runtimeSettingsGet();
+    universal_battery_model_t model = {0};
     char iface[12] = {0};
+    bool preferModelTelemetry = pylonSyntheticSourceModeEnabled(&settings) &&
+                                !pylonSourceUsesNativePayloadEncoding(&settings);
 
     if (!s_pylonSummary.valid) {
         ESP_LOGD("PYLON_RS485", "[TELEM_FROM_SUMMARY] Summary invalid, clearing telemetry");
@@ -603,6 +619,10 @@ static void telemetryFromSummary(void)
         }
     }
 
+    if (preferModelTelemetry) {
+        batteryModelGet(&model);
+    }
+
     snap.valid = true;
     if (iface[0] != '\0') {
         snprintf(snap.source, sizeof(snap.source), "%s", iface);
@@ -610,8 +630,10 @@ static void telemetryFromSummary(void)
         snprintf(snap.source, sizeof(snap.source), "BMS");
     }
     snprintf(snap.protocol, sizeof(snap.protocol), "%s", protocolToStrLocal(settings.bms_protocol));
-    snap.currentA = s_pylonSummary.current_a;
-    snap.packVoltageV = (float)s_pylonSummary.pack_voltage_cv / 100.0f;
+    snap.currentA = (preferModelTelemetry && model.valid) ? model.packCurrentA : s_pylonSummary.current_a;
+    snap.packVoltageV = (preferModelTelemetry && model.valid)
+                        ? model.packVoltageV
+                        : (float)s_pylonSummary.pack_voltage_cv / 100.0f;
     snap.cycles = s_pylonSummary.cycles;
     snap.socPct = s_pylonSummary.soc_pct;
     snap.sohPct = s_pylonSummary.soh_pct;
