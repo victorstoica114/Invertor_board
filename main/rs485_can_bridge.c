@@ -3,11 +3,11 @@
 #include "decoders/CAN_Decoder.h"
 #include "Drivers/rs485_driver.h"
 #include "config.h"
+#include "protocols/common/battery_model.h"
 #include "protocols/goodwe/goodwe_registers_map.h"
 #include "protocols/growatt/growatt_registers_map.h"
 #include "protocols/pylon/pylon_registers_map.h"
 #include "protocols/sofar/sofar_registers_map.h"
-#include "protocols/jkbms_modbus/jkbms_modbus_bms_task.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -459,8 +459,10 @@ typedef struct {
     uint8_t cellMinIdx;
 } growattSynthSnapshot_t;
 
-static bool fillSnapshotFromJkbms(growattSynthSnapshot_t *snap, uint8_t fallbackSocPct)
+static bool fillSnapshotFromBatteryModel(growattSynthSnapshot_t *snap, uint8_t fallbackSocPct)
 {
+    battery_model_t model = {0};
+
     if (snap == NULL) {
         return false;
     }
@@ -475,37 +477,40 @@ static bool fillSnapshotFromJkbms(growattSynthSnapshot_t *snap, uint8_t fallback
     snap->cellMaxIdx = 4u;
     snap->cellMinIdx = 10u;
 
-    bms_decoded_packet_t pkt = {0};
-    if (!jkbmsModbusBmsTaskGetLatestPacket(&pkt)) {
-        return false;
-    }
-    if (pkt.timestampUs <= 0) {
+    batteryModelGet(&model);
+    if (!model.valid || model.updatedMs == 0u) {
         return false;
     }
 
-    int64_t nowUs = esp_timer_get_time();
-    int64_t ageUs = nowUs - pkt.timestampUs;
-    if (ageUs < 0) {
-        ageUs = 0;
+    if (model.socPct <= 100u) {
+        snap->soc = model.socPct;
     }
-    if (ageUs > ((int64_t)BRIDGE_SOURCE_STALE_MS * 1000LL)) {
-        return false;
+    if (model.sohPct <= 100u) {
+        snap->soh = model.sohPct;
     }
-
-    if (pkt.hasSoc) {
-        snap->soc = (pkt.socPct > 100u) ? 100u : pkt.socPct;
+    if (model.temperaturesC[0] > -100.0f) {
+        snap->tempC = (int16_t)model.temperaturesC[0];
     }
-    if (pkt.hasTemperatureC) {
-        snap->tempC = pkt.temperatureC;
+    if (model.packVoltageV > 0.0f) {
+        uint32_t packCv = (uint32_t)(model.packVoltageV * 100.0f + 0.5f);
+        snap->packCv = (packCv > UINT16_MAX) ? UINT16_MAX : (uint16_t)packCv;
     }
-    if (pkt.hasPackVoltageCv) {
-        snap->packCv = pkt.packVoltageCv;
+    if (model.cycleCount > 0u) {
+        snap->cycles = model.cycleCount;
     }
-    if (pkt.hasCellExtremes) {
-        snap->cellMaxMv = pkt.maxCellMv;
-        snap->cellMinMv = pkt.minCellMv;
-        snap->cellMaxIdx = pkt.maxCellIndex;
-        snap->cellMinIdx = pkt.minCellIndex;
+    if (model.cellMaxV > 0.0f) {
+        uint32_t cellMaxMv = (uint32_t)(model.cellMaxV * 1000.0f + 0.5f);
+        snap->cellMaxMv = (cellMaxMv > UINT16_MAX) ? UINT16_MAX : (uint16_t)cellMaxMv;
+    }
+    if (model.cellMinV > 0.0f) {
+        uint32_t cellMinMv = (uint32_t)(model.cellMinV * 1000.0f + 0.5f);
+        snap->cellMinMv = (cellMinMv > UINT16_MAX) ? UINT16_MAX : (uint16_t)cellMinMv;
+    }
+    if (model.cellMaxIdx >= 1u && model.cellMaxIdx <= 16u) {
+        snap->cellMaxIdx = model.cellMaxIdx;
+    }
+    if (model.cellMinIdx >= 1u && model.cellMinIdx <= 16u) {
+        snap->cellMinIdx = model.cellMinIdx;
     }
     return true;
 }
@@ -1077,7 +1082,7 @@ static void jkbmsRs485GrowattTask(void *pv)
                         ctx->reqCount++;
 
                         growattSynthSnapshot_t snap = {0};
-                        bool fresh = fillSnapshotFromJkbms(&snap, ctx->fakeSocPct);
+                        bool fresh = fillSnapshotFromBatteryModel(&snap, ctx->fakeSocPct);
 
                         bool sent = fresh && sendGrowattResponseFromSnapshot(ctx, &snap, func, start, count);
                         if (sent) {

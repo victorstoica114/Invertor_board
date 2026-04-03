@@ -320,7 +320,7 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
 
     const bool canToRsGrowatt = isCanToRsGrowattRoute(settings);
     const bool rsJkbmsToRsGrowatt = isRsJkbmsToRsGrowattRoute(settings);
-    const bool pylonRs485Route = pylonRs485BridgeHandlesCurrentConfig();
+    const bool pylonRs485Route = pylonRs485BridgeSupportsRoute(settings);
     ESP_LOGI(EXAMPLE_TAG,
              "Orchestrator runtime start: bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) canToRsGrowatt=%s rsJkbmsToRsGrowatt=%s pylonRs485=%s",
              (unsigned)settings->bms_line,
