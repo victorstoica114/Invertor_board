@@ -686,13 +686,18 @@ static void maybeRefreshSyntheticCacheFromUniversal(void)
     if (pylonDiagLogsEnabled() && ((nowUs - s_lastCacheBuildDiagUs) >= 1000000LL)) {
         logSyntheticPayloadBuild("PYLON synthetic cache", &model, s_pylonCache.info61, s_pylonCache.info62, s_pylonCache.info63);
         ESP_LOGI(EXAMPLE_TAG,
-                 "PYLON synthetic cache state: v61=%s v62=%s v63=%s len61=%u len62=%u len63=%u",
+                 "PYLON synthetic cache state: v61=%s v62=%s v63=%s len61=%u len62=%u len63=%u info63=[%s] flags(c=%u d=%u b=%u state=0x%02X)",
                  s_pylonCache.valid61 ? "YES" : "NO",
                  s_pylonCache.valid62 ? "YES" : "NO",
                  s_pylonCache.valid63 ? "YES" : "NO",
                  (unsigned)strlen(s_pylonCache.info61),
                  (unsigned)strlen(s_pylonCache.info62),
-                 (unsigned)strlen(s_pylonCache.info63));
+                 (unsigned)strlen(s_pylonCache.info63),
+                 s_pylonCache.valid63 ? s_pylonCache.info63 : "",
+                 (unsigned)(model.chargeEnabled ? 1u : 0u),
+                 (unsigned)(model.dischargeEnabled ? 1u : 0u),
+                 (unsigned)(model.balanceEnabled ? 1u : 0u),
+                 (unsigned)(model.protocolState & 0xFFu));
         s_lastCacheBuildDiagUs = nowUs;
     }
 }
@@ -751,12 +756,18 @@ static void telemetryFromSummary(void)
     snap.pylonStatus63 = s_pylonSummary.status_63;
 
     ESP_LOGI("PYLON_RS485", "[TELEM_FROM_SUMMARY] Setting telemetry from RS485 summary: "
-             "valid=%s, soc=%u%%, v=%.2fV (cv=%u), i=%.1fA, preferModel=%s, modelV=%.2fV, raw61=%s",
+             "valid=%s, soc=%u%%, v=%.2fV (cv=%u), i=%.1fA, preferModel=%s, modelV=%.2fV, flags(c=%u d=%u b=%u state=0x%02X) status63=0x%02X raw61=%s raw63=%s",
              snap.valid ? "YES" : "NO", snap.socPct, (double)snap.packVoltageV,
              s_pylonSummary.pack_voltage_cv, (double)snap.currentA,
              preferModelTelemetry ? "YES" : "NO",
              (double)(model.valid ? model.packVoltageV : 0.0f),
-             s_pylonCache.valid61 ? s_pylonCache.info61 : "");
+             (unsigned)(model.chargeEnabled ? 1u : 0u),
+             (unsigned)(model.dischargeEnabled ? 1u : 0u),
+             (unsigned)(model.balanceEnabled ? 1u : 0u),
+             (unsigned)(model.protocolState & 0xFFu),
+             (unsigned)s_pylonSummary.status_63,
+             s_pylonCache.valid61 ? s_pylonCache.info61 : "",
+             s_pylonCache.valid63 ? s_pylonCache.info63 : "");
 
     bridgeSetTelemetrySnapshot(&snap);
 }
