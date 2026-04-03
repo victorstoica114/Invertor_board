@@ -4,6 +4,7 @@
 #include "../../config.h"
 #include "../../runtime_settings.h"
 #include "../../Drivers/RS485/rs485_driver.h"
+#include "../common/battery_model.h"
 #include "pylon_rs485_protocol.h"
 
 #include <inttypes.h>
@@ -130,7 +131,7 @@ static bool pylonBmsSourceFresh(const bridge_runtime_settings_t *settings)
     if (pylonCanToRs485ModeEnabled(settings)) {
         universal_battery_model_t model = {0};
         uint32_t ageMs = 0u;
-        bridgeGetUniversalBatteryModel(&model);
+        batteryModelGet(&model);
         if (model.updatedMs != 0u) {
             uint32_t nowMs = (uint32_t)(nowUs / 1000LL);
             ageMs = nowMs - model.updatedMs;
@@ -366,7 +367,7 @@ static bool buildCanDerivedInfo61(char *out, size_t outSize)
     uint8_t maxIdx = 3u;
     uint8_t minIdx = 12u;
 
-    bridgeGetUniversalBatteryModel(&model);
+    batteryModelGet(&model);
     if (!forceStaticPayload && !model.valid) {
         return false;
     }
@@ -446,7 +447,7 @@ static bool buildCanDerivedInfo63(char *out, size_t outSize)
     bool forceStaticPayload = pylonCanToRs485ModeEnabled(&settings) && PYLON_CAN_RS485_FORCE_FAKE_ENABLE;
     uint8_t bytes[sizeof(template63)];
 
-    bridgeGetUniversalBatteryModel(&model);
+    batteryModelGet(&model);
     if (!forceStaticPayload && !model.valid) {
         return false;
     }
@@ -1172,14 +1173,23 @@ static void pylonProbeTask(void *pv)
     }
 }
 
+bool pylonRs485BridgeSupportsRoute(const bridge_runtime_settings_t *settings)
+{
+    if (settings == NULL) {
+        return false;
+    }
+
+    return ((settings->bms_line == LINE_RS485) &&
+            (settings->inverter_line == LINE_RS485) &&
+            (settings->bms_protocol == PROTOCOL_RS485_PYLON) &&
+            (settings->inverter_protocol == PROTOCOL_RS485_PYLON)) ||
+           pylonCanToRs485ModeEnabled(settings);
+}
+
 bool pylonRs485BridgeHandlesCurrentConfig(void)
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
-    return ((settings.bms_line == LINE_RS485) &&
-            (settings.inverter_line == LINE_RS485) &&
-            (settings.bms_protocol == PROTOCOL_RS485_PYLON) &&
-            (settings.inverter_protocol == PROTOCOL_RS485_PYLON)) ||
-           pylonCanToRs485ModeEnabled(&settings);
+    return pylonRs485BridgeSupportsRoute(&settings);
 }
 
 void pylonRs485BridgeEnable(void)
