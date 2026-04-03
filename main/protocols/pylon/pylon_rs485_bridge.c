@@ -575,6 +575,10 @@ static void telemetryFromSummary(void)
         return;
     }
 
+    if (settings.bms_line != LINE_RS485) {
+        return;
+    }
+
     if (settings.bms_port >= 1u && settings.bms_port <= 2u) {
         if (settings.bms_line == LINE_RS485) {
             snprintf(iface, sizeof(iface), "RS485_%u", (unsigned)settings.bms_port);
