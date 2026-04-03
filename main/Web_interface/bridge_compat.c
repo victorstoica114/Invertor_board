@@ -1,4 +1,4 @@
-#include "bridge.h"
+#include "Web_interface/web_bridge_api.h"
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -479,16 +479,6 @@ static void buildFallbackLog(char *out, uint32_t outSize)
              (double)snap.deltaV);
 }
 
-void rs485BridgeEnable(void)
-{
-    /* Kept for backwards compatibility with older web/runtime integration. */
-}
-
-void canBridgeEnable(void)
-{
-    /* Kept for backwards compatibility with older web/runtime integration. */
-}
-
 void bridgeReloadFromRuntimeSettings(void)
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
@@ -653,16 +643,6 @@ void bridgeSetTelemetrySnapshot(const bridgeTelemetrySnapshot_t *in)
         ESP_LOGI(BRIDGE_TAG, "[TELEM_SET] Updating manual cache: source=%s, valid=%s, soc=%u%%, v=%.2fV",
                  logSource, in->valid ? "YES" : "NO", logSoc, (double)logVoltage);
     }
-}
-
-void bridgeGetUniversalBatteryModel(universal_battery_model_t *out)
-{
-    batteryModelGet(out);
-}
-
-void bridgeSetUniversalBatteryModel(const universal_battery_model_t *in)
-{
-    batteryModelSet(in);
 }
 
 void bridgeGetDecodedLogSnapshot(char *out, uint32_t outSize)

@@ -1,7 +1,7 @@
 #include "decoders/CAN_Decoder.h"
 
 #include "config.h"
-#include "bridge.h"
+#include "Web_interface/web_bridge_api.h"
 #include "protocols/common/battery_model.h"
 #include "protocols/growatt/growatt_registers_map.h"
 #include "protocols/deye/deye_can_protocol.h"

@@ -49,8 +49,6 @@ typedef struct {
     char warnings[256];
 } bridgeTelemetrySnapshot_t;
 
-void rs485BridgeEnable(void);
-void canBridgeEnable(void);
 void bridgeReloadFromRuntimeSettings(void);
 void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out);
 void bridgeSetTelemetrySnapshot(const bridgeTelemetrySnapshot_t *in);
