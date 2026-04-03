@@ -124,12 +124,35 @@ static void jkbmsStoreLatestSnapshot(const jkbms_modbus_snapshot_t *snapshot)
     portEXIT_CRITICAL(&g_latestPacketMux);
 }
 
+static bool jkbmsCellAvgLooksConsistent(const jkbms_modbus_snapshot_t *snapshot)
+{
+    const uint16_t toleranceMv = 50u;
+
+    if (snapshot == NULL || !snapshot->hasCellAvgMv) {
+        return false;
+    }
+    if (!snapshot->hasCellExtremes) {
+        return true;
+    }
+    if (snapshot->minCellMv == 0u || snapshot->maxCellMv == 0u) {
+        return true;
+    }
+    if (snapshot->cellAvgMv + toleranceMv < snapshot->minCellMv) {
+        return false;
+    }
+    if (snapshot->cellAvgMv > snapshot->maxCellMv + toleranceMv) {
+        return false;
+    }
+    return true;
+}
+
 static void jkbmsPublishBatteryModel(const jkbms_modbus_snapshot_t *snapshot, int64_t nowUs)
 {
     battery_model_t model = {0};
     const char *voltageSource = "none";
     bool forceLog = false;
     const float lastPublishedVoltageV = g_lastPublishedPackVoltageV;
+    const bool avgLooksConsistent = jkbmsCellAvgLooksConsistent(snapshot);
 
     if (snapshot == NULL || !snapshot->valid) {
         return;
@@ -141,14 +164,14 @@ static void jkbmsPublishBatteryModel(const jkbms_modbus_snapshot_t *snapshot, in
     if (snapshot->hasPackVoltageMv) {
         model.packVoltageV = (float)snapshot->packVoltageMv / 1000.0f;
         voltageSource = "pack_mv";
-    } else if (snapshot->hasCellAvgMv && snapshot->cellCount > 0u) {
+    } else if (snapshot->hasCellAvgMv && snapshot->cellCount > 0u && avgLooksConsistent) {
         model.packVoltageV = ((float)snapshot->cellAvgMv * (float)snapshot->cellCount) / 1000.0f;
         voltageSource = "cell_avg_x_count";
     } else if (snapshot->hasCellExtremes && snapshot->cellCount > 0u) {
         const float avgCellV =
             ((float)snapshot->maxCellMv + (float)snapshot->minCellMv) / 2000.0f;
         model.packVoltageV = avgCellV * (float)snapshot->cellCount;
-        voltageSource = "cell_extremes_x_count";
+        voltageSource = avgLooksConsistent ? "cell_extremes_x_count" : "cell_extremes_x_count_reject_avg";
     }
     if (snapshot->hasPackCurrentMa) {
         model.packCurrentA = (float)snapshot->packCurrentMa / 1000.0f;
@@ -202,6 +225,9 @@ static void jkbmsPublishBatteryModel(const jkbms_modbus_snapshot_t *snapshot, in
         }
     }
     if (strcmp(voltageSource, "pack_mv") == 0) {
+        forceLog = true;
+    }
+    if (!avgLooksConsistent && snapshot->hasCellAvgMv && snapshot->hasCellExtremes) {
         forceLog = true;
     }
     g_lastPublishedPackVoltageV = model.packVoltageV;
