@@ -71,6 +71,8 @@ static int64_t s_lastPylonBmsTrafficUs = 0;
 static int64_t s_lastPylonInverterTrafficUs = 0;
 static int64_t s_lastCanSourceDiagUs = 0;
 static int64_t s_lastCacheBuildDiagUs = 0;
+static int64_t s_lastStatus63DiagUs = 0;
+static uint8_t s_lastStatus63Value = 0xFFu;
 
 static void telemetryFromSummary(void);
 static void updateSummary61(void);
@@ -505,6 +507,8 @@ static bool buildCanDerivedInfo63(char *out, size_t outSize)
     bool forceStaticPayload = pylonCanToRs485ModeEnabled(&settings) && PYLON_CAN_RS485_FORCE_FAKE_ENABLE;
     bool nativeStatusSource = pylonSourceUsesNativePayloadEncoding(&settings);
     uint8_t bytes[sizeof(template63)];
+    const char *reason = "template";
+    int64_t nowUs = esp_timer_get_time();
 
     batteryModelGet(&model);
     if (!forceStaticPayload && !model.valid) {
@@ -514,8 +518,10 @@ static bool buildCanDerivedInfo63(char *out, size_t outSize)
     memcpy(bytes, template63, sizeof(bytes));
     if (forceStaticPayload) {
         bytes[8] = 0xE0u; /* Diagnostic: permissive status (charge+discharge+balance) */
+        reason = "force_fake_e0";
     } else if (model.valid && nativeStatusSource && model.protocolState != 0u) {
         bytes[8] = (uint8_t)(model.protocolState & 0xFFu);
+        reason = "native_protocol_state";
     } else if (model.valid) {
         uint8_t status = 0u;
         if (model.chargeEnabled) status |= 0x80u;
@@ -524,8 +530,27 @@ static bool buildCanDerivedInfo63(char *out, size_t outSize)
         if (status == 0u && !nativeStatusSource) {
             /* Generic sources like JK do not expose native Pylon 0x63 bits. */
             status = (uint8_t)(0xC0u | (model.balanceEnabled ? 0x20u : 0u));
+            reason = "generic_default_c0";
+        } else {
+            reason = "derived_from_flags";
         }
         bytes[8] = status;
+    }
+
+    if (pylonDiagLogsEnabled() &&
+        ((bytes[8] != s_lastStatus63Value) || ((nowUs - s_lastStatus63DiagUs) >= 1000000LL))) {
+        ESP_LOGI(EXAMPLE_TAG,
+                 "PYLON synthetic 0x63 derive: status=0x%02X reason=%s native=%s forceFake=%s flags(c=%u d=%u b=%u state=0x%02X)",
+                 (unsigned)bytes[8],
+                 reason,
+                 nativeStatusSource ? "YES" : "NO",
+                 forceStaticPayload ? "YES" : "NO",
+                 model.chargeEnabled ? 1u : 0u,
+                 model.dischargeEnabled ? 1u : 0u,
+                 model.balanceEnabled ? 1u : 0u,
+                 (unsigned)(model.protocolState & 0xFFu));
+        s_lastStatus63DiagUs = nowUs;
+        s_lastStatus63Value = bytes[8];
     }
 
     encodeHexAscii(bytes, (int)sizeof(bytes), out, outSize);
@@ -1070,10 +1095,11 @@ static bool buildCachedResponse(const uint8_t *request,
 
     if (pylonDiagLogsEnabled()) {
         ESP_LOGI(EXAMPLE_TAG,
-                 "PYLON cached response build: req cid2=0x%02X addr=0x%02X info=[%s]",
+                 "PYLON cached response build: req cid2=0x%02X addr=0x%02X info=[%s] response=[%s]",
                  (unsigned)cid2,
                  (unsigned)adr,
-                 infoAscii);
+                 infoAscii,
+                 response);
     }
 
     if (outCid2) *outCid2 = cid2;
