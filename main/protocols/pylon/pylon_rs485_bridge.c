@@ -391,6 +391,7 @@ static bool buildCanDerivedInfo61(char *out, size_t outSize)
     universal_battery_model_t model;
     bridge_runtime_settings_t settings = runtimeSettingsGet();
     bool forceStaticPayload = pylonCanToRs485ModeEnabled(&settings) && PYLON_CAN_RS485_FORCE_FAKE_ENABLE;
+    bool nativePayloadSource = pylonSourceUsesNativePayloadEncoding(&settings);
     uint8_t bytes[sizeof(template61)];
     uint16_t kelvinTemp = 0;
     uint16_t maxMv = 0;
@@ -428,47 +429,54 @@ static bool buildCanDerivedInfo61(char *out, size_t outSize)
         bytes[9] = model.sohPct;
     }
 
-    maxMv = (uint16_t)(model.cellMaxV > 0.0f ? (model.cellMaxV * 1000.0f) : 0.0f);
-    minMv = (uint16_t)(model.cellMinV > 0.0f ? (model.cellMinV * 1000.0f) : 0.0f);
-    if (maxMv > 0u) {
-        putBe16(&bytes[11], maxMv);
-    }
-    if (minMv > 0u) {
-        putBe16(&bytes[15], minMv);
-    }
+    /*
+     * Generic sources such as JK Modbus do not expose native Pylon semantics
+     * for the cell/temperature block in 0x61. Keeping the stable template for
+     * those fields is safer than projecting incompatible values directly.
+     */
+    if (nativePayloadSource) {
+        maxMv = (uint16_t)(model.cellMaxV > 0.0f ? (model.cellMaxV * 1000.0f) : 0.0f);
+        minMv = (uint16_t)(model.cellMinV > 0.0f ? (model.cellMinV * 1000.0f) : 0.0f);
+        if (maxMv > 0u) {
+            putBe16(&bytes[11], maxMv);
+        }
+        if (minMv > 0u) {
+            putBe16(&bytes[15], minMv);
+        }
 
-    if (model.cellMaxIdx >= 1u && model.cellMaxIdx <= 16u) {
-        maxIdx = model.cellMaxIdx;
-    }
-    if (model.cellMinIdx >= 1u && model.cellMinIdx <= 16u) {
-        minIdx = model.cellMinIdx;
-    }
-    putBe16(&bytes[13], maxIdx);
-    putBe16(&bytes[17], minIdx);
+        if (model.cellMaxIdx >= 1u && model.cellMaxIdx <= 16u) {
+            maxIdx = model.cellMaxIdx;
+        }
+        if (model.cellMinIdx >= 1u && model.cellMinIdx <= 16u) {
+            minIdx = model.cellMinIdx;
+        }
+        putBe16(&bytes[13], maxIdx);
+        putBe16(&bytes[17], minIdx);
 
-    if (model.temperaturesC[0] > -100.0f) {
-        kelvinTemp = (uint16_t)(model.temperaturesC[0] * 10.0f + 2731.0f);
-        putBe16(&bytes[19], kelvinTemp);
-    }
-    if (model.temperaturesC[1] > -100.0f) {
-        kelvinTemp = (uint16_t)(model.temperaturesC[1] * 10.0f + 2731.0f);
-        putBe16(&bytes[21], kelvinTemp);
-    }
-    if (model.temperaturesC[2] > -100.0f) {
-        kelvinTemp = (uint16_t)(model.temperaturesC[2] * 10.0f + 2731.0f);
-        putBe16(&bytes[25], kelvinTemp);
-    }
-    if (model.temperaturesC[3] > -100.0f) {
-        kelvinTemp = (uint16_t)(model.temperaturesC[3] * 10.0f + 2731.0f);
-        putBe16(&bytes[29], kelvinTemp);
-    }
-    if (model.temperaturesC[4] > -100.0f) {
-        kelvinTemp = (uint16_t)(model.temperaturesC[4] * 10.0f + 2731.0f);
-        putBe16(&bytes[31], kelvinTemp);
-        putBe16(&bytes[35], kelvinTemp);
-        putBe16(&bytes[39], kelvinTemp);
-        putBe16(&bytes[41], kelvinTemp);
-        putBe16(&bytes[45], kelvinTemp);
+        if (model.temperaturesC[0] > -100.0f) {
+            kelvinTemp = (uint16_t)(model.temperaturesC[0] * 10.0f + 2731.0f);
+            putBe16(&bytes[19], kelvinTemp);
+        }
+        if (model.temperaturesC[1] > -100.0f) {
+            kelvinTemp = (uint16_t)(model.temperaturesC[1] * 10.0f + 2731.0f);
+            putBe16(&bytes[21], kelvinTemp);
+        }
+        if (model.temperaturesC[2] > -100.0f) {
+            kelvinTemp = (uint16_t)(model.temperaturesC[2] * 10.0f + 2731.0f);
+            putBe16(&bytes[25], kelvinTemp);
+        }
+        if (model.temperaturesC[3] > -100.0f) {
+            kelvinTemp = (uint16_t)(model.temperaturesC[3] * 10.0f + 2731.0f);
+            putBe16(&bytes[29], kelvinTemp);
+        }
+        if (model.temperaturesC[4] > -100.0f) {
+            kelvinTemp = (uint16_t)(model.temperaturesC[4] * 10.0f + 2731.0f);
+            putBe16(&bytes[31], kelvinTemp);
+            putBe16(&bytes[35], kelvinTemp);
+            putBe16(&bytes[39], kelvinTemp);
+            putBe16(&bytes[41], kelvinTemp);
+            putBe16(&bytes[45], kelvinTemp);
+        }
     }
 
     encodeHexAscii(bytes, (int)sizeof(bytes), out, outSize);
