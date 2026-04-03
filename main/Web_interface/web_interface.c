@@ -435,6 +435,7 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "let txt='';"
         "if(mode!==3){txt='Bridge inactive in this mode.';}"
         "else if(bl===2&&bp===6&&il===2&&ip===2){txt='Special route active: JKBMS_MODBUS (RS485_'+bport+') -> RS485_GROWATT responder (RS485_'+iport+').';}"
+        "else if(bl===2&&bp===6&&il===2&&ip===3){txt='Special route active: JKBMS_MODBUS (RS485_'+bport+') -> RS485_PYLON synthetic responder (RS485_'+iport+').';}"
         "else if(bl===2&&bp===6){txt='Testing JKBMS_Modbus poller on RS485_'+bport+'.';}"
         "else if(bl===2&&bp===2){txt='Testing RS485_GROWATT poller on RS485_'+bport+'.';}"
         "else if(bl===1&&bp===1&&il===2&&ip===2){txt='Special route active: CAN_GROWATT -> RS485_GROWATT translator.';}"

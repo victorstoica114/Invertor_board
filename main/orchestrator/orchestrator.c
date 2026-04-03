@@ -421,6 +421,32 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
         }
 
         canDecoderResetCaches();
+        memset(&g_orchestratorCtx, 0, sizeof(g_orchestratorCtx));
+
+        const bool jkbmsToRs485Pylon =
+            (settings->bms_line == LINE_RS485) &&
+            (settings->bms_protocol == PROTOCOL_RS485_JKBMS) &&
+            (settings->inverter_line == LINE_RS485) &&
+            (settings->inverter_protocol == PROTOCOL_RS485_PYLON);
+
+        if (jkbmsToRs485Pylon) {
+            g_orchestratorCtx.bmsQueue =
+                xQueueCreate(ORCHESTRATOR_BMS_QUEUE_LEN, sizeof(bms_decoded_packet_t));
+            if (g_orchestratorCtx.bmsQueue == NULL) {
+                orchestratorReset(&g_orchestratorCtx);
+                return ESP_ERR_NO_MEM;
+            }
+
+            esp_err_t jkbmsErr = jkbmsModbusBmsTaskStart(g_orchestratorCtx.bmsQueue);
+            if (jkbmsErr != ESP_OK) {
+                ESP_LOGW(EXAMPLE_TAG,
+                         "JKBMS BMS task failed for JKBMS->RS485 PYLON route (err=0x%x)",
+                         (unsigned)jkbmsErr);
+                orchestratorReset(&g_orchestratorCtx);
+                return jkbmsErr;
+            }
+        }
+
         pylonRs485BridgeEnable();
         canForwardSnifferStart(settings);
         g_orchestratorCtx.canRs485TranslatorActive = true;

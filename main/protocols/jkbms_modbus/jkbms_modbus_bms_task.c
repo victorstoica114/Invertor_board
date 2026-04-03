@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "Drivers/rs485_driver.h"
+#include "bridge.h"
 #include "config.h"
 #include "decoders/modbusDecoder.h"
 #include "orchestrator/protocol_types.h"
@@ -1048,6 +1049,41 @@ static bool buildPacketFromSnapshot(const jkbms_modbus_snapshot_t *snapshot,
            outPacket->hasCellExtremes;
 }
 
+static void publishUniversalModelFromSnapshot(const jkbms_modbus_snapshot_t *snapshot)
+{
+    if (snapshot == NULL || !snapshot->valid) {
+        bridgeSetUniversalBatteryModel(NULL);
+        return;
+    }
+
+    universal_battery_model_t model = {0};
+    model.valid = true;
+    model.updatedMs = (uint32_t)(esp_timer_get_time() / 1000LL);
+    model.protocolState = 0xE0u;
+    model.chargeEnabled = true;
+    model.dischargeEnabled = true;
+    model.balanceEnabled = true;
+
+    if (snapshot->hasSoc) model.socPct = snapshot->socPct;
+    if (snapshot->hasSoh) model.sohPct = snapshot->sohPct;
+    if (snapshot->hasCycles) model.cycleCount = (uint16_t)((snapshot->cycles > UINT16_MAX) ? UINT16_MAX : snapshot->cycles);
+    if (snapshot->hasPackVoltageMv) model.packVoltageV = (float)snapshot->packVoltageMv / 1000.0f;
+    if (snapshot->hasPackCurrentMa) model.packCurrentA = (float)snapshot->packCurrentMa / 1000.0f;
+    if (snapshot->hasCellExtremes) {
+        model.cellMaxV = (float)snapshot->maxCellMv / 1000.0f;
+        model.cellMinV = (float)snapshot->minCellMv / 1000.0f;
+        model.cellDeltaV = model.cellMaxV - model.cellMinV;
+        model.cellMaxIdx = snapshot->maxCellIndex;
+        model.cellMinIdx = snapshot->minCellIndex;
+    }
+    if (snapshot->hasTempBat1C) model.temperaturesC[0] = (float)snapshot->tempBat1C;
+    if (snapshot->hasTempBat2C) model.temperaturesC[1] = (float)snapshot->tempBat2C;
+    if (snapshot->hasTempMosC) model.temperaturesC[2] = (float)snapshot->tempMosC;
+    if (snapshot->hasAlarmBits) model.alarmsMask = snapshot->alarmBits;
+
+    bridgeSetUniversalBatteryModel(&model);
+}
+
 static void jkbmsModbusBmsTask(void *pv)
 {
     jkbmsModbusBmsTaskCtx_t *ctx = (jkbmsModbusBmsTaskCtx_t *)pv;
@@ -1097,6 +1133,7 @@ static void jkbmsModbusBmsTask(void *pv)
             jkbms_modbus_snapshot_t snapshot = {0};
             if (buildDecodedSnapshot(&ctx->decoder, &snapshot)) {
                 jkbmsStoreLatestSnapshot(&snapshot);
+                publishUniversalModelFromSnapshot(&snapshot);
                 logCellDebug(&ctx->decoder, &snapshot, nowUs);
 
                 bms_decoded_packet_t packet = {0};
