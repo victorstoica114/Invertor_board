@@ -36,6 +36,7 @@ static jkbms_modbus_snapshot_t g_latestSnapshot;
 static int64_t g_lastCellDebugLogUs;
 static int64_t g_lastDecodeSourceLogUs;
 static int64_t g_lastModelPublishDebugLogUs;
+static float g_lastPublishedPackVoltageV;
 static struct {
     bool valid;
     uint8_t cellCount;
@@ -51,32 +52,52 @@ static struct {
 static void logJkbmsModelPublishDebug(const jkbms_modbus_snapshot_t *snapshot,
                                       int64_t nowUs,
                                       const char *voltageSource,
-                                      float publishedPackVoltageV)
+                                      float publishedPackVoltageV,
+                                      bool forceLog)
 {
     if (snapshot == NULL) {
         return;
     }
-    if ((nowUs - g_lastModelPublishDebugLogUs) < 1000000LL) {
+    if (!forceLog && (nowUs - g_lastModelPublishDebugLogUs) < 1000000LL) {
         return;
     }
     g_lastModelPublishDebugLogUs = nowUs;
 
-    ESP_LOGI(EXAMPLE_TAG,
-             "JKBMS model publish: source=%s resultV=%.2fV hasPack=%s packMv=%lu hasAvg=%s avgMv=%u count=%u hasExt=%s min=%u max=%u soc=%s/%u curr=%s/%ld",
-             (voltageSource != NULL) ? voltageSource : "none",
-             publishedPackVoltageV,
-             snapshot->hasPackVoltageMv ? "YES" : "NO",
-             (unsigned long)snapshot->packVoltageMv,
-             snapshot->hasCellAvgMv ? "YES" : "NO",
-             (unsigned)snapshot->cellAvgMv,
-             (unsigned)snapshot->cellCount,
-             snapshot->hasCellExtremes ? "YES" : "NO",
-             (unsigned)snapshot->minCellMv,
-             (unsigned)snapshot->maxCellMv,
-             snapshot->hasSoc ? "YES" : "NO",
-             (unsigned)snapshot->socPct,
-             snapshot->hasPackCurrentMa ? "YES" : "NO",
-             (long)snapshot->packCurrentMa);
+    if (forceLog) {
+        ESP_LOGW(EXAMPLE_TAG,
+                 "JKBMS model publish jump: source=%s resultV=%.2fV hasPack=%s packMv=%lu hasAvg=%s avgMv=%u count=%u hasExt=%s min=%u max=%u soc=%s/%u curr=%s/%ld",
+                 (voltageSource != NULL) ? voltageSource : "none",
+                 publishedPackVoltageV,
+                 snapshot->hasPackVoltageMv ? "YES" : "NO",
+                 (unsigned long)snapshot->packVoltageMv,
+                 snapshot->hasCellAvgMv ? "YES" : "NO",
+                 (unsigned)snapshot->cellAvgMv,
+                 (unsigned)snapshot->cellCount,
+                 snapshot->hasCellExtremes ? "YES" : "NO",
+                 (unsigned)snapshot->minCellMv,
+                 (unsigned)snapshot->maxCellMv,
+                 snapshot->hasSoc ? "YES" : "NO",
+                 (unsigned)snapshot->socPct,
+                 snapshot->hasPackCurrentMa ? "YES" : "NO",
+                 (long)snapshot->packCurrentMa);
+    } else {
+        ESP_LOGI(EXAMPLE_TAG,
+                 "JKBMS model publish: source=%s resultV=%.2fV hasPack=%s packMv=%lu hasAvg=%s avgMv=%u count=%u hasExt=%s min=%u max=%u soc=%s/%u curr=%s/%ld",
+                 (voltageSource != NULL) ? voltageSource : "none",
+                 publishedPackVoltageV,
+                 snapshot->hasPackVoltageMv ? "YES" : "NO",
+                 (unsigned long)snapshot->packVoltageMv,
+                 snapshot->hasCellAvgMv ? "YES" : "NO",
+                 (unsigned)snapshot->cellAvgMv,
+                 (unsigned)snapshot->cellCount,
+                 snapshot->hasCellExtremes ? "YES" : "NO",
+                 (unsigned)snapshot->minCellMv,
+                 (unsigned)snapshot->maxCellMv,
+                 snapshot->hasSoc ? "YES" : "NO",
+                 (unsigned)snapshot->socPct,
+                 snapshot->hasPackCurrentMa ? "YES" : "NO",
+                 (long)snapshot->packCurrentMa);
+    }
 }
 
 static void jkbmsStoreLatestPacket(const bms_decoded_packet_t *packet)
@@ -107,6 +128,8 @@ static void jkbmsPublishBatteryModel(const jkbms_modbus_snapshot_t *snapshot, in
 {
     battery_model_t model = {0};
     const char *voltageSource = "none";
+    bool forceLog = false;
+    const float lastPublishedVoltageV = g_lastPublishedPackVoltageV;
 
     if (snapshot == NULL || !snapshot->valid) {
         return;
@@ -169,7 +192,20 @@ static void jkbmsPublishBatteryModel(const jkbms_modbus_snapshot_t *snapshot, in
     }
 
     batteryModelSet(&model);
-    logJkbmsModelPublishDebug(snapshot, nowUs, voltageSource, model.packVoltageV);
+    if (lastPublishedVoltageV > 0.0f) {
+        float deltaV = model.packVoltageV - lastPublishedVoltageV;
+        if (deltaV < 0.0f) {
+            deltaV = -deltaV;
+        }
+        if (deltaV >= 5.0f) {
+            forceLog = true;
+        }
+    }
+    if (strcmp(voltageSource, "pack_mv") == 0) {
+        forceLog = true;
+    }
+    g_lastPublishedPackVoltageV = model.packVoltageV;
+    logJkbmsModelPublishDebug(snapshot, nowUs, voltageSource, model.packVoltageV, forceLog);
 }
 
 static bool decoderGetU16(const modbusDecoder_t *decoder, uint16_t reg, uint16_t *out)
@@ -660,7 +696,8 @@ static bool decodeU32Best(const modbusDecoder_t *decoder,
 static void logJkbmsDecodeSourceDebug(const modbusDecoder_t *decoder,
                                       const jkbms_modbus_snapshot_t *snapshot,
                                       const cell_expectation_t *exp,
-                                      int64_t nowUs)
+                                      int64_t nowUs,
+                                      bool forceLog)
 {
     uint16_t rawCellAvg = 0u;
     uint16_t rawPackHi = 0u;
@@ -675,29 +712,50 @@ static void logJkbmsDecodeSourceDebug(const modbusDecoder_t *decoder,
     if (snapshot == NULL) {
         return;
     }
-    if ((nowUs - g_lastDecodeSourceLogUs) < 1000000LL) {
+    if (!forceLog && (nowUs - g_lastDecodeSourceLogUs) < 1000000LL) {
         return;
     }
     g_lastDecodeSourceLogUs = nowUs;
 
-    ESP_LOGI(EXAMPLE_TAG,
-             "JKBMS decode source: rawAvg=%s/0x%04X decAvg=%s/%u rawPack=%s/0x%04X:0x%04X decPack=%s/%lu expPack=%s/%lu expCount=%s/%u cells=%u min=%u max=%u",
-             haveRawCellAvg ? "YES" : "NO",
-             (unsigned)rawCellAvg,
-             snapshot->hasCellAvgMv ? "YES" : "NO",
-             (unsigned)snapshot->cellAvgMv,
-             (haveRawPackHi && haveRawPackLo) ? "YES" : "NO",
-             (unsigned)rawPackHi,
-             (unsigned)rawPackLo,
-             snapshot->hasPackVoltageMv ? "YES" : "NO",
-             (unsigned long)snapshot->packVoltageMv,
-             (exp != NULL && exp->hasPackMv) ? "YES" : "NO",
-             (unsigned long)((exp != NULL) ? exp->packMv : 0u),
-             (exp != NULL && exp->hasExpectedCount) ? "YES" : "NO",
-             (unsigned)((exp != NULL) ? exp->expectedCount : 0u),
-             (unsigned)snapshot->cellCount,
-             (unsigned)snapshot->minCellMv,
-             (unsigned)snapshot->maxCellMv);
+    if (forceLog) {
+        ESP_LOGW(EXAMPLE_TAG,
+                 "JKBMS decode source jump: rawAvg=%s/0x%04X decAvg=%s/%u rawPack=%s/0x%04X:0x%04X decPack=%s/%lu expPack=%s/%lu expCount=%s/%u cells=%u min=%u max=%u",
+                 haveRawCellAvg ? "YES" : "NO",
+                 (unsigned)rawCellAvg,
+                 snapshot->hasCellAvgMv ? "YES" : "NO",
+                 (unsigned)snapshot->cellAvgMv,
+                 (haveRawPackHi && haveRawPackLo) ? "YES" : "NO",
+                 (unsigned)rawPackHi,
+                 (unsigned)rawPackLo,
+                 snapshot->hasPackVoltageMv ? "YES" : "NO",
+                 (unsigned long)snapshot->packVoltageMv,
+                 (exp != NULL && exp->hasPackMv) ? "YES" : "NO",
+                 (unsigned long)((exp != NULL) ? exp->packMv : 0u),
+                 (exp != NULL && exp->hasExpectedCount) ? "YES" : "NO",
+                 (unsigned)((exp != NULL) ? exp->expectedCount : 0u),
+                 (unsigned)snapshot->cellCount,
+                 (unsigned)snapshot->minCellMv,
+                 (unsigned)snapshot->maxCellMv);
+    } else {
+        ESP_LOGI(EXAMPLE_TAG,
+                 "JKBMS decode source: rawAvg=%s/0x%04X decAvg=%s/%u rawPack=%s/0x%04X:0x%04X decPack=%s/%lu expPack=%s/%lu expCount=%s/%u cells=%u min=%u max=%u",
+                 haveRawCellAvg ? "YES" : "NO",
+                 (unsigned)rawCellAvg,
+                 snapshot->hasCellAvgMv ? "YES" : "NO",
+                 (unsigned)snapshot->cellAvgMv,
+                 (haveRawPackHi && haveRawPackLo) ? "YES" : "NO",
+                 (unsigned)rawPackHi,
+                 (unsigned)rawPackLo,
+                 snapshot->hasPackVoltageMv ? "YES" : "NO",
+                 (unsigned long)snapshot->packVoltageMv,
+                 (exp != NULL && exp->hasPackMv) ? "YES" : "NO",
+                 (unsigned long)((exp != NULL) ? exp->packMv : 0u),
+                 (exp != NULL && exp->hasExpectedCount) ? "YES" : "NO",
+                 (unsigned)((exp != NULL) ? exp->expectedCount : 0u),
+                 (unsigned)snapshot->cellCount,
+                 (unsigned)snapshot->minCellMv,
+                 (unsigned)snapshot->maxCellMv);
+    }
 }
 
 static bool decodeI32Best(const modbusDecoder_t *decoder,
@@ -1149,7 +1207,19 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
                  out->hasAlarmBits ||
                  (out->hasCellExtremes && out->cellCount >= 4u);
 
-    logJkbmsDecodeSourceDebug(decoder, out, &exp, esp_timer_get_time());
+    {
+        bool forceDecodeLog = false;
+        if (out->hasPackVoltageMv && out->hasCellAvgMv && out->cellCount > 0u) {
+            uint32_t derivedPackMv = (uint32_t)out->cellAvgMv * (uint32_t)out->cellCount;
+            uint32_t diffMv = (out->packVoltageMv >= derivedPackMv)
+                                  ? (out->packVoltageMv - derivedPackMv)
+                                  : (derivedPackMv - out->packVoltageMv);
+            if (diffMv >= 5000u) {
+                forceDecodeLog = true;
+            }
+        }
+        logJkbmsDecodeSourceDebug(decoder, out, &exp, esp_timer_get_time(), forceDecodeLog);
+    }
 
     return out->valid;
 }
@@ -1279,6 +1349,7 @@ esp_err_t jkbmsModbusBmsTaskStart(QueueHandle_t outQueue)
     g_lastCellDebugLogUs = 0;
     g_lastDecodeSourceLogUs = 0;
     g_lastModelPublishDebugLogUs = 0;
+    g_lastPublishedPackVoltageV = 0.0f;
     memset(&g_lastGoodCellMap, 0, sizeof(g_lastGoodCellMap));
     batteryModelClear();
 
