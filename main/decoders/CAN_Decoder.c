@@ -2,6 +2,7 @@
 
 #include "config.h"
 #include "bridge.h"
+#include "protocols/common/battery_model.h"
 #include "protocols/growatt/growatt_registers_map.h"
 #include "protocols/deye/deye_can_protocol.h"
 #include "protocols/pylon/pylon_can_protocol.h"
@@ -130,7 +131,7 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
     memcpy(local, src, sizeof(local));
     portEXIT_CRITICAL(&g_canBmsCacheMux);
 
-    bridgeGetUniversalBatteryModel(&model);
+    batteryModelGet(&model);
 
     if (canPylonGetFrameById(local, 0x355u, &f355) && f355->dlc >= 4u) {
         uint16_t soc = can_le16(&f355->data[0]);
@@ -176,7 +177,7 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
     model.valid = haveSoc && havePack;
     if (model.valid) {
         model.updatedMs = nowMs;
-        bridgeSetUniversalBatteryModel(&model);
+        batteryModelSet(&model);
     }
 }
 
