@@ -489,17 +489,19 @@ void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
     bridge_runtime_settings_t settings = runtimeSettingsGet();
     uint32_t nowMs = bridgeNowMs();
     uint32_t updatedMs = 0u;
-    bool manualStale = false;
+    uint32_t manualUpdatedMs = 0u;
+    uint32_t manualStaleMs = 0u;
+    bool manualFresh = false;
+    bridgeTelemetrySnapshot_t manual = {0};
+    bridgeTelemetrySnapshot_t live = {0};
+    uint32_t liveUpdatedMs = 0u;
 
     if (out == NULL) {
         return;
     }
 
     memset(out, 0, sizeof(*out));
-    snprintf(out->source, sizeof(out->source), "runtime");
-    snprintf(out->protocol, sizeof(out->protocol), "%s", protocolToStr(settings.bms_protocol));
 
-    bool usedManualCache = false;
     bool manualCacheStale = false;
     bool noManualCache = false;
     uint32_t manualAge = 0u;
@@ -508,17 +510,17 @@ void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
 
     portENTER_CRITICAL(&g_bridgeMux);
     if (g_haveManualTelemetry) {
-        updatedMs = g_manualTelemetryUpdatedMs;
         manualAge = (nowMs >= g_manualTelemetryUpdatedMs) ? (nowMs - g_manualTelemetryUpdatedMs) : 0u;
         if ((g_manualTelemetryUpdatedMs != 0u) &&
             ((nowMs - g_manualTelemetryUpdatedMs) <= WEB_TELEMETRY_STALE_MS)) {
-            *out = g_manualTelemetry;
-            usedManualCache = true;
+            manual = g_manualTelemetry;
+            manualUpdatedMs = g_manualTelemetryUpdatedMs;
+            manualFresh = true;
             snprintf(manualSource, sizeof(manualSource), "%s", g_manualTelemetry.source);
             manualSoc = g_manualTelemetry.socPct;
         } else if (g_manualTelemetryUpdatedMs != 0u) {
-            manualStale = true;
             manualCacheStale = true;
+            manualStaleMs = g_manualTelemetryUpdatedMs;
             g_haveManualTelemetry = false;
         }
     } else {
@@ -527,9 +529,9 @@ void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
     portEXIT_CRITICAL(&g_bridgeMux);
 
     /* Log after exiting critical section to avoid potential deadlock */
-    if (usedManualCache) {
-        ESP_LOGD(BRIDGE_TAG, "[TELEM] Using manual cache: age=%u ms, source=%s, valid=%s, soc=%u%%",
-                 manualAge, manualSource, out->valid ? "YES" : "NO", manualSoc);
+    if (manualFresh) {
+        ESP_LOGD(BRIDGE_TAG, "[TELEM] Manual cache fresh: age=%u ms, source=%s, valid=%s, soc=%u%%",
+                 manualAge, manualSource, manual.valid ? "YES" : "NO", manualSoc);
     } else if (manualCacheStale) {
         ESP_LOGD(BRIDGE_TAG, "[TELEM] Manual cache STALE: age=%u ms > threshold=%d ms",
                  manualAge, WEB_TELEMETRY_STALE_MS);
@@ -537,10 +539,19 @@ void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
         ESP_LOGD(BRIDGE_TAG, "[TELEM] No manual cache available");
     }
 
-    ESP_LOGD(BRIDGE_TAG, "[TELEM] Before fill: valid=%s, source=%s",
-             out->valid ? "YES" : "NO", out->source);
+    fillTelemetryFromLatestPacket(&live, &liveUpdatedMs);
 
-    fillTelemetryFromLatestPacket(out, &updatedMs);
+    if (live.valid) {
+        *out = live;
+        updatedMs = liveUpdatedMs;
+    } else if (manualFresh) {
+        *out = manual;
+        updatedMs = manualUpdatedMs;
+    } else {
+        snprintf(out->source, sizeof(out->source), "runtime");
+        snprintf(out->protocol, sizeof(out->protocol), "%s", protocolToStr(settings.bms_protocol));
+        updatedMs = manualStaleMs;
+    }
 
     ESP_LOGD(BRIDGE_TAG, "[TELEM] After fill: valid=%s, source=%s, updatedMs=%u",
              out->valid ? "YES" : "NO", out->source, updatedMs);
@@ -563,17 +574,19 @@ void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
 
     {
         bool ageStale = (out->updatedMs != 0u) && (out->ageMs > WEB_TELEMETRY_STALE_MS);
-        out->stale = ageStale || (manualStale && (updatedMs == 0u));
+        out->stale = ageStale || ((manualStaleMs != 0u) && (updatedMs == manualStaleMs));
         ESP_LOGD(BRIDGE_TAG, "[TELEM] Stale check: ageStale=%s (age=%u ms, threshold=%d ms), "
                  "manualStale=%s, final_stale=%s",
                  ageStale ? "YES" : "NO", out->ageMs, WEB_TELEMETRY_STALE_MS,
-                 manualStale ? "YES" : "NO", out->stale ? "YES" : "NO");
+                 (manualStaleMs != 0u) ? "YES" : "NO", out->stale ? "YES" : "NO");
     }
 
     if (out->stale) {
         ESP_LOGI(BRIDGE_TAG, "[TELEM] Data is STALE - clearing telemetry snapshot");
         char protocol[sizeof(out->protocol)] = {0};
-        snprintf(protocol, sizeof(protocol), "%s", out->protocol);
+        const char *fallbackProtocol = protocolToStr(settings.bms_protocol);
+
+        snprintf(protocol, sizeof(protocol), "%s", out->protocol[0] != '\0' ? out->protocol : fallbackProtocol);
         memset(out, 0, sizeof(*out));
         snprintf(out->protocol, sizeof(out->protocol), "%s", protocol);
         out->stale = true;
