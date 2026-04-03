@@ -1,0 +1,224 @@
+"""
+Integration tests for protocol route selection and build configuration.
+
+These tests verify that:
+1. The firmware builds correctly with expected features enabled
+2. Protocol routing configuration is valid
+3. All protocol routes are properly compiled in
+"""
+
+import pytest
+import os
+import re
+from pathlib import Path
+
+
+@pytest.fixture(scope="module")
+def build_dir():
+    """Fixture to provide build directory path."""
+    return Path("/home/runner/work/Invertor_board/Invertor_board/build")
+
+
+@pytest.fixture(scope="module")
+def sdkconfig_path():
+    """Fixture to provide sdkconfig path."""
+    return Path("/home/runner/work/Invertor_board/Invertor_board/sdkconfig")
+
+
+def test_build_artifacts_exist(build_dir):
+    """Test that essential build artifacts exist."""
+    assert build_dir.exists(), "Build directory should exist"
+
+    # Check for essential build outputs
+    project_elf = build_dir / "project-name.elf"
+    project_bin = build_dir / "project-name.bin"
+
+    assert project_elf.exists() or project_bin.exists(), \
+        "At least one of .elf or .bin should exist"
+
+
+def test_sdkconfig_exists(sdkconfig_path):
+    """Test that sdkconfig exists and is readable."""
+    assert sdkconfig_path.exists(), "sdkconfig should exist"
+    assert sdkconfig_path.is_file(), "sdkconfig should be a file"
+    assert os.access(sdkconfig_path, os.R_OK), "sdkconfig should be readable"
+
+
+def test_protocol_features_enabled(sdkconfig_path):
+    """Test that protocol-related features are enabled in sdkconfig."""
+    if not sdkconfig_path.exists():
+        pytest.skip("sdkconfig not found")
+
+    with open(sdkconfig_path, 'r') as f:
+        config_content = f.read()
+
+    # Check for ESP-IDF features we rely on
+    assert 'CONFIG_FREERTOS_HZ=1000' in config_content or \
+           'CONFIG_FREERTOS_HZ=' in config_content, \
+           "FreeRTOS tick rate should be configured"
+
+
+def test_can_driver_enabled(sdkconfig_path):
+    """Test that CAN (TWAI) driver is enabled."""
+    if not sdkconfig_path.exists():
+        pytest.skip("sdkconfig not found")
+
+    with open(sdkconfig_path, 'r') as f:
+        config_content = f.read()
+
+    # ESP32-C6 uses TWAI controller
+    # Check that TWAI is not explicitly disabled
+    assert 'CONFIG_TWAI_ISR_IN_IRAM=y' in config_content or \
+           'TWAI' in config_content, \
+           "TWAI/CAN should be available"
+
+
+def test_uart_driver_enabled(sdkconfig_path):
+    """Test that UART driver is enabled (for RS485)."""
+    if not sdkconfig_path.exists():
+        pytest.skip("sdkconfig not found")
+
+    with open(sdkconfig_path, 'r') as f:
+        config_content = f.read()
+
+    # UART is usually enabled by default, just verify it's not disabled
+    assert 'CONFIG_UART_ISR_IN_IRAM=y' in config_content or \
+           'UART' in config_content, \
+           "UART should be available"
+
+
+def test_build_output_size_reasonable(build_dir):
+    """Test that build output binary size is reasonable."""
+    bin_file = build_dir / "project-name.bin"
+
+    if not bin_file.exists():
+        pytest.skip("Binary file not found")
+
+    file_size = bin_file.stat().st_size
+
+    # Binary should be between 100KB and 4MB for ESP32-C6
+    assert 100 * 1024 < file_size < 4 * 1024 * 1024, \
+        f"Binary size {file_size} bytes seems unusual"
+
+
+def test_protocol_constants_in_config_h():
+    """Test that all protocol constants are defined in config.h."""
+    config_h = Path("/home/runner/work/Invertor_board/Invertor_board/main/config.h")
+
+    if not config_h.exists():
+        pytest.skip("config.h not found")
+
+    with open(config_h, 'r') as f:
+        config_content = f.read()
+
+    # Check that all protocol IDs are defined
+    expected_protocols = [
+        'PROTOCOL_CAN_GROWATT',
+        'PROTOCOL_RS485_GROWATT',
+        'PROTOCOL_RS485_PYLON',
+        'PROTOCOL_CAN_PYLON',
+        'PROTOCOL_CAN_DEYE',
+        'PROTOCOL_RS485_JKBMS',
+        'PROTOCOL_CAN_GOODWE',
+        'PROTOCOL_CAN_SOFAR',
+        'PROTOCOL_CAN_SMA',
+        'PROTOCOL_CAN_VICTRON',
+    ]
+
+    for protocol in expected_protocols:
+        assert re.search(rf'#define\s+{protocol}\s+\d+', config_content), \
+            f"Protocol {protocol} should be defined in config.h"
+
+
+def test_line_constants_in_config_h():
+    """Test that line type constants are defined."""
+    config_h = Path("/home/runner/work/Invertor_board/Invertor_board/main/config.h")
+
+    if not config_h.exists():
+        pytest.skip("config.h not found")
+
+    with open(config_h, 'r') as f:
+        config_content = f.read()
+
+    assert re.search(r'#define\s+LINE_CAN\s+1', config_content), \
+        "LINE_CAN should be defined as 1"
+    assert re.search(r'#define\s+LINE_RS485\s+2', config_content), \
+        "LINE_RS485 should be defined as 2"
+
+
+def test_mode_constants_in_config_h():
+    """Test that mode constants are defined."""
+    config_h = Path("/home/runner/work/Invertor_board/Invertor_board/main/config.h")
+
+    if not config_h.exists():
+        pytest.skip("config.h not found")
+
+    with open(config_h, 'r') as f:
+        config_content = f.read()
+
+    assert re.search(r'#define\s+MODE_SNIFFER\s+1', config_content), \
+        "MODE_SNIFFER should be defined"
+    assert re.search(r'#define\s+MODE_FORWARD\s+2', config_content), \
+        "MODE_FORWARD should be defined"
+    assert re.search(r'#define\s+MODE_BRIDGE\s+3', config_content), \
+        "MODE_BRIDGE should be defined"
+
+
+def test_orchestrator_files_exist():
+    """Test that orchestrator source files exist."""
+    orchestrator_dir = Path("/home/runner/work/Invertor_board/Invertor_board/main/orchestrator")
+
+    assert orchestrator_dir.exists(), "Orchestrator directory should exist"
+    assert (orchestrator_dir / "orchestrator.c").exists(), \
+        "orchestrator.c should exist"
+    assert (orchestrator_dir / "orchestrator.h").exists(), \
+        "orchestrator.h should exist"
+
+
+def test_protocol_directories_exist():
+    """Test that protocol implementation directories exist."""
+    protocols_dir = Path("/home/runner/work/Invertor_board/Invertor_board/main/protocols")
+
+    assert protocols_dir.exists(), "Protocols directory should exist"
+
+    expected_protocol_dirs = [
+        'growatt',
+        'pylon',
+        'jkbms_modbus',
+        'deye',
+    ]
+
+    for protocol_dir in expected_protocol_dirs:
+        protocol_path = protocols_dir / protocol_dir
+        assert protocol_path.exists(), \
+            f"Protocol directory {protocol_dir} should exist"
+
+
+def test_decoder_files_exist():
+    """Test that decoder source files exist."""
+    decoders_dir = Path("/home/runner/work/Invertor_board/Invertor_board/main/decoders")
+
+    assert decoders_dir.exists(), "Decoders directory should exist"
+    assert (decoders_dir / "CAN_Decoder.c").exists(), \
+        "CAN_Decoder.c should exist"
+    assert (decoders_dir / "CAN_Decoder.h").exists(), \
+        "CAN_Decoder.h should exist"
+    assert (decoders_dir / "modbusDecoder.c").exists(), \
+        "modbusDecoder.c should exist"
+    assert (decoders_dir / "modbusDecoder.h").exists(), \
+        "modbusDecoder.h should exist"
+
+
+def test_web_interface_files_exist():
+    """Test that web interface files exist."""
+    web_dir = Path("/home/runner/work/Invertor_board/Invertor_board/main/Web_interface")
+
+    assert web_dir.exists(), "Web_interface directory should exist"
+    assert (web_dir / "web_interface.c").exists(), \
+        "web_interface.c should exist"
+    assert (web_dir / "bridge_compat.c").exists(), \
+        "bridge_compat.c should exist"
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

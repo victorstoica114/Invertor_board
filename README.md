@@ -307,6 +307,48 @@ Most compile-time toggles are in `main/config.h`, including:
 
 Runtime settings from web API/UI override operational route/mode choices.
 
+## Testing
+
+The project includes a comprehensive test suite to prevent regressions and ensure protocol compatibility.
+
+### Test Structure
+
+```
+tests/
+├── unit/                  # Unit tests for components (Unity framework)
+├── integration/           # Integration tests (pytest)
+└── fixtures/              # Protocol sample data
+```
+
+### Running Tests
+
+```bash
+# Build firmware first
+idf.py set-target esp32c6
+idf.py build
+
+# Run integration tests
+cd tests/integration
+pip install pytest pytest-html
+pytest test_build_artifacts.py -v
+```
+
+### Test Coverage
+
+- **CAN Decoder**: Frame parsing, cache management, freshness checks
+- **Modbus Decoder**: Framing, CRC validation, register caching
+- **Route Selection**: Protocol mapping, configuration validation
+- **Build Verification**: Feature flags, file structure, protocol definitions
+
+See `tests/README.md` for detailed testing documentation.
+
+### Continuous Integration
+
+GitLab CI automatically runs tests on every commit:
+- Build verification for ESP32-C6
+- Integration tests with pytest
+- Static analysis with cppcheck
+
 ## AI Onboarding Cheat Sheet (for Codex Web)
 
 If you want an AI coding agent to be productive quickly, give it this context:
