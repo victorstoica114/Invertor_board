@@ -1,6 +1,6 @@
 #include "pylon_rs485_bridge.h"
 
-#include "../../bridge.h"
+#include "../../Web_interface/web_bridge_api.h"
 #include "../../config.h"
 #include "../../runtime_settings.h"
 #include "../../Drivers/RS485/rs485_driver.h"
