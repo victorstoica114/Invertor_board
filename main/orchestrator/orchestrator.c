@@ -181,6 +181,18 @@ static bool isRsJkbmsToRsGrowattRoute(const bridge_runtime_settings_t *settings)
            (settings->inverter_protocol == PROTOCOL_RS485_GROWATT);
 }
 
+static bool isRsJkbmsToRsPylonRoute(const bridge_runtime_settings_t *settings)
+{
+    if (settings == NULL) {
+        return false;
+    }
+
+    return (settings->bms_line == LINE_RS485) &&
+           (settings->inverter_line == LINE_RS485) &&
+           (settings->bms_protocol == PROTOCOL_RS485_JKBMS) &&
+           (settings->inverter_protocol == PROTOCOL_RS485_PYLON);
+}
+
 static void clearTransportBuffers(void)
 {
     uint8_t sink[64];
@@ -320,9 +332,10 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
 
     const bool canToRsGrowatt = isCanToRsGrowattRoute(settings);
     const bool rsJkbmsToRsGrowatt = isRsJkbmsToRsGrowattRoute(settings);
+    const bool rsJkbmsToRsPylon = isRsJkbmsToRsPylonRoute(settings);
     const bool pylonRs485Route = pylonRs485BridgeSupportsRoute(settings);
     ESP_LOGI(EXAMPLE_TAG,
-             "Orchestrator runtime start: bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) canToRsGrowatt=%s rsJkbmsToRsGrowatt=%s pylonRs485=%s",
+             "Orchestrator runtime start: bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) canToRsGrowatt=%s rsJkbmsToRsGrowatt=%s rsJkbmsToRsPylon=%s pylonRs485=%s",
              (unsigned)settings->bms_line,
              (unsigned)settings->bms_protocol,
              (unsigned)settings->bms_port,
@@ -331,6 +344,7 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
              (unsigned)settings->inverter_port,
              canToRsGrowatt ? "YES" : "NO",
              rsJkbmsToRsGrowatt ? "YES" : "NO",
+             rsJkbmsToRsPylon ? "YES" : "NO",
              pylonRs485Route ? "YES" : "NO");
 
     if (canToRsGrowatt) {
@@ -408,6 +422,42 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
         g_orchestratorCtx.canRs485TranslatorActive = true;
         ESP_LOGI(EXAMPLE_TAG,
                  "Orchestrator started JKBMS RS485->RS485 Growatt route: BMS(RS485_%u) -> Inverter(%s:%u)",
+                 (unsigned)settings->bms_port,
+                 rsNameByPort(settings->inverter_port),
+                 (unsigned)settings->inverter_port);
+        return ESP_OK;
+    }
+
+    if (rsJkbmsToRsPylon) {
+        if (g_orchestratorTaskHandle != NULL || g_orchestratorCtx.canRs485TranslatorActive) {
+            ESP_LOGW(EXAMPLE_TAG, "Orchestrator already running");
+            return ESP_ERR_INVALID_STATE;
+        }
+
+        memset(&g_orchestratorCtx, 0, sizeof(g_orchestratorCtx));
+        g_orchestratorCtx.bmsProtocol = PROTOCOL_ID_JKBMS;
+        g_orchestratorCtx.inverterProtocol = PROTOCOL_ID_PYLON;
+
+        g_orchestratorCtx.bmsQueue =
+            xQueueCreate(ORCHESTRATOR_BMS_QUEUE_LEN, sizeof(bms_decoded_packet_t));
+        if (g_orchestratorCtx.bmsQueue == NULL) {
+            orchestratorReset(&g_orchestratorCtx);
+            return ESP_ERR_NO_MEM;
+        }
+
+        esp_err_t err = jkbmsModbusBmsTaskStart(g_orchestratorCtx.bmsQueue);
+        if (err != ESP_OK) {
+            ESP_LOGW(EXAMPLE_TAG,
+                     "JKBMS BMS task failed for RS485->RS485 Pylon route (err=0x%x)",
+                     (unsigned)err);
+            orchestratorReset(&g_orchestratorCtx);
+            return err;
+        }
+
+        pylonRs485BridgeEnable();
+        g_orchestratorCtx.canRs485TranslatorActive = true;
+        ESP_LOGI(EXAMPLE_TAG,
+                 "Orchestrator started JKBMS RS485->RS485 Pylon route: BMS(RS485_%u) -> Inverter(%s:%u)",
                  (unsigned)settings->bms_port,
                  rsNameByPort(settings->inverter_port),
                  (unsigned)settings->inverter_port);
