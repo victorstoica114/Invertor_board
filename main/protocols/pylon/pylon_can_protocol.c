@@ -1,9 +1,11 @@
 #include "pylon_can_protocol.h"
 
-#include "../../bridge.h"
+#include "../../Web_interface/web_bridge_api.h"
 
 #include <stdio.h>
 #include <string.h>
+
+#include "protocols/common/battery_model.h"
 
 #include "esp_log.h"
 
@@ -244,7 +246,7 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
     model.dischargeEnabled = (status35C & 0x40u) != 0u;
     model.balanceEnabled = (status35C & 0x20u) != 0u;
     model.protocolState = status35C;
-    bridgeSetUniversalBatteryModel(&model);
+    batteryModelSet(&model);
 
     snprintf(s_pylonCanLogText,
              sizeof(s_pylonCanLogText),

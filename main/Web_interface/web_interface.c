@@ -6,6 +6,7 @@
 
 #include "Web_interface/web_bridge_api.h"
 #include "config.h"
+#include "protocols/common/battery_model.h"
 #include "runtime_settings.h"
 
 #include "esp_event.h"
@@ -158,6 +159,57 @@ static bool jsonGetUInt16(const cJSON *root, const char *key, uint16_t *out)
     return true;
 }
 
+static bool jsonGetUInt32(const cJSON *root, const char *key, uint32_t *out)
+{
+    const cJSON *item = NULL;
+    if (root == NULL || key == NULL || out == NULL) {
+        return false;
+    }
+
+    item = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (!cJSON_IsNumber(item)) {
+        return false;
+    }
+    if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) {
+        return false;
+    }
+
+    *out = (uint32_t)item->valuedouble;
+    return true;
+}
+
+static bool jsonGetFloat(const cJSON *root, const char *key, float *out)
+{
+    const cJSON *item = NULL;
+    if (root == NULL || key == NULL || out == NULL) {
+        return false;
+    }
+
+    item = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (!cJSON_IsNumber(item)) {
+        return false;
+    }
+
+    *out = (float)item->valuedouble;
+    return true;
+}
+
+static bool jsonGetBool(const cJSON *root, const char *key, bool *out)
+{
+    const cJSON *item = NULL;
+    if (root == NULL || key == NULL || out == NULL) {
+        return false;
+    }
+
+    item = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (!cJSON_IsBool(item)) {
+        return false;
+    }
+
+    *out = cJSON_IsTrue(item);
+    return true;
+}
+
 static bool jsonCopyString(const cJSON *root, const char *key, char *out, size_t outSize)
 {
     const cJSON *item = NULL;
@@ -175,6 +227,38 @@ static bool jsonCopyString(const cJSON *root, const char *key, char *out, size_t
     memcpy(out, item->valuestring, len);
     out[len] = '\0';
     return true;
+}
+
+static void fillDefaultFakeBatteryModel(battery_model_t *model)
+{
+    if (model == NULL) {
+        return;
+    }
+
+    memset(model, 0, sizeof(*model));
+    model->valid = true;
+    model->packVoltageV = 51.20f;
+    model->packCurrentA = 0.0f;
+    model->socPct = 80u;
+    model->sohPct = 100u;
+    model->cycleCount = 120u;
+    model->chargeVoltageLimitV = 57.60f;
+    model->chargeCurrentLimitA = 100.0f;
+    model->dischargeCurrentLimitA = 100.0f;
+    model->cellMaxV = 3.250f;
+    model->cellMinV = 3.200f;
+    model->cellMaxIdx = 3u;
+    model->cellMinIdx = 12u;
+    model->cellDeltaV = model->cellMaxV - model->cellMinV;
+    model->temperaturesC[0] = 25.0f;
+    model->temperaturesC[1] = 25.0f;
+    model->temperaturesC[2] = 25.0f;
+    model->temperaturesC[3] = 25.0f;
+    model->temperaturesC[4] = 25.0f;
+    model->chargeEnabled = true;
+    model->dischargeEnabled = true;
+    model->balanceEnabled = false;
+    model->protocolState = 0xC0u;
 }
 
 static void wifiApplyRuntimeSettings(void)
@@ -378,7 +462,7 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "const status63=(hasData&&isNum(t.status_63))?t.status_63:'-';"
         "const banner=!hasData?(stale?'<div class=\"mono\" style=\"color:#d17a22\">Telemetry hidden: last update '+fmtAge(age)+' ago.</div>':'<div class=\"mono\">Waiting for telemetry...</div>'):(stale?'<div class=\"mono\" style=\"color:#d17a22\">Data marked stale.</div>':'');"
         "const cards=["
-        "card('Runtime',[row('Valid',hasData?'YES':'NO'),row('Source',sourceLabel),row('Protocol',protocolLabel),row('Status 0x63',status63),row('Age',fmtAge(age))]),"
+        "card('Runtime',[row('Valid',hasData?'YES':'NO'),row('Source',sourceLabel),row('Protocol',protocolLabel),row('Status 0x63',status63),row('Fake Override',t.fake_override?'ON':'OFF'),row('Age',fmtAge(age))]),"
         "card('Pack',[row('Pack Voltage',hasData?fmt(t.pack_voltage_v,3,' V'):'-'),row('Current',hasData?fmt(t.current_a,2,' A'):'-'),row('Power',hasData?fmt(t.pack_power_w,1,' W'):'-'),row('SOC',hasData&&isNum(t.soc_pct)?t.soc_pct+' %':'-'),row('SOH',hasData&&isNum(t.soh_pct)?t.soh_pct+' %':'-'),row('Cycles',hasData&&isNum(t.cycles)?t.cycles:'-')]),"
         "card('Cells',[row('Cell Max',hasData?fmt(t.cell_max_v,3,' V')+' @ #'+fmtInt(t.cell_max_idx):'-'),row('Cell Min',hasData?fmt(t.cell_min_v,3,' V')+' @ #'+fmtInt(t.cell_min_idx):'-'),row('Delta',hasData?fmt(t.delta_v,3,' V'):'-')]),"
         "card('Temperatures',[row('MOS',hasData?fmt(t.temp_mos_c,1,' C'):'-'),row('T1',hasData?fmt(t.temp_t1_c,1,' C'):'-'),row('T2',hasData?fmt(t.temp_t2_c,1,' C'):'-'),row('T4',hasData?fmt(t.temp_t4_c,1,' C'):'-'),row('T5',hasData?fmt(t.temp_t5_c,1,' C'):'-')]),"
@@ -413,7 +497,8 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "row('Web port','<input id=\"web_port\" type=\"number\" min=\"1\" max=\"65535\" value=\"'+s.web_port+'\" />')"
         "];"
         "const actions='<div class=\"actions\"><button onclick=\"saveSettings()\">Save</button><span id=\"settingsStatus\" class=\"mono\"></span></div><div id=\"routeHint\" class=\"mono\" style=\"margin-top:8px;color:#8aa0b7\"></div>';"
-        "document.getElementById('settingsForm').innerHTML='<table>'+rows.join('')+'</table>'+actions;"
+        "const fakePanel='<div class=\"card\" style=\"margin-top:16px\"><h3>Fake Inverter Data</h3><div class=\"mono\" style=\"margin-bottom:10px;color:#8aa0b7\">Runtime-only debug override. When enabled, inverter-facing protocols use these values instead of live BMS data.</div><div id=\"fakeBmsPanel\"></div></div>';"
+        "document.getElementById('settingsForm').innerHTML='<table>'+rows.join('')+'</table>'+actions+fakePanel;"
         "function applyProtoFilter(lineId,protoId,wanted,canOpts,rsOpts){"
         "const line=parseInt(document.getElementById(lineId).value,10);"
         "const opts=(line===1)?canOpts:rsOpts;"
@@ -435,6 +520,7 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "let txt='';"
         "if(mode!==3){txt='Bridge inactive in this mode.';}"
         "else if(bl===2&&bp===6&&il===2&&ip===2){txt='Special route active: JKBMS_MODBUS (RS485_'+bport+') -> RS485_GROWATT responder (RS485_'+iport+').';}"
+        "else if(bl===2&&bp===6&&il===2&&ip===3){txt='Special route active: JKBMS_MODBUS (RS485_'+bport+') -> RS485_PYLON responder (RS485_'+iport+').';}"
         "else if(bl===2&&bp===6){txt='Testing JKBMS_Modbus poller on RS485_'+bport+'.';}"
         "else if(bl===2&&bp===2){txt='Testing RS485_GROWATT poller on RS485_'+bport+'.';}"
         "else if(bl===1&&bp===1&&il===2&&ip===2){txt='Special route active: CAN_GROWATT -> RS485_GROWATT translator.';}"
@@ -465,6 +551,67 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "document.getElementById('inverter_port').addEventListener('change',updateRouteHint);"
         "updateRouteHint();"
         "}"
+        "function renderFakeBmsDebug(f){"
+        "function pick(v,d){return (v===undefined||v===null||v==='')?d:v;}"
+        "function num(id,val,step){return '<input id=\"'+id+'\" type=\"number\" step=\"'+step+'\" value=\"'+val+'\" />';}"
+        "function chk(id,val){return '<input id=\"'+id+'\" type=\"checkbox\"'+(val?' checked':'')+' />';}"
+        "const rows=["
+        "row('Enable fake data',chk('fake_enabled',!!f.enabled)),"
+        "row('Pack Voltage',num('fake_pack_voltage_v',pick(f.pack_voltage_v,51.2),'0.1')),"
+        "row('Pack Current',num('fake_pack_current_a',pick(f.pack_current_a,0),'0.1')),"
+        "row('SOC / SOH',num('fake_soc_pct',pick(f.soc_pct,80),'1')+' / '+num('fake_soh_pct',pick(f.soh_pct,100),'1')),"
+        "row('Cycles',num('fake_cycles',pick(f.cycles,120),'1')),"
+        "row('Charge Limits',num('fake_charge_voltage_limit_v',pick(f.charge_voltage_limit_v,57.6),'0.1')+' V / '+num('fake_charge_current_limit_a',pick(f.charge_current_limit_a,100),'0.1')+' A'),"
+        "row('Discharge Limit',num('fake_discharge_current_limit_a',pick(f.discharge_current_limit_a,100),'0.1')),"
+        "row('Cell Max / Min',num('fake_cell_max_v',pick(f.cell_max_v,3.25),'0.001')+' / '+num('fake_cell_min_v',pick(f.cell_min_v,3.2),'0.001')),"
+        "row('Cell Max / Min Idx',num('fake_cell_max_idx',pick(f.cell_max_idx,3),'1')+' / '+num('fake_cell_min_idx',pick(f.cell_min_idx,12),'1')),"
+        "row('Temps MOS/T1/T2',num('fake_temp_mos_c',pick(f.temp_mos_c,25),'0.1')+' / '+num('fake_temp_t1_c',pick(f.temp_t1_c,25),'0.1')+' / '+num('fake_temp_t2_c',pick(f.temp_t2_c,25),'0.1')),"
+        "row('Temps T4/T5',num('fake_temp_t4_c',pick(f.temp_t4_c,25),'0.1')+' / '+num('fake_temp_t5_c',pick(f.temp_t5_c,25),'0.1')),"
+        "row('Flags', 'Charge '+chk('fake_charge_enabled',!!f.charge_enabled)+'  Discharge '+chk('fake_discharge_enabled',!!f.discharge_enabled)+'  Balance '+chk('fake_balance_enabled',!!f.balance_enabled))," 
+        "row('Protocol State',num('fake_protocol_state',pick(f.protocol_state,192),'1'))"
+        "];"
+        "const actions='<div class=\"actions\"><button onclick=\"saveFakeBms()\">Apply Fake Data</button><button onclick=\"disableFakeBms()\">Disable Fake Data</button><span id=\"fakeStatus\" class=\"mono\"></span></div>';"
+        "document.getElementById('fakeBmsPanel').innerHTML='<table>'+rows.join('')+'</table>'+actions;"
+        "}"
+        "async function loadFakeBms(){"
+        "const f=await fetch('/api/fake_bms?ts='+Date.now(),{cache:'no-store'}).then(r=>r.json());"
+        "renderFakeBmsDebug(f);"
+        "}"
+        "async function saveFakeBms(){"
+        "const payload={"
+        "enabled:document.getElementById('fake_enabled').checked,"
+        "pack_voltage_v:parseFloat(document.getElementById('fake_pack_voltage_v').value),"
+        "pack_current_a:parseFloat(document.getElementById('fake_pack_current_a').value),"
+        "soc_pct:parseInt(document.getElementById('fake_soc_pct').value,10),"
+        "soh_pct:parseInt(document.getElementById('fake_soh_pct').value,10),"
+        "cycles:parseInt(document.getElementById('fake_cycles').value,10),"
+        "charge_voltage_limit_v:parseFloat(document.getElementById('fake_charge_voltage_limit_v').value),"
+        "charge_current_limit_a:parseFloat(document.getElementById('fake_charge_current_limit_a').value),"
+        "discharge_current_limit_a:parseFloat(document.getElementById('fake_discharge_current_limit_a').value),"
+        "cell_max_v:parseFloat(document.getElementById('fake_cell_max_v').value),"
+        "cell_min_v:parseFloat(document.getElementById('fake_cell_min_v').value),"
+        "cell_max_idx:parseInt(document.getElementById('fake_cell_max_idx').value,10),"
+        "cell_min_idx:parseInt(document.getElementById('fake_cell_min_idx').value,10),"
+        "temp_mos_c:parseFloat(document.getElementById('fake_temp_mos_c').value),"
+        "temp_t1_c:parseFloat(document.getElementById('fake_temp_t1_c').value),"
+        "temp_t2_c:parseFloat(document.getElementById('fake_temp_t2_c').value),"
+        "temp_t4_c:parseFloat(document.getElementById('fake_temp_t4_c').value),"
+        "temp_t5_c:parseFloat(document.getElementById('fake_temp_t5_c').value),"
+        "charge_enabled:document.getElementById('fake_charge_enabled').checked,"
+        "discharge_enabled:document.getElementById('fake_discharge_enabled').checked,"
+        "balance_enabled:document.getElementById('fake_balance_enabled').checked,"
+        "protocol_state:parseInt(document.getElementById('fake_protocol_state').value,10)"
+        "};"
+        "document.getElementById('fakeStatus').textContent='Applying...';"
+        "const res=await fetch('/api/fake_bms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});"
+        "const body=await res.json();"
+        "document.getElementById('fakeStatus').textContent=body.message||'done';"
+        "setTimeout(function(){loadFakeBms();refreshTelemetry();},200);"
+        "}"
+        "async function disableFakeBms(){"
+        "document.getElementById('fake_enabled').checked=false;"
+        "await saveFakeBms();"
+        "}"
         "async function saveSettings(){"
         "const payload={"
         "mode:parseInt(document.getElementById('mode').value,10),"
@@ -491,6 +638,7 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "async function loadSettings(){"
         "let s=await fetch('/api/settings?ts='+Date.now(),{cache:'no-store'}).then(r=>r.json());"
         "renderSettings(s);"
+        "loadFakeBms();"
         "}"
         "async function refreshLogs(){"
         "const el=document.getElementById('logsContent');"
@@ -516,6 +664,7 @@ static esp_err_t rootHandler(httpd_req_t *req)
 static esp_err_t telemetryHandler(httpd_req_t *req)
 {
     bridgeTelemetrySnapshot_t snap = {0};
+    const bool fakeOverride = batteryModelIsDebugOverrideEnabled();
     char json[2048];
     int pos = 0;
 
@@ -531,6 +680,7 @@ static esp_err_t telemetryHandler(httpd_req_t *req)
                     "{"
                     "\"valid\":%s,"
                     "\"stale\":%s,"
+                    "\"fake_override\":%s,"
                     "\"age_ms\":%u,"
                     "\"updated_ms\":%u,"
                     "\"source\":\"%s\","
@@ -570,6 +720,7 @@ static esp_err_t telemetryHandler(httpd_req_t *req)
                     "\"cells_v\":[",
                     snap.valid ? "true" : "false",
                     snap.stale ? "true" : "false",
+                    fakeOverride ? "true" : "false",
                     (unsigned)snap.ageMs,
                     (unsigned)snap.updatedMs,
                     snap.source,
@@ -620,6 +771,189 @@ static esp_err_t telemetryHandler(httpd_req_t *req)
     setNoCacheHeaders(req);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t fakeBmsGetHandler(httpd_req_t *req)
+{
+    battery_model_t model = {0};
+    bool enabled = false;
+    char json[1024];
+
+    batteryModelGetDebugOverride(&model, &enabled);
+    if (!model.valid) {
+        fillDefaultFakeBatteryModel(&model);
+    }
+
+    snprintf(json,
+             sizeof(json),
+             "{"
+             "\"enabled\":%s,"
+             "\"valid\":%s,"
+             "\"pack_voltage_v\":%.3f,"
+             "\"pack_current_a\":%.3f,"
+             "\"soc_pct\":%u,"
+             "\"soh_pct\":%u,"
+             "\"cycles\":%u,"
+             "\"charge_voltage_limit_v\":%.3f,"
+             "\"charge_current_limit_a\":%.3f,"
+             "\"discharge_current_limit_a\":%.3f,"
+             "\"cell_max_v\":%.3f,"
+             "\"cell_min_v\":%.3f,"
+             "\"cell_max_idx\":%u,"
+             "\"cell_min_idx\":%u,"
+             "\"temp_mos_c\":%.1f,"
+             "\"temp_t1_c\":%.1f,"
+             "\"temp_t2_c\":%.1f,"
+             "\"temp_t4_c\":%.1f,"
+             "\"temp_t5_c\":%.1f,"
+             "\"charge_enabled\":%s,"
+             "\"discharge_enabled\":%s,"
+             "\"balance_enabled\":%s,"
+             "\"protocol_state\":%u"
+             "}",
+             enabled ? "true" : "false",
+             model.valid ? "true" : "false",
+             (double)model.packVoltageV,
+             (double)model.packCurrentA,
+             (unsigned)model.socPct,
+             (unsigned)model.sohPct,
+             (unsigned)model.cycleCount,
+             (double)model.chargeVoltageLimitV,
+             (double)model.chargeCurrentLimitA,
+             (double)model.dischargeCurrentLimitA,
+             (double)model.cellMaxV,
+             (double)model.cellMinV,
+             (unsigned)model.cellMaxIdx,
+             (unsigned)model.cellMinIdx,
+             (double)model.temperaturesC[0],
+             (double)model.temperaturesC[1],
+             (double)model.temperaturesC[2],
+             (double)model.temperaturesC[3],
+             (double)model.temperaturesC[4],
+             model.chargeEnabled ? "true" : "false",
+             model.dischargeEnabled ? "true" : "false",
+             model.balanceEnabled ? "true" : "false",
+             (unsigned)model.protocolState);
+
+    setNoCacheHeaders(req);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t fakeBmsPostHandler(httpd_req_t *req)
+{
+    char *buf = NULL;
+    int receivedTotal = 0;
+    int contentLen = 0;
+    int remaining = 0;
+    cJSON *root = NULL;
+    bool parseError = false;
+    bool enabled = false;
+    battery_model_t model = {0};
+    const int kMaxBodyLen = 4096;
+    const char *okResp = "{\"ok\":true,\"message\":\"Fake inverter data applied\"}";
+    const char *disabledResp = "{\"ok\":true,\"message\":\"Fake inverter data disabled\"}";
+
+    if (req == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    contentLen = req->content_len;
+    if (contentLen <= 0 || contentLen > kMaxBodyLen) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        setNoCacheHeaders(req);
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_send(req,
+                               "{\"ok\":false,\"message\":\"Invalid fake payload\"}",
+                               HTTPD_RESP_USE_STRLEN);
+    }
+
+    buf = (char *)calloc((size_t)contentLen + 1u, sizeof(char));
+    if (buf == NULL) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        setNoCacheHeaders(req);
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_send(req,
+                               "{\"ok\":false,\"message\":\"Out of memory\"}",
+                               HTTPD_RESP_USE_STRLEN);
+    }
+
+    remaining = contentLen;
+    while (remaining > 0) {
+        int received = httpd_req_recv(req, buf + receivedTotal, remaining);
+        if (received <= 0) {
+            parseError = true;
+            break;
+        }
+        receivedTotal += received;
+        remaining -= received;
+    }
+
+    if (!parseError) {
+        root = cJSON_ParseWithLength(buf, (size_t)receivedTotal);
+        if (root == NULL || !cJSON_IsObject(root)) {
+            parseError = true;
+        }
+    }
+
+    if (parseError) {
+        cJSON_Delete(root);
+        free(buf);
+        httpd_resp_set_status(req, "400 Bad Request");
+        setNoCacheHeaders(req);
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_send(req,
+                               "{\"ok\":false,\"message\":\"Invalid JSON payload\"}",
+                               HTTPD_RESP_USE_STRLEN);
+    }
+
+    fillDefaultFakeBatteryModel(&model);
+    (void)jsonGetBool(root, "enabled", &enabled);
+    (void)jsonGetFloat(root, "pack_voltage_v", &model.packVoltageV);
+    (void)jsonGetFloat(root, "pack_current_a", &model.packCurrentA);
+    (void)jsonGetUInt8(root, "soc_pct", &model.socPct);
+    (void)jsonGetUInt8(root, "soh_pct", &model.sohPct);
+    (void)jsonGetUInt16(root, "cycles", &model.cycleCount);
+    (void)jsonGetFloat(root, "charge_voltage_limit_v", &model.chargeVoltageLimitV);
+    (void)jsonGetFloat(root, "charge_current_limit_a", &model.chargeCurrentLimitA);
+    (void)jsonGetFloat(root, "discharge_current_limit_a", &model.dischargeCurrentLimitA);
+    (void)jsonGetFloat(root, "cell_max_v", &model.cellMaxV);
+    (void)jsonGetFloat(root, "cell_min_v", &model.cellMinV);
+    (void)jsonGetUInt8(root, "cell_max_idx", &model.cellMaxIdx);
+    (void)jsonGetUInt8(root, "cell_min_idx", &model.cellMinIdx);
+    (void)jsonGetFloat(root, "temp_mos_c", &model.temperaturesC[0]);
+    (void)jsonGetFloat(root, "temp_t1_c", &model.temperaturesC[1]);
+    (void)jsonGetFloat(root, "temp_t2_c", &model.temperaturesC[2]);
+    (void)jsonGetFloat(root, "temp_t4_c", &model.temperaturesC[3]);
+    (void)jsonGetFloat(root, "temp_t5_c", &model.temperaturesC[4]);
+    (void)jsonGetBool(root, "charge_enabled", &model.chargeEnabled);
+    (void)jsonGetBool(root, "discharge_enabled", &model.dischargeEnabled);
+    (void)jsonGetBool(root, "balance_enabled", &model.balanceEnabled);
+    (void)jsonGetUInt32(root, "protocol_state", &model.protocolState);
+    cJSON_Delete(root);
+    free(buf);
+
+    model.valid = true;
+    model.cellDeltaV = (model.cellMaxV >= model.cellMinV) ? (model.cellMaxV - model.cellMinV) : 0.0f;
+    if (model.socPct > 100u) {
+        model.socPct = 100u;
+    }
+    if (model.sohPct > 100u) {
+        model.sohPct = 100u;
+    }
+    if (model.cellMaxIdx == 0u) {
+        model.cellMaxIdx = 1u;
+    }
+    if (model.cellMinIdx == 0u) {
+        model.cellMinIdx = 1u;
+    }
+
+    batteryModelSetDebugOverride(&model);
+    batteryModelSetDebugOverrideEnabled(enabled);
+
+    setNoCacheHeaders(req);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, enabled ? okResp : disabledResp, HTTPD_RESP_USE_STRLEN);
 }
 
 static esp_err_t logsHandler(httpd_req_t *req)
@@ -852,12 +1186,26 @@ static void startHttpServer(void)
         .handler = settingsPostHandler,
         .user_ctx = NULL
     };
+    httpd_uri_t fakeBmsUri = {
+        .uri = "/api/fake_bms",
+        .method = HTTP_GET,
+        .handler = fakeBmsGetHandler,
+        .user_ctx = NULL
+    };
+    httpd_uri_t fakeBmsPostUri = {
+        .uri = "/api/fake_bms",
+        .method = HTTP_POST,
+        .handler = fakeBmsPostHandler,
+        .user_ctx = NULL
+    };
 
     httpd_register_uri_handler(s_httpd, &rootUri);
     httpd_register_uri_handler(s_httpd, &telemetryUri);
     httpd_register_uri_handler(s_httpd, &logsUri);
     httpd_register_uri_handler(s_httpd, &settingsUri);
     httpd_register_uri_handler(s_httpd, &settingsPostUri);
+    httpd_register_uri_handler(s_httpd, &fakeBmsUri);
+    httpd_register_uri_handler(s_httpd, &fakeBmsPostUri);
 }
 
 static void initWifiSta(void)

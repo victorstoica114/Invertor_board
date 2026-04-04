@@ -7,6 +7,7 @@
 #include "config.h"
 #include "decoders/modbusDecoder.h"
 #include "orchestrator/protocol_types.h"
+#include "protocols/common/battery_model.h"
 #include "protocols/rs485_growatt/rs485_growatt_modbus_poller.h"
 #include "protocols/rs485_growatt/rs485_growatt_registers_map.h"
 
@@ -45,6 +46,63 @@ static void rs485GrowattStoreLatestPacket(const bms_decoded_packet_t *packet)
 static uint8_t clampU8(uint16_t v, uint8_t vmax)
 {
     return (uint8_t)((v > vmax) ? vmax : v);
+}
+
+static void rs485GrowattPublishBatteryModel(const modbusDecoder_t *decoder,
+                                            const bms_decoded_packet_t *packet)
+{
+    battery_model_t model = {0};
+    uint16_t regVal = 0;
+
+    if (decoder == NULL || packet == NULL) {
+        return;
+    }
+
+    model.valid = true;
+    model.updatedMs = (uint32_t)(packet->timestampUs / 1000LL);
+
+    if (packet->hasSoc) {
+        model.socPct = packet->socPct;
+    }
+    if (packet->hasPackVoltageCv) {
+        model.packVoltageV = (float)packet->packVoltageCv / 100.0f;
+    }
+    if (packet->hasCellExtremes) {
+        model.cellMinV = (float)packet->minCellMv / 1000.0f;
+        model.cellMaxV = (float)packet->maxCellMv / 1000.0f;
+        model.cellMinIdx = packet->minCellIndex;
+        model.cellMaxIdx = packet->maxCellIndex;
+        model.cellDeltaV = (float)(packet->maxCellMv - packet->minCellMv) / 1000.0f;
+    }
+    if (packet->hasTemperatureC) {
+        model.temperaturesC[0] = (float)packet->temperatureC;
+        model.temperaturesC[1] = (float)packet->temperatureC;
+        model.temperaturesC[2] = (float)packet->temperatureC;
+    }
+
+    if (modbusDecoderGetCachedReg(decoder, RS485_GROWATT_MB_REG_SOH_PCT, &regVal)) {
+        model.sohPct = clampU8(regVal, 100u);
+    }
+    if (modbusDecoderGetCachedReg(decoder, RS485_GROWATT_MB_REG_CYCLE_COUNT_TENTATIVE, &regVal)) {
+        model.cycleCount = regVal;
+    }
+    if (modbusDecoderGetCachedReg(decoder, RS485_GROWATT_MB_REG_CV_TARGET_CV, &regVal)) {
+        model.chargeVoltageLimitV = (float)regVal / 100.0f;
+    }
+    if (modbusDecoderGetCachedReg(decoder, RS485_GROWATT_MB_REG_ICHG_LIM_CA_TENTATIVE, &regVal)) {
+        model.chargeCurrentLimitA = (float)regVal / 100.0f;
+    }
+    if (modbusDecoderGetCachedReg(decoder, RS485_GROWATT_MB_REG_IDIS_LIM_CA_TENTATIVE, &regVal)) {
+        model.dischargeCurrentLimitA = (float)regVal / 100.0f;
+    }
+    if (modbusDecoderGetCachedReg(decoder, RS485_GROWATT_MB_REG_PACK_I_ABS_CA_TENTATIVE, &regVal)) {
+        model.packCurrentA = (float)regVal / 100.0f;
+    }
+    if (modbusDecoderGetCachedReg(decoder, RS485_GROWATT_MB_REG_STATUS_FLAGS, &regVal)) {
+        model.protocolState = regVal;
+    }
+
+    batteryModelSet(&model);
 }
 
 static bool rs485GrowattBuildDecodedPacket(const modbusDecoder_t *decoder,
@@ -140,6 +198,7 @@ static void rs485GrowattBmsTask(void *pv)
             bms_decoded_packet_t packet = {0};
             if (rs485GrowattBuildDecodedPacket(&ctx->decoder, ++ctx->sequence, &packet)) {
                 rs485GrowattStoreLatestPacket(&packet);
+                rs485GrowattPublishBatteryModel(&ctx->decoder, &packet);
                 if (xQueueOverwrite(ctx->outQueue, &packet) != pdPASS) {
                     ESP_LOGW(EXAMPLE_TAG, "RS485 Growatt output queue overwrite failed");
                 }
@@ -160,6 +219,7 @@ esp_err_t rs485GrowattBmsTaskStart(QueueHandle_t outQueue)
 
     memset(&g_rs485GrowattBmsCtx, 0, sizeof(g_rs485GrowattBmsCtx));
     g_rs485GrowattBmsCtx.outQueue = outQueue;
+    batteryModelClear();
 
     BaseType_t taskOk =
         xTaskCreate(rs485GrowattBmsTask,
@@ -207,6 +267,7 @@ esp_err_t rs485GrowattBmsTaskStop(void)
     vTaskDelete(g_rs485GrowattBmsTaskHandle);
     g_rs485GrowattBmsTaskHandle = NULL;
     memset(&g_rs485GrowattBmsCtx, 0, sizeof(g_rs485GrowattBmsCtx));
+    batteryModelClear();
 
     portENTER_CRITICAL(&g_latestPacketMux);
     g_haveLatestPacket = false;

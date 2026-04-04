@@ -6,6 +6,7 @@
 #include "Drivers/can_driver.h"
 #include "config.h"
 #include "orchestrator/protocol_types.h"
+#include "protocols/common/battery_model.h"
 #include "protocols/growatt/growatt_registers_map.h"
 
 #include "driver/twai.h"
@@ -17,6 +18,7 @@
 typedef struct {
     QueueHandle_t inQueue;
     bool haveLatest;
+    bool latestFromDebugOverride;
     bms_decoded_packet_t latest;
     int64_t lastTxUs;
 } growattInverterTaskCtx_t;
@@ -69,6 +71,49 @@ static esp_err_t sendCan322(const bms_decoded_packet_t *packet)
     return twai_transmit_v2(txBus, &tx, pdMS_TO_TICKS(20));
 }
 
+static bool buildPacketFromBatteryModel(bms_decoded_packet_t *packet)
+{
+    battery_model_t model = {0};
+
+    if (packet == NULL) {
+        return false;
+    }
+
+    batteryModelGet(&model);
+    if (!model.valid || model.updatedMs == 0u) {
+        return false;
+    }
+
+    memset(packet, 0, sizeof(*packet));
+    packet->sourceProtocol = PROTOCOL_ID_JKBMS;
+    packet->timestampUs = esp_timer_get_time();
+    packet->hasSoc = true;
+    packet->socPct = model.socPct;
+
+    if (model.temperaturesC[0] > -100.0f) {
+        packet->hasTemperatureC = true;
+        packet->temperatureC = (int16_t)model.temperaturesC[0];
+    }
+
+    if (model.packVoltageV > 0.0f) {
+        uint32_t packCv = (uint32_t)(model.packVoltageV * 100.0f + 0.5f);
+        packet->hasPackVoltageCv = true;
+        packet->packVoltageCv = (uint16_t)((packCv > UINT16_MAX) ? UINT16_MAX : packCv);
+    }
+
+    if (model.cellMaxV > 0.0f && model.cellMinV > 0.0f) {
+        uint32_t maxMv = (uint32_t)(model.cellMaxV * 1000.0f + 0.5f);
+        uint32_t minMv = (uint32_t)(model.cellMinV * 1000.0f + 0.5f);
+        packet->hasCellExtremes = true;
+        packet->maxCellMv = (uint16_t)((maxMv > UINT16_MAX) ? UINT16_MAX : maxMv);
+        packet->minCellMv = (uint16_t)((minMv > UINT16_MAX) ? UINT16_MAX : minMv);
+        packet->maxCellIndex = model.cellMaxIdx;
+        packet->minCellIndex = model.cellMinIdx;
+    }
+
+    return packet->hasSoc || packet->hasTemperatureC;
+}
+
 static void growattInverterTask(void *pv)
 {
     growattInverterTaskCtx_t *ctx = (growattInverterTaskCtx_t *)pv;
@@ -81,6 +126,18 @@ static void growattInverterTask(void *pv)
         if (got == pdTRUE) {
             ctx->latest = incoming;
             ctx->haveLatest = true;
+            ctx->latestFromDebugOverride = false;
+        } else if (batteryModelIsDebugOverrideEnabled()) {
+            bms_decoded_packet_t fakePacket = {0};
+            if (buildPacketFromBatteryModel(&fakePacket)) {
+                ctx->latest = fakePacket;
+                ctx->haveLatest = true;
+                ctx->latestFromDebugOverride = true;
+            }
+        } else if (ctx->latestFromDebugOverride) {
+            memset(&ctx->latest, 0, sizeof(ctx->latest));
+            ctx->haveLatest = false;
+            ctx->latestFromDebugOverride = false;
         }
 
         if (!ctx->haveLatest || !ctx->latest.hasSoc || !ctx->latest.hasTemperatureC) {

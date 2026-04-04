@@ -1,4 +1,4 @@
-#include "bridge.h"
+#include "Web_interface/web_bridge_api.h"
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -9,7 +9,7 @@
 #include "orchestrator/protocol_types.h"
 #include "protocols/growatt/growatt_bms_task.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_bms_task.h"
-#include "rs485_can_bridge.h"
+#include "protocols/rs485_growatt/rs485_growatt_bridge.h"
 #include "runtime_settings.h"
 
 #include "esp_log.h"
@@ -19,7 +19,6 @@
 #define BRIDGE_TAG "BRIDGE_COMPAT"
 
 static bridgeTelemetrySnapshot_t g_manualTelemetry;
-static universal_battery_model_t g_universalBatteryModel;
 static bool g_haveManualTelemetry;
 static uint32_t g_manualTelemetryUpdatedMs;
 static char g_decodedLog[2048];
@@ -28,16 +27,6 @@ static portMUX_TYPE g_bridgeMux = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t bridgeNowMs(void)
 {
     return (uint32_t)(esp_timer_get_time() / 1000LL);
-}
-
-static bool bridgeUniversalBatteryModelIsFresh(const universal_battery_model_t *model)
-{
-    uint32_t nowMs = bridgeNowMs();
-
-    if (model == NULL || !model->valid || model->updatedMs == 0u) {
-        return false;
-    }
-    return (nowMs - model->updatedMs) <= BRIDGE_SOURCE_STALE_MS;
 }
 
 static const char *modeToStr(uint8_t mode)
@@ -462,16 +451,6 @@ static void buildFallbackLog(char *out, uint32_t outSize)
              (double)snap.deltaV);
 }
 
-void rs485BridgeEnable(void)
-{
-    /* Kept for backwards compatibility with older web/runtime integration. */
-}
-
-void canBridgeEnable(void)
-{
-    /* Kept for backwards compatibility with older web/runtime integration. */
-}
-
 void bridgeReloadFromRuntimeSettings(void)
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
@@ -600,7 +579,6 @@ void bridgeSetTelemetrySnapshot(const bridgeTelemetrySnapshot_t *in)
     if (in == NULL) {
         didClear = true;
         memset(&g_manualTelemetry, 0, sizeof(g_manualTelemetry));
-        memset(&g_universalBatteryModel, 0, sizeof(g_universalBatteryModel));
         g_haveManualTelemetry = false;
         g_manualTelemetryUpdatedMs = 0u;
     } else {
@@ -619,24 +597,6 @@ void bridgeSetTelemetrySnapshot(const bridgeTelemetrySnapshot_t *in)
         g_manualTelemetry.stale = false;
         g_manualTelemetryUpdatedMs = g_manualTelemetry.updatedMs;
         g_haveManualTelemetry = true;
-        g_universalBatteryModel.valid = in->valid;
-        g_universalBatteryModel.packVoltageV = in->packVoltageV;
-        g_universalBatteryModel.packCurrentA = in->currentA;
-        g_universalBatteryModel.socPct = in->socPct;
-        g_universalBatteryModel.sohPct = in->sohPct;
-        g_universalBatteryModel.cycleCount = in->cycles;
-        g_universalBatteryModel.cellMaxV = in->cellMaxV;
-        g_universalBatteryModel.cellMinV = in->cellMinV;
-        g_universalBatteryModel.cellMaxIdx = in->cellMaxIdx;
-        g_universalBatteryModel.cellMinIdx = in->cellMinIdx;
-        g_universalBatteryModel.cellDeltaV = in->deltaV;
-        g_universalBatteryModel.temperaturesC[0] = in->tempMosC;
-        g_universalBatteryModel.temperaturesC[1] = in->tempT1C;
-        g_universalBatteryModel.temperaturesC[2] = in->tempT2C;
-        g_universalBatteryModel.temperaturesC[3] = in->tempT4C;
-        g_universalBatteryModel.temperaturesC[4] = in->tempT5C;
-        g_universalBatteryModel.protocolState = in->pylonStatus63;
-        g_universalBatteryModel.updatedMs = in->valid ? nowMs : 0u;
     }
     portEXIT_CRITICAL(&g_bridgeMux);
 
@@ -647,41 +607,6 @@ void bridgeSetTelemetrySnapshot(const bridgeTelemetrySnapshot_t *in)
         ESP_LOGI(BRIDGE_TAG, "[TELEM_SET] Updating manual cache: source=%s, valid=%s, soc=%u%%, v=%.2fV",
                  logSource, in->valid ? "YES" : "NO", logSoc, (double)logVoltage);
     }
-}
-
-void bridgeGetUniversalBatteryModel(universal_battery_model_t *out)
-{
-    if (out == NULL) {
-        return;
-    }
-
-    portENTER_CRITICAL(&g_bridgeMux);
-    *out = g_universalBatteryModel;
-    portEXIT_CRITICAL(&g_bridgeMux);
-
-    if (!bridgeUniversalBatteryModelIsFresh(out)) {
-        memset(out, 0, sizeof(*out));
-    }
-}
-
-void bridgeSetUniversalBatteryModel(const universal_battery_model_t *in)
-{
-    uint32_t nowMs = bridgeNowMs();
-
-    portENTER_CRITICAL(&g_bridgeMux);
-    if (in == NULL) {
-        memset(&g_universalBatteryModel, 0, sizeof(g_universalBatteryModel));
-    } else {
-        g_universalBatteryModel = *in;
-        if (g_universalBatteryModel.valid) {
-            if (g_universalBatteryModel.updatedMs == 0u) {
-                g_universalBatteryModel.updatedMs = nowMs;
-            }
-        } else {
-            g_universalBatteryModel.updatedMs = 0u;
-        }
-    }
-    portEXIT_CRITICAL(&g_bridgeMux);
 }
 
 void bridgeGetDecodedLogSnapshot(char *out, uint32_t outSize)

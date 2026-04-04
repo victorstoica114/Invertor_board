@@ -13,7 +13,8 @@
 #include "protocols/jkbms_modbus/jkbms_modbus_bms_task.h"
 #include "protocols/pylon/pylon_bms_task.h"
 #include "protocols/pylon/pylon_inverter_task.h"
-#include "rs485_can_bridge.h"
+#include "protocols/rs485_growatt/rs485_growatt_bridge.h"
+#include "protocols/common/battery_model.h"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -181,6 +182,62 @@ static bool isRsJkbmsToRsGrowattRoute(const bridge_runtime_settings_t *settings)
            (settings->inverter_protocol == PROTOCOL_RS485_GROWATT);
 }
 
+static bool buildPacketFromBatteryModel(bms_decoded_packet_t *out)
+{
+    battery_model_t model = {0};
+
+    if (out == NULL) {
+        return false;
+    }
+
+    batteryModelGet(&model);
+    if (!model.valid || model.updatedMs == 0u) {
+        return false;
+    }
+
+    memset(out, 0, sizeof(*out));
+    out->sourceProtocol = PROTOCOL_ID_JKBMS;
+    out->timestampUs = esp_timer_get_time();
+
+    out->hasSoc = true;
+    out->socPct = model.socPct;
+
+    if (model.temperaturesC[0] > -100.0f) {
+        out->hasTemperatureC = true;
+        out->temperatureC = (int16_t)model.temperaturesC[0];
+    }
+
+    if (model.packVoltageV > 0.0f) {
+        uint32_t packCv = (uint32_t)(model.packVoltageV * 100.0f + 0.5f);
+        out->hasPackVoltageCv = true;
+        out->packVoltageCv = (uint16_t)((packCv > UINT16_MAX) ? UINT16_MAX : packCv);
+    }
+
+    if (model.cellMaxV > 0.0f && model.cellMinV > 0.0f) {
+        uint32_t maxMv = (uint32_t)(model.cellMaxV * 1000.0f + 0.5f);
+        uint32_t minMv = (uint32_t)(model.cellMinV * 1000.0f + 0.5f);
+        out->hasCellExtremes = true;
+        out->maxCellMv = (uint16_t)((maxMv > UINT16_MAX) ? UINT16_MAX : maxMv);
+        out->minCellMv = (uint16_t)((minMv > UINT16_MAX) ? UINT16_MAX : minMv);
+        out->maxCellIndex = model.cellMaxIdx;
+        out->minCellIndex = model.cellMinIdx;
+    }
+
+    return out->hasSoc || out->hasTemperatureC || out->hasPackVoltageCv || out->hasCellExtremes;
+}
+
+static bool isRsJkbmsToRsPylonRoute(const bridge_runtime_settings_t *settings)
+{
+    if (settings == NULL) {
+        return false;
+    }
+
+    return (settings->bms_line == LINE_RS485) &&
+           (settings->inverter_line == LINE_RS485) &&
+           (settings->bms_protocol == PROTOCOL_RS485_JKBMS) &&
+           (settings->inverter_protocol == PROTOCOL_RS485_PYLON);
+}
+
 static void clearTransportBuffers(void)
 {
     uint8_t sink[64];
@@ -212,6 +269,13 @@ static void orchestratorTask(void *pv)
         bms_decoded_packet_t packet = {0};
         if (xQueueReceive(ctx->bmsQueue, &packet, portMAX_DELAY) != pdTRUE) {
             continue;
+        }
+
+        if (batteryModelIsDebugOverrideEnabled()) {
+            bms_decoded_packet_t fakePacket = {0};
+            if (buildPacketFromBatteryModel(&fakePacket)) {
+                packet = fakePacket;
+            }
         }
 
         const int64_t nowUs = esp_timer_get_time();
@@ -320,9 +384,10 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
 
     const bool canToRsGrowatt = isCanToRsGrowattRoute(settings);
     const bool rsJkbmsToRsGrowatt = isRsJkbmsToRsGrowattRoute(settings);
-    const bool pylonRs485Route = pylonRs485BridgeHandlesCurrentConfig();
+    const bool rsJkbmsToRsPylon = isRsJkbmsToRsPylonRoute(settings);
+    const bool pylonRs485Route = pylonRs485BridgeSupportsRoute(settings);
     ESP_LOGI(EXAMPLE_TAG,
-             "Orchestrator runtime start: bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) canToRsGrowatt=%s rsJkbmsToRsGrowatt=%s pylonRs485=%s",
+             "Orchestrator runtime start: bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) canToRsGrowatt=%s rsJkbmsToRsGrowatt=%s rsJkbmsToRsPylon=%s pylonRs485=%s",
              (unsigned)settings->bms_line,
              (unsigned)settings->bms_protocol,
              (unsigned)settings->bms_port,
@@ -331,6 +396,7 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
              (unsigned)settings->inverter_port,
              canToRsGrowatt ? "YES" : "NO",
              rsJkbmsToRsGrowatt ? "YES" : "NO",
+             rsJkbmsToRsPylon ? "YES" : "NO",
              pylonRs485Route ? "YES" : "NO");
 
     if (canToRsGrowatt) {
@@ -408,6 +474,42 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
         g_orchestratorCtx.canRs485TranslatorActive = true;
         ESP_LOGI(EXAMPLE_TAG,
                  "Orchestrator started JKBMS RS485->RS485 Growatt route: BMS(RS485_%u) -> Inverter(%s:%u)",
+                 (unsigned)settings->bms_port,
+                 rsNameByPort(settings->inverter_port),
+                 (unsigned)settings->inverter_port);
+        return ESP_OK;
+    }
+
+    if (rsJkbmsToRsPylon) {
+        if (g_orchestratorTaskHandle != NULL || g_orchestratorCtx.canRs485TranslatorActive) {
+            ESP_LOGW(EXAMPLE_TAG, "Orchestrator already running");
+            return ESP_ERR_INVALID_STATE;
+        }
+
+        memset(&g_orchestratorCtx, 0, sizeof(g_orchestratorCtx));
+        g_orchestratorCtx.bmsProtocol = PROTOCOL_ID_JKBMS;
+        g_orchestratorCtx.inverterProtocol = PROTOCOL_ID_PYLON;
+
+        g_orchestratorCtx.bmsQueue =
+            xQueueCreate(ORCHESTRATOR_BMS_QUEUE_LEN, sizeof(bms_decoded_packet_t));
+        if (g_orchestratorCtx.bmsQueue == NULL) {
+            orchestratorReset(&g_orchestratorCtx);
+            return ESP_ERR_NO_MEM;
+        }
+
+        esp_err_t err = jkbmsModbusBmsTaskStart(g_orchestratorCtx.bmsQueue);
+        if (err != ESP_OK) {
+            ESP_LOGW(EXAMPLE_TAG,
+                     "JKBMS BMS task failed for RS485->RS485 Pylon route (err=0x%x)",
+                     (unsigned)err);
+            orchestratorReset(&g_orchestratorCtx);
+            return err;
+        }
+
+        pylonRs485BridgeEnable();
+        g_orchestratorCtx.canRs485TranslatorActive = true;
+        ESP_LOGI(EXAMPLE_TAG,
+                 "Orchestrator started JKBMS RS485->RS485 Pylon route: BMS(RS485_%u) -> Inverter(%s:%u)",
                  (unsigned)settings->bms_port,
                  rsNameByPort(settings->inverter_port),
                  (unsigned)settings->inverter_port);
