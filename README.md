@@ -4,6 +4,8 @@ This repository contains an ESP-IDF firmware for an ESP32 board that bridges, tr
 
 The project is used as a practical protocol bridge between BMS and inverter, with runtime configuration through a web UI.
 
+See also: [CHANGELOG.md](CHANGELOG.md)
+
 ## Target Hardware
 
 - MCU family: Espressif ESP32
