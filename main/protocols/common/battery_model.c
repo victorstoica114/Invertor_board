@@ -5,6 +5,7 @@
 #include "config.h"
 
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
 
 static battery_model_t g_batteryModel;
 static battery_model_t g_debugBatteryModel;
