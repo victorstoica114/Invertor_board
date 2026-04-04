@@ -524,13 +524,23 @@ static bool buildCanDerivedInfo63(char *out, size_t outSize)
         reason = "native_protocol_state";
     } else if (model.valid) {
         uint8_t status = 0u;
+        bool haveExplicitChargeDischarge = false;
         if (model.chargeEnabled) status |= 0x80u;
         if (model.dischargeEnabled) status |= 0x40u;
         if (model.balanceEnabled) status |= 0x20u;
-        if (status == 0u && !nativeStatusSource) {
-            /* Generic sources like JK do not expose native Pylon 0x63 bits. */
+        if ((model.protocolState & 0x80u) != 0u || model.chargeEnabled) {
+            haveExplicitChargeDischarge = true;
+        }
+        if ((model.protocolState & 0x40u) != 0u || model.dischargeEnabled) {
+            haveExplicitChargeDischarge = true;
+        }
+        if (!nativeStatusSource && !haveExplicitChargeDischarge) {
+            /*
+             * Generic sources like JK do not expose native Pylon enable bits.
+             * Treat missing charge/discharge flags as "unknown", not "OFF".
+             */
             status = (uint8_t)(0xC0u | (model.balanceEnabled ? 0x20u : 0u));
-            reason = "generic_default_c0";
+            reason = "generic_default_charge_discharge_on";
         } else {
             reason = "derived_from_flags";
         }
