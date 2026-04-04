@@ -539,9 +539,11 @@ static bool buildCanDerivedInfo63(char *out, size_t outSize)
             /*
              * Generic sources like JK do not expose native Pylon enable bits.
              * Treat missing charge/discharge flags as "unknown", not "OFF".
+             * Also avoid projecting generic "balance active" into Pylon 0x63,
+             * because the web fake path that works uses a plain 0xC0 status.
              */
-            status = (uint8_t)(0xC0u | (model.balanceEnabled ? 0x20u : 0u));
-            reason = "generic_default_charge_discharge_on";
+            status = 0xC0u;
+            reason = "generic_default_c0_ignore_balance";
         } else {
             reason = "derived_from_flags";
         }
