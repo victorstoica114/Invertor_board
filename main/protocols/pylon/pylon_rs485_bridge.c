@@ -71,18 +71,10 @@ static int64_t s_lastPylonBmsTrafficUs = 0;
 static int64_t s_lastPylonInverterTrafficUs = 0;
 static int64_t s_lastCanSourceDiagUs = 0;
 static int64_t s_lastCacheBuildDiagUs = 0;
-static int64_t s_lastStatus63DiagUs = 0;
-static uint8_t s_lastStatus63Value = 0xFFu;
-static char s_lastStatus63Reason[48] = "init";
 
 static void telemetryFromSummary(void);
 static void updateSummary61(void);
 static void updateSummary63(void);
-static void logSyntheticPayloadBuild(const char *label,
-                                     const universal_battery_model_t *model,
-                                     const char *info61,
-                                     const char *info62,
-                                     const char *info63);
 
 static const char *protocolToStrLocal(uint8_t protocol)
 {
@@ -548,102 +540,28 @@ static bool buildCanDerivedInfo63(char *out, size_t outSize)
             reason = "derived_from_flags";
         }
         bytes[8] = status;
-        if (pylonDiagLogsEnabled()) {
-            ESP_LOGI(EXAMPLE_TAG,
-                     "PYLON synthetic 0x63 inputs: native=%s explicitCD=%s flags(c=%u d=%u b=%u state=0x%02X) -> status=0x%02X reason=%s",
-                     nativeStatusSource ? "YES" : "NO",
-                     haveExplicitChargeDischarge ? "YES" : "NO",
-                     model.chargeEnabled ? 1u : 0u,
-                     model.dischargeEnabled ? 1u : 0u,
-                     model.balanceEnabled ? 1u : 0u,
-                     (unsigned)(model.protocolState & 0xFFu),
-                     (unsigned)bytes[8],
-                     reason);
-        }
     }
 
-    snprintf(s_lastStatus63Reason, sizeof(s_lastStatus63Reason), "%s", reason);
-
-    if (pylonDiagLogsEnabled() &&
-        ((bytes[8] != s_lastStatus63Value) || ((nowUs - s_lastStatus63DiagUs) >= 1000000LL))) {
-        ESP_LOGI(EXAMPLE_TAG,
-                 "PYLON synthetic 0x63 derive: status=0x%02X reason=%s native=%s forceFake=%s flags(c=%u d=%u b=%u state=0x%02X)",
-                 (unsigned)bytes[8],
-                 reason,
-                 nativeStatusSource ? "YES" : "NO",
-                 forceStaticPayload ? "YES" : "NO",
-                 model.chargeEnabled ? 1u : 0u,
-                 model.dischargeEnabled ? 1u : 0u,
-                 model.balanceEnabled ? 1u : 0u,
-                 (unsigned)(model.protocolState & 0xFFu));
-        s_lastStatus63DiagUs = nowUs;
-        s_lastStatus63Value = bytes[8];
-    }
+    (void)nowUs;
+    (void)reason;
 
     encodeHexAscii(bytes, (int)sizeof(bytes), out, outSize);
     return out[0] != '\0';
-}
-
-static void logSyntheticPayloadBuild(const char *label,
-                                     const universal_battery_model_t *model,
-                                     const char *info61,
-                                     const char *info62,
-                                     const char *info63)
-{
-    if (!pylonDiagLogsEnabled() || model == NULL) {
-        return;
-    }
-
-    ESP_LOGI(EXAMPLE_TAG,
-             "%s model: valid=%s V=%.2fV I=%.2fA soc=%u soh=%u cyc=%u max=%.3fV#%u min=%.3fV#%u T=[%.1f %.1f %.1f %.1f %.1f] flags(c=%u d=%u b=%u state=0x%02X)",
-             label != NULL ? label : "PYLON synthetic",
-             model->valid ? "YES" : "NO",
-             (double)model->packVoltageV,
-             (double)model->packCurrentA,
-             (unsigned)model->socPct,
-             (unsigned)model->sohPct,
-             (unsigned)model->cycleCount,
-             (double)model->cellMaxV,
-             (unsigned)model->cellMaxIdx,
-             (double)model->cellMinV,
-             (unsigned)model->cellMinIdx,
-             (double)model->temperaturesC[0],
-             (double)model->temperaturesC[1],
-             (double)model->temperaturesC[2],
-             (double)model->temperaturesC[3],
-             (double)model->temperaturesC[4],
-             model->chargeEnabled ? 1u : 0u,
-             model->dischargeEnabled ? 1u : 0u,
-             model->balanceEnabled ? 1u : 0u,
-             (unsigned)(model->protocolState & 0xFFu));
-
-    if (info61 != NULL && info61[0] != '\0') {
-        ESP_LOGI(EXAMPLE_TAG, "%s 0x61=[%s]", label != NULL ? label : "PYLON synthetic", info61);
-    }
-    if (info62 != NULL && info62[0] != '\0') {
-        ESP_LOGI(EXAMPLE_TAG, "%s 0x62=[%s]", label != NULL ? label : "PYLON synthetic", info62);
-    }
-    if (info63 != NULL && info63[0] != '\0') {
-        ESP_LOGI(EXAMPLE_TAG, "%s 0x63=[%s]", label != NULL ? label : "PYLON synthetic", info63);
-    }
 }
 
 static void maybeRefreshSyntheticCacheFromUniversal(void)
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
     universal_battery_model_t model = {0};
-    universal_battery_model_t realModel = {0};
     char info61[sizeof(s_pylonCache.info61)] = {0};
     char info63[sizeof(s_pylonCache.info63)] = {0};
     int64_t nowUs = esp_timer_get_time();
-    bool debugOverride = batteryModelIsDebugOverrideEnabled();
 
     if (!pylonSyntheticSourceModeEnabled(&settings)) {
         return;
     }
 
     batteryModelGet(&model);
-    batteryModelGetReal(&realModel);
 
     if (!pylonBmsSourceFresh(&settings)) {
         if (pylonSyntheticSourceModeEnabled(&settings) && PYLON_CAN_RS485_FORCE_FAKE_ENABLE) {
@@ -662,7 +580,6 @@ static void maybeRefreshSyntheticCacheFromUniversal(void)
 
             memset(&s_pylonSummary, 0, sizeof(s_pylonSummary));
             if (pylonDiagLogsEnabled()) {
-                logSyntheticPayloadBuild("PYLON synthetic forced-fake", &model, info61, s_pylonCache.info62, info63);
                 ESP_LOGW(EXAMPLE_TAG,
                          "PYLON synthetic source not fresh: using FORCED fake cache (v61=%s v62=%s v63=%s)",
                          s_pylonCache.valid61 ? "YES" : "NO",
@@ -713,27 +630,7 @@ static void maybeRefreshSyntheticCacheFromUniversal(void)
         s_lastCacheBuildDiagUs = nowUs;
     }
 
-    if (pylonDiagLogsEnabled() && ((nowUs - s_lastCacheBuildDiagUs) >= 1000000LL)) {
-        logSyntheticPayloadBuild("PYLON synthetic cache", &model, s_pylonCache.info61, s_pylonCache.info62, s_pylonCache.info63);
-        ESP_LOGI(EXAMPLE_TAG,
-                 "PYLON synthetic cache state: debugOverride=%s realV=%.2fV effV=%.2fV v61=%s v62=%s v63=%s len61=%u len62=%u len63=%u info63=[%s] flags(c=%u d=%u b=%u state=0x%02X) reason63=%s",
-                 debugOverride ? "YES" : "NO",
-                 (double)realModel.packVoltageV,
-                 (double)model.packVoltageV,
-                 s_pylonCache.valid61 ? "YES" : "NO",
-                 s_pylonCache.valid62 ? "YES" : "NO",
-                 s_pylonCache.valid63 ? "YES" : "NO",
-                 (unsigned)strlen(s_pylonCache.info61),
-                 (unsigned)strlen(s_pylonCache.info62),
-                 (unsigned)strlen(s_pylonCache.info63),
-                 s_pylonCache.valid63 ? s_pylonCache.info63 : "",
-                 (unsigned)(model.chargeEnabled ? 1u : 0u),
-                 (unsigned)(model.dischargeEnabled ? 1u : 0u),
-                 (unsigned)(model.balanceEnabled ? 1u : 0u),
-                 (unsigned)(model.protocolState & 0xFFu),
-                 s_lastStatus63Reason);
-        s_lastCacheBuildDiagUs = nowUs;
-    }
+    (void)model;
 }
 
 static void telemetryFromSummary(void)
@@ -790,18 +687,10 @@ static void telemetryFromSummary(void)
     snap.pylonStatus63 = s_pylonSummary.status_63;
 
     ESP_LOGI("PYLON_RS485", "[TELEM_FROM_SUMMARY] Setting telemetry from RS485 summary: "
-             "valid=%s, soc=%u%%, v=%.2fV (cv=%u), i=%.1fA, preferModel=%s, modelV=%.2fV, flags(c=%u d=%u b=%u state=0x%02X) status63=0x%02X raw61=%s raw63=%s",
+             "valid=%s, soc=%u%%, v=%.2fV (cv=%u), i=%.1fA, status63=0x%02X",
              snap.valid ? "YES" : "NO", snap.socPct, (double)snap.packVoltageV,
              s_pylonSummary.pack_voltage_cv, (double)snap.currentA,
-             preferModelTelemetry ? "YES" : "NO",
-             (double)(model.valid ? model.packVoltageV : 0.0f),
-             (unsigned)(model.chargeEnabled ? 1u : 0u),
-             (unsigned)(model.dischargeEnabled ? 1u : 0u),
-             (unsigned)(model.balanceEnabled ? 1u : 0u),
-             (unsigned)(model.protocolState & 0xFFu),
-             (unsigned)s_pylonSummary.status_63,
-             s_pylonCache.valid61 ? s_pylonCache.info61 : "",
-             s_pylonCache.valid63 ? s_pylonCache.info63 : "");
+             (unsigned)s_pylonSummary.status_63);
 
     bridgeSetTelemetrySnapshot(&snap);
 }
@@ -825,7 +714,7 @@ static void updateDecodedLogSnapshot(void)
              "  raw   : [%s]\n\n"
              "Pylon 0x63\n"
              "  valid : %s\n"
-             "  flags : status=0x%02X  likely(discharge=ON charge/balance=OFF)\n"
+             "  status: 0x%02X\n"
              "  raw   : [%s]\n",
              (long long)nowS,
              s_pylonCache.valid61 ? "YES" : "NO",
@@ -1024,7 +913,7 @@ static void updateSummary63(void)
     if (pylonDiagLogsEnabled()) {
         ESP_LOGI(EXAMPLE_TAG, "RS485 PYLON 0x63");
         ESP_LOGI(EXAMPLE_TAG,
-                 "  flags: status=0x%02X  likely(discharge=ON charge/balance=OFF)",
+                 "  status: 0x%02X",
                  (unsigned)s_pylonSummary.status_63);
         ESP_LOGI(EXAMPLE_TAG, "  raw  : [%s]", s_pylonCache.info63);
     }
@@ -1085,8 +974,6 @@ static bool buildCachedResponse(const uint8_t *request,
     uint16_t checksum;
     uint16_t lengthField;
     bridge_runtime_settings_t settings = runtimeSettingsGet();
-    bool debugOverride = batteryModelIsDebugOverrideEnabled();
-
     if (!parsePylonHeader(request, requestLen, &ver, &adr, &cid1, &cid2) || cid1 != 0x46) {
         return false;
     }
@@ -1141,13 +1028,9 @@ static bool buildCachedResponse(const uint8_t *request,
 
     if (pylonDiagLogsEnabled()) {
         ESP_LOGI(EXAMPLE_TAG,
-                 "PYLON cached response build: req cid2=0x%02X addr=0x%02X debugOverride=%s sourceFresh=%s forceFake=%s reason63=%s info=[%s] response=[%s]",
+                 "PYLON cached response build: req cid2=0x%02X addr=0x%02X info=[%s] response=[%s]",
                  (unsigned)cid2,
                  (unsigned)adr,
-                 debugOverride ? "YES" : "NO",
-                 sourceFresh ? "YES" : "NO",
-                 forceFake ? "YES" : "NO",
-                 s_lastStatus63Reason,
                  infoAscii,
                  response);
     }

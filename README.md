@@ -75,6 +75,38 @@ Bridge mode route selection is done in `orchestratorStartFromRuntime(...)`:
 3. `Pylon RS485 bridge` route (`RS485_PYLON<->RS485_PYLON` or `CAN_PYLON->RS485_PYLON`)
 4. fallback generic orchestrator route (`protocol_id_t` based)
 
+## Integration Notes
+
+### `JKBMS_MODBUS -> RS485_PYLON`
+
+For generic BMS sources such as `JKBMS_MODBUS`, the synthetic Pylon `0x63` status byte must stay conservative.
+
+What we found during field debugging:
+
+- the inverter accepted the bridge immediately when the web `Fake Inverter Data` override was active
+- the same inverter stayed in fault with live JK data even when voltage, `SOC`, and current looked valid
+- the decisive difference was the synthetic Pylon `0x63` status byte
+
+Required rule:
+
+- when the source is generic/non-native Pylon and there are no explicit native Pylon charge/discharge bits available, do not project the JK `balance` flag into Pylon `0x63`
+- default the synthetic status to `0xC0` (`charge + discharge enabled`) instead of `0xE0`
+
+Why this matters:
+
+- projecting generic `balance=1` produced `0xE0`
+- the affected inverter accepted `0xC0` but faulted on `0xE0`
+
+Implementation reference:
+
+- `main/Protocols/pylon/pylon_rs485_bridge.c`
+- `buildCanDerivedInfo63(...)`
+
+Additional robustness kept in place:
+
+- `JKBMS` `cellAvgMv` is rejected as a pack-voltage source when it is inconsistent with decoded cell min/max values in the same snapshot
+- fallback pack voltage is then derived from decoded cell extremes, avoiding false jumps caused by noisy or invalid average-cell registers
+
 ## Protocol IDs and Line IDs
 
 Defined in `main/config.h`:
