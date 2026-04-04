@@ -15,6 +15,7 @@ The goal is practical maintenance:
 - Web UI support for `Fake Inverter Data` runtime override.
 - Shared `battery_model` layer used by inverter-facing synthetic/projection paths.
 - Project documentation for the `JKBMS_MODBUS -> RS485_PYLON` integration behavior.
+- GitLab CI pipeline for automatic ESP32-C6 builds and integration-test execution on push/merge request.
 
 ### Changed
 

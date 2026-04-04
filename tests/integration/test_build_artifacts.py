@@ -13,16 +13,32 @@ import re
 from pathlib import Path
 
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def repo_path(*parts: str) -> Path:
+    """Return a repository-relative path."""
+    return REPO_ROOT.joinpath(*parts)
+
+
+def first_existing_path(*candidates: Path) -> Path:
+    """Return the first existing candidate, or the first one for helpful failures."""
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
 @pytest.fixture(scope="module")
 def build_dir():
     """Fixture to provide build directory path."""
-    return Path("/home/runner/work/Invertor_board/Invertor_board/build")
+    return repo_path("build")
 
 
 @pytest.fixture(scope="module")
 def sdkconfig_path():
     """Fixture to provide sdkconfig path."""
-    return Path("/home/runner/work/Invertor_board/Invertor_board/sdkconfig")
+    return repo_path("sdkconfig")
 
 
 def test_build_artifacts_exist(build_dir):
@@ -30,10 +46,10 @@ def test_build_artifacts_exist(build_dir):
     assert build_dir.exists(), "Build directory should exist"
 
     # Check for essential build outputs
-    project_elf = build_dir / "project-name.elf"
-    project_bin = build_dir / "project-name.bin"
+    elf_outputs = list(build_dir.glob("*.elf"))
+    bin_outputs = list(build_dir.glob("*.bin"))
 
-    assert project_elf.exists() or project_bin.exists(), \
+    assert elf_outputs or bin_outputs, \
         "At least one of .elf or .bin should exist"
 
 
@@ -89,11 +105,12 @@ def test_uart_driver_enabled(sdkconfig_path):
 
 def test_build_output_size_reasonable(build_dir):
     """Test that build output binary size is reasonable."""
-    bin_file = build_dir / "project-name.bin"
+    bin_outputs = list(build_dir.glob("*.bin"))
 
-    if not bin_file.exists():
+    if not bin_outputs:
         pytest.skip("Binary file not found")
 
+    bin_file = bin_outputs[0]
     file_size = bin_file.stat().st_size
 
     # Binary should be between 100KB and 4MB for ESP32-C6
@@ -103,7 +120,7 @@ def test_build_output_size_reasonable(build_dir):
 
 def test_protocol_constants_in_config_h():
     """Test that all protocol constants are defined in config.h."""
-    config_h = Path("/home/runner/work/Invertor_board/Invertor_board/main/config.h")
+    config_h = repo_path("main", "config.h")
 
     if not config_h.exists():
         pytest.skip("config.h not found")
@@ -132,7 +149,7 @@ def test_protocol_constants_in_config_h():
 
 def test_line_constants_in_config_h():
     """Test that line type constants are defined."""
-    config_h = Path("/home/runner/work/Invertor_board/Invertor_board/main/config.h")
+    config_h = repo_path("main", "config.h")
 
     if not config_h.exists():
         pytest.skip("config.h not found")
@@ -148,7 +165,7 @@ def test_line_constants_in_config_h():
 
 def test_mode_constants_in_config_h():
     """Test that mode constants are defined."""
-    config_h = Path("/home/runner/work/Invertor_board/Invertor_board/main/config.h")
+    config_h = repo_path("main", "config.h")
 
     if not config_h.exists():
         pytest.skip("config.h not found")
@@ -166,7 +183,7 @@ def test_mode_constants_in_config_h():
 
 def test_orchestrator_files_exist():
     """Test that orchestrator source files exist."""
-    orchestrator_dir = Path("/home/runner/work/Invertor_board/Invertor_board/main/orchestrator")
+    orchestrator_dir = repo_path("main", "orchestrator")
 
     assert orchestrator_dir.exists(), "Orchestrator directory should exist"
     assert (orchestrator_dir / "orchestrator.c").exists(), \
@@ -177,7 +194,10 @@ def test_orchestrator_files_exist():
 
 def test_protocol_directories_exist():
     """Test that protocol implementation directories exist."""
-    protocols_dir = Path("/home/runner/work/Invertor_board/Invertor_board/main/protocols")
+    protocols_dir = first_existing_path(
+        repo_path("main", "protocols"),
+        repo_path("main", "Protocols"),
+    )
 
     assert protocols_dir.exists(), "Protocols directory should exist"
 
@@ -196,7 +216,7 @@ def test_protocol_directories_exist():
 
 def test_decoder_files_exist():
     """Test that decoder source files exist."""
-    decoders_dir = Path("/home/runner/work/Invertor_board/Invertor_board/main/decoders")
+    decoders_dir = repo_path("main", "decoders")
 
     assert decoders_dir.exists(), "Decoders directory should exist"
     assert (decoders_dir / "CAN_Decoder.c").exists(), \
@@ -211,7 +231,10 @@ def test_decoder_files_exist():
 
 def test_web_interface_files_exist():
     """Test that web interface files exist."""
-    web_dir = Path("/home/runner/work/Invertor_board/Invertor_board/main/Web_interface")
+    web_dir = first_existing_path(
+        repo_path("main", "Web_interface"),
+        repo_path("main", "web_interface"),
+    )
 
     assert web_dir.exists(), "Web_interface directory should exist"
     assert (web_dir / "web_interface.c").exists(), \

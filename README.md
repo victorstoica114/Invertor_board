@@ -347,7 +347,17 @@ See `tests/README.md` for detailed testing documentation.
 GitLab CI automatically runs tests on every commit:
 - Build verification for ESP32-C6
 - Integration tests with pytest
-- Static analysis with cppcheck
+
+The pipeline definition lives in [`.gitlab-ci.yml`](./.gitlab-ci.yml) and is designed for GitLab runners that can start the `espressif/idf:release-v5.5` Docker image.
+
+### GitLab Runner Setup
+
+To enable automatic execution in GitLab:
+
+1. Go to `Settings > CI/CD > Runners` in the GitLab project.
+2. Enable a shared runner or register a project/group runner.
+3. Use a runner with Docker executor support and access to `espressif/idf:release-v5.5`.
+4. Push to any branch or open a merge request; the pipeline runs automatically.
 
 ## AI Onboarding Cheat Sheet (for Codex Web)
 

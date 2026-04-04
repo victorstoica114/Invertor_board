@@ -1,94 +1,50 @@
+default:
+  image: espressif/idf:release-v5.5
+  interruptible: true
+
 stages:
   - build
   - test
-  - report
 
-# Build the firmware for ESP32-C6
-build:
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  PYTEST_ADDOPTS: "-ra"
+
+cache:
+  paths:
+    - .cache/pip
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+
+build_firmware:
   stage: build
-  image: espressif/idf:release-v5.5
   script:
-    - echo "Building firmware for ESP32-C6"
     - idf.py set-target esp32c6
     - idf.py build
   artifacts:
+    when: always
+    expire_in: 1 week
     paths:
       - build/
       - sdkconfig
-    expire_in: 1 week
 
-# Run unit tests
-unit_tests:
-  stage: test
-  image: espressif/idf:release-v5.5
-  needs: [build]
-  script:
-    - echo "Running unit tests"
-    - cd tests/unit
-    # Note: Unit tests require component structure
-    # For now, we verify test files compile
-    - |
-      for test_file in test_*.c; do
-        echo "Checking $test_file..."
-        gcc -c "$test_file" -I../../main -I. \
-          -DUNITY_INCLUDE_CONFIG_H \
-          -Wno-error || echo "Test file $test_file syntax check completed"
-      done
-  allow_failure: true
-  artifacts:
-    reports:
-      junit: tests/unit/test_results.xml
-    when: always
-    expire_in: 1 week
-
-# Run integration tests
 integration_tests:
   stage: test
-  image: espressif/idf:release-v5.5
-  needs: [build]
+  needs:
+    - job: build_firmware
+      artifacts: true
+  before_script:
+    - python -m pip install --upgrade pip
+    - python -m pip install -r tests/requirements.txt
   script:
-    - echo "Running integration tests"
-    - pip install pytest pytest-html
-    - cd tests/integration
-    - pytest test_build_artifacts.py -v --html=report.html --self-contained-html --junit-xml=test_results.xml
+    - pytest tests/integration/test_build_artifacts.py -v --junitxml=tests/integration/junit.xml
   artifacts:
+    when: always
+    expire_in: 1 week
     reports:
-      junit: tests/integration/test_results.xml
+      junit: tests/integration/junit.xml
     paths:
-      - tests/integration/report.html
-    when: always
-    expire_in: 1 week
-
-# Static analysis with cppcheck (optional)
-static_analysis:
-  stage: test
-  image: espressif/idf:release-v5.5
-  needs: []
-  script:
-    - apt-get update && apt-get install -y cppcheck
-    - echo "Running static analysis on main protocol and orchestrator code"
-    - |
-      cppcheck --enable=warning,style,performance,portability \
-        --suppress=missingIncludeSystem \
-        --inline-suppr \
-        --error-exitcode=0 \
-        main/orchestrator/ \
-        main/decoders/ \
-        main/protocols/ \
-        --xml --xml-version=2 2> cppcheck-report.xml || true
-  allow_failure: true
-  artifacts:
-    paths:
-      - cppcheck-report.xml
-    when: always
-    expire_in: 1 week
-
-# Generate test report summary
-test_report:
-  stage: report
-  image: python:3.9-slim
-  needs: [integration_tests]
-  script:
-    - echo "Test execution completed"
-    - echo "Check artifacts for detailed test results"
-  when: always
+      - tests/integration/junit.xml

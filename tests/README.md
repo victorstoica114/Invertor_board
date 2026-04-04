@@ -63,6 +63,13 @@ cd tests/integration
 pytest test_build_artifacts.py -v
 ```
 
+The pipeline definition is stored in the repository root as `.gitlab-ci.yml`.
+It currently enforces:
+- ESP32-C6 firmware build with ESP-IDF
+- integration tests based on built artifacts and repository structure
+
+To make the pipeline execute in GitLab, the project needs an active runner with Docker executor support and access to `espressif/idf:release-v5.5`.
+
 ## Test Coverage
 
 ### Unit Tests
@@ -186,9 +193,7 @@ Tests run automatically on every push to GitLab:
 
 1. **Build stage**: Firmware is compiled for ESP32-C6
 2. **Test stage**:
-   - Unit tests verify component behavior
-   - Integration tests verify build configuration
-   - Static analysis checks for code quality issues
+   - Integration tests verify build configuration and repository structure
 3. **Report stage**: Test results are collected and made available as artifacts
 
 See `.gitlab-ci.yml` for full CI configuration.
