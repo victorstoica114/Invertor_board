@@ -73,6 +73,7 @@ static int64_t s_lastCanSourceDiagUs = 0;
 static int64_t s_lastCacheBuildDiagUs = 0;
 static int64_t s_lastStatus63DiagUs = 0;
 static uint8_t s_lastStatus63Value = 0xFFu;
+static char s_lastStatus63Reason[48] = "init";
 
 static void telemetryFromSummary(void);
 static void updateSummary61(void);
@@ -545,7 +546,21 @@ static bool buildCanDerivedInfo63(char *out, size_t outSize)
             reason = "derived_from_flags";
         }
         bytes[8] = status;
+        if (pylonDiagLogsEnabled()) {
+            ESP_LOGI(EXAMPLE_TAG,
+                     "PYLON synthetic 0x63 inputs: native=%s explicitCD=%s flags(c=%u d=%u b=%u state=0x%02X) -> status=0x%02X reason=%s",
+                     nativeStatusSource ? "YES" : "NO",
+                     haveExplicitChargeDischarge ? "YES" : "NO",
+                     model.chargeEnabled ? 1u : 0u,
+                     model.dischargeEnabled ? 1u : 0u,
+                     model.balanceEnabled ? 1u : 0u,
+                     (unsigned)(model.protocolState & 0xFFu),
+                     (unsigned)bytes[8],
+                     reason);
+        }
     }
+
+    snprintf(s_lastStatus63Reason, sizeof(s_lastStatus63Reason), "%s", reason);
 
     if (pylonDiagLogsEnabled() &&
         ((bytes[8] != s_lastStatus63Value) || ((nowUs - s_lastStatus63DiagUs) >= 1000000LL))) {
@@ -615,15 +630,18 @@ static void maybeRefreshSyntheticCacheFromUniversal(void)
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
     universal_battery_model_t model = {0};
+    universal_battery_model_t realModel = {0};
     char info61[sizeof(s_pylonCache.info61)] = {0};
     char info63[sizeof(s_pylonCache.info63)] = {0};
     int64_t nowUs = esp_timer_get_time();
+    bool debugOverride = batteryModelIsDebugOverrideEnabled();
 
     if (!pylonSyntheticSourceModeEnabled(&settings)) {
         return;
     }
 
     batteryModelGet(&model);
+    batteryModelGetReal(&realModel);
 
     if (!pylonBmsSourceFresh(&settings)) {
         if (pylonSyntheticSourceModeEnabled(&settings) && PYLON_CAN_RS485_FORCE_FAKE_ENABLE) {
@@ -696,7 +714,10 @@ static void maybeRefreshSyntheticCacheFromUniversal(void)
     if (pylonDiagLogsEnabled() && ((nowUs - s_lastCacheBuildDiagUs) >= 1000000LL)) {
         logSyntheticPayloadBuild("PYLON synthetic cache", &model, s_pylonCache.info61, s_pylonCache.info62, s_pylonCache.info63);
         ESP_LOGI(EXAMPLE_TAG,
-                 "PYLON synthetic cache state: v61=%s v62=%s v63=%s len61=%u len62=%u len63=%u info63=[%s] flags(c=%u d=%u b=%u state=0x%02X)",
+                 "PYLON synthetic cache state: debugOverride=%s realV=%.2fV effV=%.2fV v61=%s v62=%s v63=%s len61=%u len62=%u len63=%u info63=[%s] flags(c=%u d=%u b=%u state=0x%02X) reason63=%s",
+                 debugOverride ? "YES" : "NO",
+                 (double)realModel.packVoltageV,
+                 (double)model.packVoltageV,
                  s_pylonCache.valid61 ? "YES" : "NO",
                  s_pylonCache.valid62 ? "YES" : "NO",
                  s_pylonCache.valid63 ? "YES" : "NO",
@@ -707,7 +728,8 @@ static void maybeRefreshSyntheticCacheFromUniversal(void)
                  (unsigned)(model.chargeEnabled ? 1u : 0u),
                  (unsigned)(model.dischargeEnabled ? 1u : 0u),
                  (unsigned)(model.balanceEnabled ? 1u : 0u),
-                 (unsigned)(model.protocolState & 0xFFu));
+                 (unsigned)(model.protocolState & 0xFFu),
+                 s_lastStatus63Reason);
         s_lastCacheBuildDiagUs = nowUs;
     }
 }
@@ -1061,6 +1083,7 @@ static bool buildCachedResponse(const uint8_t *request,
     uint16_t checksum;
     uint16_t lengthField;
     bridge_runtime_settings_t settings = runtimeSettingsGet();
+    bool debugOverride = batteryModelIsDebugOverrideEnabled();
 
     if (!parsePylonHeader(request, requestLen, &ver, &adr, &cid1, &cid2) || cid1 != 0x46) {
         return false;
@@ -1116,9 +1139,13 @@ static bool buildCachedResponse(const uint8_t *request,
 
     if (pylonDiagLogsEnabled()) {
         ESP_LOGI(EXAMPLE_TAG,
-                 "PYLON cached response build: req cid2=0x%02X addr=0x%02X info=[%s] response=[%s]",
+                 "PYLON cached response build: req cid2=0x%02X addr=0x%02X debugOverride=%s sourceFresh=%s forceFake=%s reason63=%s info=[%s] response=[%s]",
                  (unsigned)cid2,
                  (unsigned)adr,
+                 debugOverride ? "YES" : "NO",
+                 sourceFresh ? "YES" : "NO",
+                 forceFake ? "YES" : "NO",
+                 s_lastStatus63Reason,
                  infoAscii,
                  response);
     }
