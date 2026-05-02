@@ -10,6 +10,7 @@ See also: [CHANGELOG.md](CHANGELOG.md)
 
 - MCU family: Espressif ESP32
 - Current target in this repository: **ESP32-C6**
+- ESP-IDF version used by local builds and CI: **v6.0.1**
 - Suggested IDF target command: `idf.py set-target esp32c6`
 
 ## Short Description
@@ -29,7 +30,7 @@ Implemented and actively used:
 - `RS485_GROWATT` BMS polling/decoding (`Modbus`) + queue publish
 - `JKBMS_MODBUS` BMS polling/decoding (`Modbus`) + rich snapshot
 - `GROWATT` inverter CAN sender (publishes frame `0x322`)
-- `CAN_GROWATT | CAN_PYLON | CAN_GOODWE | CAN_SOFAR | CAN_SMA | CAN_VICTRON -> RS485_GROWATT` translator (`main/rs485_can_bridge.c`)
+- `CAN_GROWATT | CAN_PYLON | CAN_GOODWE | CAN_SOFAR | CAN_SMA | CAN_VICTRON -> RS485_GROWATT` translator (`main/protocols/rs485_growatt/rs485_growatt_bridge.c`)
 - `RS485_JKBMS -> RS485_GROWATT` translator
 - `RS485_PYLON <-> RS485_PYLON` bridge/responder
 - `CAN_PYLON -> RS485_PYLON` synthetic responder/bridge
@@ -101,7 +102,7 @@ Why this matters:
 
 Implementation reference:
 
-- `main/Protocols/pylon/pylon_rs485_bridge.c`
+- `main/protocols/pylon/pylon_rs485_bridge.c`
 - `buildCanDerivedInfo63(...)`
 
 Additional robustness kept in place:
@@ -156,7 +157,7 @@ Inside `main/`:
 - CAN + RS485 low-level init and TX helpers
 - `Web_interface/`
 - web server, web UI, JSON API, bridge compatibility layer
-- `rs485_can_bridge.c/.h`
+- `protocols/rs485_growatt/rs485_growatt_bridge.c/.h`
 - specialized translator/responder for Growatt-oriented RS485 inverter side
 - `old/`
 - archived legacy code (not part of active CMake sources)
@@ -239,7 +240,7 @@ Minimum integration checklist (so files are actually used):
 - behavior for `bridge/forward/sniffer`
 - `main/orchestrator/orchestrator.c`
 - bridge route decision and task orchestration
-- `main/rs485_can_bridge.c`
+- `main/protocols/rs485_growatt/rs485_growatt_bridge.c`
 - CAN->RS485 Growatt responder; JKBMS->RS485 Growatt responder; synthetic snapshot export
 - `main/protocols/pylon/pylon_rs485_bridge.c`
 - Pylon-specific RS485 responder/forwarder and CAN->RS485 synthetic support
@@ -282,9 +283,12 @@ Runtime settings are persisted in NVS namespace `bridge_cfg`.
 
 ## Build and Run
 
-Typical ESP-IDF flow:
+Use ESP-IDF **v6.0.1** and target `esp32c6`.
+
+Typical shell flow:
 
 ```bash
+. /path/to/esp-idf/export.sh
 idf.py set-target esp32c6
 idf.py build
 idf.py -p <PORT> flash monitor
@@ -309,55 +313,167 @@ Runtime settings from web API/UI override operational route/mode choices.
 
 ## Testing
 
-The project includes a comprehensive test suite to prevent regressions and ensure protocol compatibility.
+The project has four test layers. GitLab CI runs them as separate jobs, and the local commands below mirror those jobs.
 
 ### Test Structure
 
-```
+```text
 tests/
-├── unit/                  # Unit tests for components (Unity framework)
-├── integration/           # Integration tests (pytest)
-└── fixtures/              # Protocol sample data
+  sanity/
+    test_repo_sanity.py
+  unit/
+    test_can_decoder.c
+    test_modbus_decoder.c
+    test_route_selection.c
+    test_host_unit_coverage.py
+    esp_stub/
+    host_stubs.c
+  integration/
+    test_firmware_configuration.py
+    test_protocol_fixtures.py
+    fixtures/protocol_samples.py
+  firmware_build/
+    test_build_artifacts.py
+  requirements.txt
 ```
 
-### Running Tests
+### Python Test Environment
 
 ```bash
-# Build firmware first
-idf.py set-target esp32c6
-idf.py build
-
-# Run integration tests
-cd tests/integration
-pip install pytest pytest-html
-pytest test_build_artifacts.py -v
+python -m venv .venv
+. .venv/bin/activate
+python -m pip install -r tests/requirements.txt
 ```
 
-### Test Coverage
+On Windows, activate the venv with the matching PowerShell/CMD command for your shell.
 
-- **CAN Decoder**: Frame parsing, cache management, freshness checks
-- **Modbus Decoder**: Framing, CRC validation, register caching
-- **Route Selection**: Protocol mapping, configuration validation
-- **Build Verification**: Feature flags, file structure, protocol definitions
+### Sanity Tests
 
-See `tests/README.md` for detailed testing documentation.
+```bash
+python -m pytest tests/sanity -v
+```
+
+Sanity tests check repository shape, GitLab CI settings, ESP-IDF image/version pinning, runner tag configuration, test entrypoints, and ignored generated artifacts.
+
+### Unit Tests
+
+```bash
+python -m pytest tests/unit/test_host_unit_coverage.py -v
+```
+
+The host C unit suite compiles and runs CAN decoder, Modbus decoder, and route-selection tests on the host. It also emits gcov data under `tests/.build/host_unit/coverage/`.
+
+Host unit tests require `gcc` and `gcov`. Missing tools skip on developer machines, but fail in CI so coverage cannot silently disappear.
+
+### Integration Tests
+
+```bash
+python -m pytest tests/integration -v
+```
+
+Integration tests verify firmware configuration, protocol constants, repository structure, protocol fixture shape, and Modbus CRC helpers.
+
+### Firmware Build Tests
+
+```bash
+. /path/to/esp-idf/export.sh
+idf.py set-target esp32c6
+idf.py build
+python -m pytest tests/firmware_build -v
+```
+
+Build tests run after `idf.py build` and verify generated `.elf`/`.bin` artifacts, `sdkconfig`, and binary size.
+
+### Coverage Report
+
+After unit tests, generate coverage reports manually with:
+
+```bash
+python -m gcovr --root . \
+  --object-directory tests/.build/host_unit \
+  --filter main \
+  --filter tests/unit \
+  --xml-pretty --output tests/.build/host_unit/coverage/cobertura.xml \
+  --html-details tests/.build/host_unit/coverage/html/index.html \
+  --print-summary
+```
+
+See `tests/README.md` for more detailed testing documentation.
 
 ### Continuous Integration
 
-GitLab CI automatically runs tests on every commit:
-- Build verification for ESP32-C6
-- Integration tests with pytest
+GitLab CI runs on every commit/merge-request source and is split into these stages:
 
-The pipeline definition lives in [`.gitlab-ci.yml`](./.gitlab-ci.yml) and is designed for GitLab runners that can start the `espressif/idf:release-v5.5` Docker image.
+1. `sanity`
+2. `unit`
+3. `integration`
+4. `build`
+
+Jobs:
+
+- `sanity_tests`: fast repository and CI checks
+- `unit_tests`: host C unit tests plus Cobertura/HTML coverage artifacts
+- `integration_tests`: firmware configuration and protocol fixture checks
+- `build_firmware`: final ESP32-C6 firmware build plus post-build artifact checks
+
+The pipeline definition lives in [`.gitlab-ci.yml`](./.gitlab-ci.yml).
+
+Current CI expectations:
+
+- ESP-IDF image/version is pinned to `espressif/idf:v6.0.1`
+- project runner tag is `ubuntu`
+- preferred executor is a local Linux **shell** runner
+- `IDF_CCACHE_ENABLE=1` and `.ccache/` are used for faster rebuilds
+- Python dependencies are installed into `.venv` for Python-only jobs
+- firmware build job sources ESP-IDF from `/home/gitlab-runner/esp/esp-idf/export.sh` when running on the local shell runner
+- if `cmake`/`ninja` are missing from the ESP-IDF environment, CI installs them into the ESP-IDF Python environment
 
 ### GitLab Runner Setup
 
-To enable automatic execution in GitLab:
+The project currently targets a project runner named `ubuntu-runner` with tag:
+
+```text
+ubuntu
+```
+
+Required runner behavior:
+
+- executor: `shell`
+- OS: Linux amd64
+- tag: `ubuntu`
+- runner is allowed to run jobs from this project
+
+Install ESP-IDF for the `gitlab-runner` user:
+
+```bash
+sudo -u gitlab-runner -H bash -lc 'mkdir -p ~/esp && cd ~/esp && git clone -b v6.0.1 --recursive https://github.com/espressif/esp-idf.git esp-idf'
+sudo -u gitlab-runner -H bash -lc 'cd ~/esp/esp-idf && ./install.sh esp32c6'
+sudo -u gitlab-runner -H bash -lc 'cd /tmp && . ~/esp/esp-idf/export.sh && idf.py --version'
+```
+
+The last command should print:
+
+```text
+ESP-IDF v6.0.1
+```
+
+In GitLab project settings:
 
 1. Go to `Settings > CI/CD > Runners` in the GitLab project.
-2. Enable a shared runner or register a project/group runner.
-3. Use a runner with Docker executor support and access to `espressif/idf:release-v5.5`.
-4. Push to any branch or open a merge request; the pipeline runs automatically.
+2. Ensure the project runner is online.
+3. Ensure the runner tag is `ubuntu`.
+4. Keep `Run untagged jobs` optional; the CI file explicitly uses the `ubuntu` tag.
+5. Disable shared/instance runners if you want to avoid GitLab SaaS Docker runners.
+
+Successful local-runner logs should show:
+
+```text
+on ubuntu-runner
+Preparing the "shell" executor
+Using Shell executor...
+```
+
+If logs show `green-*.saas-linux...`, `docker+machine`, or `Pulling docker image`, the job is still running on a shared GitLab runner instead of the local shell runner.
 
 ## AI Onboarding Cheat Sheet (for Codex Web)
 
@@ -378,7 +494,7 @@ Suggested first-read file order for AI:
 3. `main/main.c`
 4. `main/modes/mode_manager.c`
 5. `main/orchestrator/orchestrator.c`
-6. `main/rs485_can_bridge.c`
+6. `main/protocols/rs485_growatt/rs485_growatt_bridge.c`
 7. `main/protocols/pylon/pylon_rs485_bridge.c`
 8. `main/decoders/CAN_Decoder.c`
 9. `main/decoders/modbusDecoder.c`
