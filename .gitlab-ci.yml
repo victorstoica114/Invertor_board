@@ -35,6 +35,8 @@ workflow:
       . /opt/esp/idf/export.sh
     elif [ -n "${IDF_PATH:-}" ] && [ -f "$IDF_PATH/export.sh" ]; then
       . "$IDF_PATH/export.sh"
+    elif [ -f /home/gitlab-runner/esp/esp-idf/export.sh ]; then
+      . /home/gitlab-runner/esp/esp-idf/export.sh
     elif [ -f /home/victor/esp/esp-idf/export.sh ]; then
       . /home/victor/esp/esp-idf/export.sh
     fi
@@ -62,6 +64,8 @@ workflow:
       . /opt/esp/idf/export.sh
     elif [ -n "${IDF_PATH:-}" ] && [ -f "$IDF_PATH/export.sh" ]; then
       . "$IDF_PATH/export.sh"
+    elif [ -f /home/gitlab-runner/esp/esp-idf/export.sh ]; then
+      . /home/gitlab-runner/esp/esp-idf/export.sh
     elif [ -f /home/victor/esp/esp-idf/export.sh ]; then
       . /home/victor/esp/esp-idf/export.sh
     else
