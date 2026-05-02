@@ -39,19 +39,21 @@ workflow:
       . /home/victor/esp/esp-idf/export.sh
     fi
 
-    if command -v python >/dev/null 2>&1 && python -m pip --version >/dev/null 2>&1; then
-      export CI_PYTHON=python
-    elif command -v python3 >/dev/null 2>&1 && python3 -m pip --version >/dev/null 2>&1; then
-      export CI_PYTHON=python3
+    if command -v python >/dev/null 2>&1; then
+      export BASE_PYTHON=python
+    elif command -v python3 >/dev/null 2>&1; then
+      export BASE_PYTHON=python3
     else
-      echo "Python with pip not found. Install python3-pip or make ESP-IDF export.sh accessible to gitlab-runner."
+      echo "Python not found. Install python3 or make ESP-IDF export.sh accessible to gitlab-runner."
       exit 1
     fi
 
-    if "$CI_PYTHON" -c "import sys; raise SystemExit(0 if sys.prefix != sys.base_prefix else 1)"; then
+    if "$BASE_PYTHON" -m venv .venv >/dev/null 2>&1; then
+      export CI_PYTHON="$CI_PROJECT_DIR/.venv/bin/python"
       "$CI_PYTHON" -m pip install -r tests/requirements.txt
     else
-      "$CI_PYTHON" -m pip install --user -r tests/requirements.txt
+      export CI_PYTHON="$BASE_PYTHON"
+      "$CI_PYTHON" -m pip install --user --break-system-packages -r tests/requirements.txt
     fi
 
 .firmware_before_script: &firmware_before_script

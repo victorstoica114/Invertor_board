@@ -3,6 +3,7 @@ managed_components/
 sdkconfig.old
 .pytest_cache/
 pytest-cache-files-*/
+.venv/
 __pycache__/
 *.pyc
 vendor/
