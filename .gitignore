@@ -1,6 +1,7 @@
 build/
 managed_components/
 sdkconfig.old
+.vscode/settings.json
 .pytest_cache/
 pytest-cache-files-*/
 .venv/
