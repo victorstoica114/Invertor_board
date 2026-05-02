@@ -27,6 +27,13 @@ def test_esp_idf_6_json_dependency_uses_component_manager() -> None:
     assert "        json" not in cmake
 
 
+def test_esp_idf_6_split_driver_dependencies_are_declared() -> None:
+    cmake = _read_repo_file("main", "CMakeLists.txt")
+
+    for component in ("esp_driver_gpio", "esp_driver_uart", "esp_driver_twai"):
+        assert component in cmake
+
+
 def test_ci_declares_sanity_unit_and_integration_jobs() -> None:
     ci = _read_repo_file(".gitlab-ci.yml")
 

@@ -32,6 +32,9 @@ idf_component_register(
         "."
     REQUIRES
         driver
+        esp_driver_gpio
+        esp_driver_uart
+        esp_driver_twai
         esp_timer
         esp_http_server
         esp_wifi
