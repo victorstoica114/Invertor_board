@@ -1,5 +1,5 @@
 default:
-  image: espressif/idf:release-v5.5
+  image: espressif/idf:v6.0.1
   interruptible: true
 
 stages:
@@ -22,6 +22,7 @@ workflow:
 build_firmware:
   stage: build
   script:
+    - idf.py --version
     - idf.py set-target esp32c6
     - idf.py build
   artifacts:
