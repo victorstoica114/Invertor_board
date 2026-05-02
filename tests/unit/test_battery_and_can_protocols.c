@@ -12,9 +12,12 @@
 #include "protocols/deye/deye_can_protocol.h"
 #include "protocols/pylon/pylon_can_protocol.h"
 
+#define TEST_LOG_BUFFER_SIZE 2048u
+#define BATTERY_STALE_OFFSET_MS 5u
+
 static bridgeTelemetrySnapshot_t g_lastSnapshot;
 static bool g_snapshotSet;
-static char g_lastLog[2048];
+static char g_lastLog[TEST_LOG_BUFFER_SIZE];
 static bool g_logSet;
 
 void bridgeSetTelemetrySnapshot(const bridgeTelemetrySnapshot_t *in)
@@ -278,7 +281,7 @@ void test_battery_model_stale_data_is_cleared(void)
     const uint32_t nowMs = (uint32_t)(esp_timer_get_time() / 1000LL);
     model.valid = true;
     model.socPct = 55u;
-    model.updatedMs = nowMs - (BRIDGE_SOURCE_STALE_MS + 5u);
+    model.updatedMs = nowMs - (BRIDGE_SOURCE_STALE_MS + BATTERY_STALE_OFFSET_MS);
     batteryModelSet(&model);
 
     battery_model_t out = {0};
