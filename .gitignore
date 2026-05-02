@@ -1,5 +1,8 @@
 build/
+managed_components/
+sdkconfig.old
 .pytest_cache/
+pytest-cache-files-*/
 __pycache__/
 *.pyc
 vendor/

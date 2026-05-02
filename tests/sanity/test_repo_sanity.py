@@ -46,7 +46,17 @@ def test_ci_declares_sanity_unit_and_integration_jobs() -> None:
 
 def test_ci_keeps_build_as_final_stage() -> None:
     ci = _read_repo_file(".gitlab-ci.yml")
-    stages = [line.removeprefix("  - ").strip() for line in ci.splitlines() if line.startswith("  - ")]
+    stages: list[str] = []
+    in_stages_block = False
+
+    for line in ci.splitlines():
+        if line == "stages:":
+            in_stages_block = True
+            continue
+        if in_stages_block and line and not line.startswith(" "):
+            break
+        if in_stages_block and line.startswith("  - "):
+            stages.append(line.removeprefix("  - ").strip())
 
     assert stages == ["sanity", "unit", "integration", "build"]
 

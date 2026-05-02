@@ -9,23 +9,40 @@ stages:
   - build
 
 variables:
+  IDF_CCACHE_ENABLE: "1"
+  CCACHE_DIR: "$CI_PROJECT_DIR/.ccache"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
   PYTEST_ADDOPTS: "-ra"
 
 cache:
   paths:
     - .cache/pip
+    - .ccache
 
 workflow:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH
 
+.python_test_before_script: &python_test_before_script
+  - python -m pip install -r tests/requirements.txt
+
+.firmware_before_script: &firmware_before_script
+  - |
+    if [ -n "${IDF_PATH:-}" ] && [ -f "$IDF_PATH/export.sh" ]; then
+      . "$IDF_PATH/export.sh"
+    elif [ -f /opt/esp/idf/export.sh ]; then
+      . /opt/esp/idf/export.sh
+    else
+      echo "ESP-IDF export.sh not found. Set IDF_PATH or use the ESP-IDF Docker image."
+      exit 1
+    fi
+  - python -m pip install -r tests/requirements.txt
+
 sanity_tests:
   stage: sanity
-  before_script:
-    - python -m pip install --upgrade pip
-    - python -m pip install -r tests/requirements.txt
+  before_script: *python_test_before_script
   script:
     - pytest tests/sanity -v --junitxml=tests/sanity/junit.xml
   artifacts:
@@ -38,9 +55,7 @@ sanity_tests:
 
 unit_tests:
   stage: unit
-  before_script:
-    - python -m pip install --upgrade pip
-    - python -m pip install -r tests/requirements.txt
+  before_script: *python_test_before_script
   script:
     - pytest tests/unit/test_host_unit_coverage.py -v --junitxml=tests/unit/junit.xml
     - mkdir -p tests/.build/host_unit/coverage/html
@@ -59,9 +74,7 @@ unit_tests:
 
 build_firmware:
   stage: build
-  before_script:
-    - python -m pip install --upgrade pip
-    - python -m pip install -r tests/requirements.txt
+  before_script: *firmware_before_script
   script:
     - idf.py --version
     - idf.py set-target esp32c6
@@ -79,9 +92,7 @@ build_firmware:
 
 integration_tests:
   stage: integration
-  before_script:
-    - python -m pip install --upgrade pip
-    - python -m pip install -r tests/requirements.txt
+  before_script: *python_test_before_script
   script:
     - pytest tests/integration -v --junitxml=tests/integration/junit.xml
   artifacts:
