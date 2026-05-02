@@ -29,23 +29,51 @@ workflow:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH
 
-.esp_idf_python_before_script: &esp_idf_python_before_script
+.python_test_before_script: &python_test_before_script
   - |
     if [ -f /opt/esp/idf/export.sh ]; then
       . /opt/esp/idf/export.sh
     elif [ -n "${IDF_PATH:-}" ] && [ -f "$IDF_PATH/export.sh" ]; then
       . "$IDF_PATH/export.sh"
+    elif [ -f /home/victor/esp/esp-idf/export.sh ]; then
+      . /home/victor/esp/esp-idf/export.sh
+    fi
+
+    if command -v python >/dev/null 2>&1 && python -m pip --version >/dev/null 2>&1; then
+      export CI_PYTHON=python
+    elif command -v python3 >/dev/null 2>&1 && python3 -m pip --version >/dev/null 2>&1; then
+      export CI_PYTHON=python3
+    else
+      echo "Python with pip not found. Install python3-pip or make ESP-IDF export.sh accessible to gitlab-runner."
+      exit 1
+    fi
+
+    if "$CI_PYTHON" -c "import sys; raise SystemExit(0 if sys.prefix != sys.base_prefix else 1)"; then
+      "$CI_PYTHON" -m pip install -r tests/requirements.txt
+    else
+      "$CI_PYTHON" -m pip install --user -r tests/requirements.txt
+    fi
+
+.firmware_before_script: &firmware_before_script
+  - |
+    if [ -f /opt/esp/idf/export.sh ]; then
+      . /opt/esp/idf/export.sh
+    elif [ -n "${IDF_PATH:-}" ] && [ -f "$IDF_PATH/export.sh" ]; then
+      . "$IDF_PATH/export.sh"
+    elif [ -f /home/victor/esp/esp-idf/export.sh ]; then
+      . /home/victor/esp/esp-idf/export.sh
     else
       echo "ESP-IDF export.sh not found. Set IDF_PATH or use the ESP-IDF Docker image."
       exit 1
     fi
-  - python -m pip install -r tests/requirements.txt
+    export CI_PYTHON=python
+    "$CI_PYTHON" -m pip install -r tests/requirements.txt
 
 sanity_tests:
   stage: sanity
-  before_script: *esp_idf_python_before_script
+  before_script: *python_test_before_script
   script:
-    - pytest tests/sanity -v --junitxml=tests/sanity/junit.xml
+    - $CI_PYTHON -m pytest tests/sanity -v --junitxml=tests/sanity/junit.xml
   artifacts:
     when: always
     expire_in: 1 week
@@ -56,11 +84,11 @@ sanity_tests:
 
 unit_tests:
   stage: unit
-  before_script: *esp_idf_python_before_script
+  before_script: *python_test_before_script
   script:
-    - pytest tests/unit/test_host_unit_coverage.py -v --junitxml=tests/unit/junit.xml
+    - $CI_PYTHON -m pytest tests/unit/test_host_unit_coverage.py -v --junitxml=tests/unit/junit.xml
     - mkdir -p tests/.build/host_unit/coverage/html
-    - python -m gcovr --root . --object-directory tests/.build/host_unit --filter main --filter tests/unit --xml-pretty --output tests/.build/host_unit/coverage/cobertura.xml --html-details tests/.build/host_unit/coverage/html/index.html --print-summary
+    - $CI_PYTHON -m gcovr --root . --object-directory tests/.build/host_unit --filter main --filter tests/unit --xml-pretty --output tests/.build/host_unit/coverage/cobertura.xml --html-details tests/.build/host_unit/coverage/html/index.html --print-summary
   artifacts:
     when: always
     expire_in: 1 week
@@ -75,12 +103,12 @@ unit_tests:
 
 build_firmware:
   stage: build
-  before_script: *esp_idf_python_before_script
+  before_script: *firmware_before_script
   script:
     - idf.py --version
     - idf.py set-target esp32c6
     - idf.py build
-    - pytest tests/firmware_build -v --junitxml=tests/firmware_build/junit.xml
+    - $CI_PYTHON -m pytest tests/firmware_build -v --junitxml=tests/firmware_build/junit.xml
   artifacts:
     when: always
     expire_in: 1 week
@@ -93,9 +121,9 @@ build_firmware:
 
 integration_tests:
   stage: integration
-  before_script: *esp_idf_python_before_script
+  before_script: *python_test_before_script
   script:
-    - pytest tests/integration -v --junitxml=tests/integration/junit.xml
+    - $CI_PYTHON -m pytest tests/integration -v --junitxml=tests/integration/junit.xml
   artifacts:
     when: always
     expire_in: 1 week
