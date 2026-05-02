@@ -40,11 +40,17 @@ integration_tests:
     - python -m pip install --upgrade pip
     - python -m pip install -r tests/requirements.txt
   script:
-    - pytest tests/integration/test_build_artifacts.py -v --junitxml=tests/integration/junit.xml
+    - pytest tests/integration -v --junitxml=tests/integration/junit.xml
+    - mkdir -p tests/.build/host_unit/coverage/html
+    - python -m gcovr --root . --object-directory tests/.build/host_unit --filter main --filter tests/unit --xml-pretty --output tests/.build/host_unit/coverage/cobertura.xml --html-details tests/.build/host_unit/coverage/html/index.html --print-summary
   artifacts:
     when: always
     expire_in: 1 week
     reports:
       junit: tests/integration/junit.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: tests/.build/host_unit/coverage/cobertura.xml
     paths:
       - tests/integration/junit.xml
+      - tests/.build/host_unit/coverage/

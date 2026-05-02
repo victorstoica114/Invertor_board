@@ -7,3 +7,4 @@ pytest-html>=3.2.0
 # Optional: for more detailed test reports
 pytest-cov>=4.1.0
 pytest-timeout>=2.1.0
+gcovr>=7.2

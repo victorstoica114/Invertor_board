@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include "runtime_settings.h"
+#include "Web_interface/web_bridge_api.h"
 #include "protocols/common/battery_model.h"
 
 // Host-only stubs to allow building decoder logic without ESP-IDF.
@@ -24,15 +25,12 @@ void batteryModelSet(const battery_model_t *model)
     (void)model;
 }
 
-void bridgeSetTelemetrySnapshot(const char *ifname, const void *snapshot, uint32_t snapshotSize)
+void bridgeSetTelemetrySnapshot(const bridgeTelemetrySnapshot_t *snapshot)
 {
-    (void)ifname;
     (void)snapshot;
-    (void)snapshotSize;
 }
 
-void bridgeSetDecodedLogSnapshot(const char *ifname, const char *log)
+void bridgeSetDecodedLogSnapshot(const char *log)
 {
-    (void)ifname;
     (void)log;
 }

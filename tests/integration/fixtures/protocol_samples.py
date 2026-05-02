@@ -1,52 +1,65 @@
 """
-Protocol sample fixtures for testing.
+Protocol sample fixtures for integration tests.
 
-This module provides pre-captured protocol frames for use in unit and integration tests.
-These samples represent real protocol data from supported BMS and inverter devices.
+The samples mirror the fields used by the production decoders so Python
+integration tests and host C tests can share realistic frame data.
 """
 
-# Growatt CAN frame samples (ID 0x322)
-# Format: [SOC%, reserved, voltage_low, voltage_high, current_low, current_high, ...]
+# Growatt CAN frame samples (ID 0x313)
+# Format: big-endian voltage cV, current dA, temperature dC, SOC%, SOH%.
 GROWATT_CAN_FRAME_SAMPLES = [
     {
-        "id": 0x322,
+        "id": 0x313,
         "dlc": 8,
-        "data": bytes([75, 0x00, 0xC8, 0x14, 0x0A, 0x00, 0x00, 0x00]),
-        "description": "SOC 75%, Voltage 52.4V (5240 cV), Current 10A",
+        "data": bytes([0x14, 0x78, 0x00, 0x64, 0x00, 0xFA, 75, 98]),
+        "description": "Growatt 0x313: SOC 75%, voltage 52.40V, current 10.0A, temp 25.0C",
         "expected_soc": 75,
         "expected_voltage_cv": 5240,
+        "expected_current_da": 100,
     },
     {
-        "id": 0x322,
+        "id": 0x313,
         "dlc": 8,
-        "data": bytes([100, 0x00, 0x00, 0x15, 0x00, 0x00, 0x00, 0x00]),
-        "description": "SOC 100%, Voltage 54.0V (5400 cV), Current 0A",
+        "data": bytes([0x15, 0x18, 0x00, 0x00, 0x00, 0xF0, 100, 100]),
+        "description": "Growatt 0x313: SOC 100%, voltage 54.00V, current 0.0A, temp 24.0C",
         "expected_soc": 100,
         "expected_voltage_cv": 5400,
+        "expected_current_da": 0,
     },
     {
-        "id": 0x322,
+        "id": 0x313,
         "dlc": 8,
-        "data": bytes([25, 0x00, 0xE8, 0x13, 0xF6, 0xFF, 0x00, 0x00]),
-        "description": "SOC 25%, Voltage 51.2V (5120 cV), Current -10A (discharge)",
+        "data": bytes([0x14, 0x00, 0xFF, 0x9C, 0x00, 0xF0, 25, 97]),
+        "description": "Growatt 0x313: SOC 25%, voltage 51.20V, current -10.0A, temp 24.0C",
         "expected_soc": 25,
         "expected_voltage_cv": 5120,
+        "expected_current_da": -100,
     },
 ]
 
 # Pylon CAN frame samples
 PYLON_CAN_FRAME_SAMPLES = [
     {
-        "id": 0x351,  # Pylon battery voltage/current/temperature
+        "id": 0x351,  # Pylon charge/discharge limits
         "dlc": 8,
-        "data": bytes([0x40, 0x14, 0xF6, 0xFF, 0xE8, 0x03, 0x64, 0x00]),
-        "description": "Pylon 0x351: Voltage 52.0V, Current -10A, Temp 10°C, SOC 100%",
+        "data": bytes([0x1C, 0x02, 0xF4, 0x01, 0xE8, 0x03, 0xB8, 0x01]),
+        "description": "Pylon 0x351: charge voltage/current and discharge current limits",
     },
     {
         "id": 0x355,  # Pylon SOC/SOH
         "dlc": 8,
-        "data": bytes([0x64, 0x00, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00]),
-        "description": "Pylon 0x355: SOC 100%, SOH 100%",
+        "data": bytes([0x64, 0x00, 0x62, 0x00, 0x00, 0x00, 0x00, 0x00]),
+        "description": "Pylon 0x355: SOC 100%, SOH 98%",
+        "expected_soc": 100,
+        "expected_soh": 98,
+    },
+    {
+        "id": 0x356,  # Pylon pack voltage/current/temperature
+        "dlc": 8,
+        "data": bytes([0x78, 0x14, 0x9C, 0xFF, 0xFA, 0x00, 0x00, 0x00]),
+        "description": "Pylon 0x356: voltage 52.40V, current -10.0A, temp 25.0C",
+        "expected_voltage_cv": 5240,
+        "expected_current_da": -100,
     },
 ]
 
@@ -57,15 +70,22 @@ JKBMS_MODBUS_SAMPLES = [
         "slave_id": 0x01,
         "function": 0x03,  # Read Holding Registers
         "registers": {
-            0x0064: 0x1234,  # Example register
+            0x0064: 0x1234,
             0x0065: 0x5678,
         },
-        "raw_response": bytes([
-            0x01, 0x03, 0x04,  # Header: slave, function, byte count
-            0x12, 0x34,  # Register 0x0064 value
-            0x56, 0x78,  # Register 0x0065 value
-            0x00, 0x00   # CRC (to be calculated)
-        ]),
+        "raw_response": bytes(
+            [
+                0x01,
+                0x03,
+                0x04,
+                0x12,
+                0x34,
+                0x56,
+                0x78,
+                0x00,
+                0x00,
+            ]
+        ),
         "description": "JKBMS read holding registers response",
     },
 ]
@@ -77,8 +97,8 @@ GROWATT_MODBUS_SAMPLES = [
         "function": 0x03,
         "registers": {
             0x0000: 5240,  # Battery voltage (cV)
-            0x0001: 75,    # SOC (%)
-            0x0002: 250,   # Temperature (0.1°C)
+            0x0001: 75,  # SOC (%)
+            0x0002: 250,  # Temperature (0.1C)
         },
         "description": "Growatt BMS status registers",
     },
@@ -126,10 +146,10 @@ def get_modbus_frame_with_crc(slave_id, function, data):
 
 def get_can_frame_dict(sample):
     """
-    Convert sample dict to format suitable for testing.
+    Convert sample dict to a TWAI-like Python dictionary.
 
     Args:
-        sample: Sample dictionary from above
+        sample: sample dictionary from one of the CAN sample lists
 
     Returns:
         Dict suitable for test frame creation
@@ -143,20 +163,18 @@ def get_can_frame_dict(sample):
 
 
 if __name__ == "__main__":
-    # Test the fixture utilities
     print("Testing protocol fixtures...")
 
     print(f"\nGrowatt CAN samples: {len(GROWATT_CAN_FRAME_SAMPLES)}")
     for i, sample in enumerate(GROWATT_CAN_FRAME_SAMPLES):
-        print(f"  Sample {i+1}: {sample['description']}")
+        print(f"  Sample {i + 1}: {sample['description']}")
 
     print(f"\nPylon CAN samples: {len(PYLON_CAN_FRAME_SAMPLES)}")
     for i, sample in enumerate(PYLON_CAN_FRAME_SAMPLES):
-        print(f"  Sample {i+1}: {sample['description']}")
+        print(f"  Sample {i + 1}: {sample['description']}")
 
-    # Test CRC calculation
     test_frame = bytes([0x01, 0x03, 0x04, 0x12, 0x34, 0x56, 0x78])
     crc = calculate_modbus_crc(test_frame)
     print(f"\nTest Modbus CRC: 0x{crc:04X}")
 
-    print("\nProtocol fixtures ready for use in tests!")
+    print("\nProtocol fixtures ready for use in tests.")
