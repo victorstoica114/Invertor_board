@@ -19,6 +19,14 @@ def test_ci_uses_pinned_esp_idf_6_image() -> None:
     assert "idf.py --version" in ci
 
 
+def test_esp_idf_6_json_dependency_uses_component_manager() -> None:
+    cmake = _read_repo_file("main", "CMakeLists.txt")
+    manifest = _read_repo_file("main", "idf_component.yml")
+
+    assert "espressif/cjson" in manifest
+    assert "        json" not in cmake
+
+
 def test_ci_declares_sanity_unit_and_integration_jobs() -> None:
     ci = _read_repo_file(".gitlab-ci.yml")
 
