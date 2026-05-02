@@ -53,6 +53,15 @@ HOST_C_TESTS = (
             "main/orchestrator/orchestrator.c",
         ),
     ),
+    HostCTestTarget(
+        name="battery_can_protocols",
+        sources=(
+            "tests/unit/test_battery_and_can_protocols.c",
+            "main/protocols/common/battery_model.c",
+            "main/protocols/pylon/pylon_can_protocol.c",
+            "main/protocols/deye/deye_can_protocol.c",
+        ),
+    ),
 )
 
 COMMON_CFLAGS = (
