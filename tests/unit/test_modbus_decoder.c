@@ -60,9 +60,9 @@ void test_modbus_decoder_cache_holding_registers(void)
         0x00, 0x00  /* CRC (placeholder) */
     };
 
-    /* Calculate proper Modbus CRC */
+    /* Calculate proper Modbus CRC (over all bytes except CRC itself) */
     uint16_t crc = 0xFFFF;
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < 7; i++) {
         crc ^= response[i];
         for (int j = 0; j < 8; j++) {
             if (crc & 0x0001) {
@@ -72,14 +72,15 @@ void test_modbus_decoder_cache_holding_registers(void)
             }
         }
     }
-    response[6] = crc & 0xFF;
-    response[7] = (crc >> 8) & 0xFF;
+    response[7] = crc & 0xFF;
+    response[8] = (crc >> 8) & 0xFF;
 
     /* Record the request first (required for decoding) */
     modbusDecoderRecordRequest(&g_testDecoder, 0x01, 0x03, 0x0064, 2, 0);
 
     /* Feed the response to decoder */
     modbusDecoderFeed(&g_testDecoder, response, sizeof(response), 10000);
+    modbusDecoderFlush(&g_testDecoder);
 
     /* Verify cached register values */
     uint16_t value1 = 0, value2 = 0;
@@ -246,7 +247,7 @@ void test_modbus_decoder_crc_error(void)
 }
 
 /* Main test runner function */
-void app_main(void)
+int main(void)
 {
     UNITY_BEGIN();
 
@@ -259,5 +260,5 @@ void app_main(void)
     RUN_TEST(test_modbus_decoder_request_recording);
     RUN_TEST(test_modbus_decoder_crc_error);
 
-    UNITY_END();
+    return UNITY_END();
 }

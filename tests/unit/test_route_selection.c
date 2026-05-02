@@ -259,7 +259,7 @@ void test_route_all_can_bms_protocols_supported(void)
 }
 
 /* Main test runner function */
-void app_main(void)
+int main(void)
 {
     UNITY_BEGIN();
 
@@ -276,5 +276,5 @@ void app_main(void)
     RUN_TEST(test_line_constants_defined);
     RUN_TEST(test_route_all_can_bms_protocols_supported);
 
-    UNITY_END();
+    return UNITY_END();
 }
