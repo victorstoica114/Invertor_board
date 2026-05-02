@@ -72,6 +72,15 @@ workflow:
       echo "ESP-IDF export.sh not found. Set IDF_PATH or use the ESP-IDF Docker image."
       exit 1
     fi
+
+    if ! command -v cmake >/dev/null 2>&1 || ! command -v ninja >/dev/null 2>&1; then
+      echo "ESP-IDF build tools missing from PATH; installing tools for esp32c6."
+      bash "$IDF_PATH/install.sh" esp32c6
+      . "$IDF_PATH/export.sh"
+    fi
+
+    cmake --version
+    ninja --version
     export CI_PYTHON=python
     "$CI_PYTHON" -m pip install -r tests/requirements.txt
 
