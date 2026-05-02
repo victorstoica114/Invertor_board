@@ -14,7 +14,7 @@ def _read_repo_file(*parts: str) -> str:
 def test_ci_uses_pinned_esp_idf_6_image() -> None:
     ci = _read_repo_file(".gitlab-ci.yml")
 
-    assert "image: espressif/idf:v6.0.1" in ci
+    assert "name: espressif/idf:v6.0.1" in ci
     assert "espressif/idf:release-v5.5" not in ci
     assert "idf.py --version" in ci
 

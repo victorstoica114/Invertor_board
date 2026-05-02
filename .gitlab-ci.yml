@@ -1,5 +1,7 @@
 default:
-  image: espressif/idf:v6.0.1
+  image:
+    name: espressif/idf:v6.0.1
+    entrypoint: [""]
   interruptible: true
 
 stages:
