@@ -44,6 +44,13 @@ def test_ci_declares_sanity_unit_and_integration_jobs() -> None:
         assert job in ci
 
 
+def test_ci_targets_project_runner_tag() -> None:
+    ci = _read_repo_file(".gitlab-ci.yml")
+
+    assert "tags:" in ci
+    assert "  - ubuntu" in ci
+
+
 def test_ci_keeps_build_as_final_stage() -> None:
     ci = _read_repo_file(".gitlab-ci.yml")
     stages: list[str] = []

@@ -2,6 +2,8 @@ default:
   image:
     name: espressif/idf:v6.0.1
     entrypoint: [""]
+  tags:
+    - ubuntu
   interruptible: true
 
 stages:
