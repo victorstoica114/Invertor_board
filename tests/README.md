@@ -30,10 +30,27 @@ Unit tests are designed to test individual components in isolation. They use the
 
 **Note**: Current unit tests are source-code level tests. Full ESP-IDF component testing requires additional configuration.
 
-To verify test compilation:
+Host-based unit tests can be compiled and run without ESP-IDF by using the
+lightweight stubs in `tests/unit/esp_stub/`.
+
 ```bash
 cd tests/unit
-gcc -c test_*.c -I../../main -I. -DUNITY_INCLUDE_CONFIG_H -Wno-error
+
+# CAN decoder unit tests
+gcc -O0 -g -Wall -Wextra -I../../main -I. -Iesp_stub \
+  -o /tmp/test_can_decoder \
+  test_can_decoder.c host_stubs.c \
+  ../../main/decoders/CAN_Decoder.c \
+  ../../main/protocols/pylon/pylon_can_protocol.c \
+  ../../main/protocols/deye/deye_can_protocol.c
+/tmp/test_can_decoder
+
+# Modbus decoder unit tests
+gcc -O0 -g -Wall -Wextra -I../../main -I. -Iesp_stub \
+  -o /tmp/test_modbus_decoder \
+  test_modbus_decoder.c \
+  ../../main/decoders/modbusDecoder.c
+/tmp/test_modbus_decoder
 ```
 
 ### Integration Tests

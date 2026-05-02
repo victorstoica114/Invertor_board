@@ -2,7 +2,7 @@
 
 #include <stddef.h>
 
-#include "../Pylon/pylon_can_protocol.h"
+#include "../pylon/pylon_can_protocol.h"
 
 #ifdef __cplusplus
 extern "C" {
