@@ -16,9 +16,11 @@ tests/
     esp_stub/
     host_stubs.c
   integration/
-    test_build_artifacts.py
+    test_firmware_configuration.py
     test_protocol_fixtures.py
     fixtures/protocol_samples.py
+  firmware_build/
+    test_build_artifacts.py
   requirements.txt
 ```
 
@@ -56,9 +58,19 @@ python -m pytest tests/integration -v
 
 Integration tests verify:
 
-- expected build artifacts and firmware configuration
+- firmware configuration
 - protocol constants and repository structure
 - protocol fixture shape and Modbus CRC helpers
+
+## Run Build Tests
+
+```bash
+idf.py set-target esp32c6
+idf.py build
+python -m pytest tests/firmware_build -v
+```
+
+Build tests run after the firmware build and verify generated `.elf`/`.bin` artifacts, `sdkconfig`, and binary size.
 
 ## Host C Coverage
 
@@ -97,8 +109,8 @@ gcc -O0 -g -Wall -Wextra -I../../main -I. -Iesp_stub \
 
 - `sanity_tests`: fast repo and CI checks
 - `unit_tests`: host C unit tests and Cobertura coverage
-- `build_firmware`: ESP32-C6 firmware build
-- `integration_tests`: build artifact and protocol fixture checks
+- `integration_tests`: firmware configuration and protocol fixture checks
+- `build_firmware`: final ESP32-C6 firmware build and build artifact checks
 
 CI publishes JUnit reports for all pytest layers and Cobertura/HTML coverage artifacts from `unit_tests`.
 

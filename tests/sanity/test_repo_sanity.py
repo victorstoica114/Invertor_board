@@ -22,11 +22,18 @@ def test_ci_uses_pinned_esp_idf_6_image() -> None:
 def test_ci_declares_sanity_unit_and_integration_jobs() -> None:
     ci = _read_repo_file(".gitlab-ci.yml")
 
-    for stage in ("sanity", "build", "unit", "integration"):
+    for stage in ("sanity", "unit", "integration", "build"):
         assert f"  - {stage}" in ci
 
-    for job in ("sanity_tests:", "unit_tests:", "integration_tests:"):
+    for job in ("sanity_tests:", "unit_tests:", "integration_tests:", "build_firmware:"):
         assert job in ci
+
+
+def test_ci_keeps_build_as_final_stage() -> None:
+    ci = _read_repo_file(".gitlab-ci.yml")
+    stages = [line.removeprefix("  - ").strip() for line in ci.splitlines() if line.startswith("  - ")]
+
+    assert stages == ["sanity", "unit", "integration", "build"]
 
 
 def test_required_test_entrypoints_exist() -> None:
@@ -36,9 +43,10 @@ def test_required_test_entrypoints_exist() -> None:
         "tests/unit/test_can_decoder.c",
         "tests/unit/test_modbus_decoder.c",
         "tests/unit/test_route_selection.c",
-        "tests/integration/test_build_artifacts.py",
+        "tests/integration/test_firmware_configuration.py",
         "tests/integration/test_protocol_fixtures.py",
         "tests/integration/fixtures/protocol_samples.py",
+        "tests/firmware_build/test_build_artifacts.py",
     )
 
     missing = [path for path in expected_paths if not REPO_ROOT.joinpath(path).exists()]

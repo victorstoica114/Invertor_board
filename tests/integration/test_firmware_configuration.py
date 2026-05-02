@@ -1,11 +1,4 @@
-"""
-Integration tests for protocol route selection and build configuration.
-
-These tests verify that:
-1. The firmware builds correctly with expected features enabled
-2. Protocol routing configuration is valid
-3. All protocol routes are properly compiled in
-"""
+"""Integration tests for firmware configuration and protocol layout."""
 
 import pytest
 import os
@@ -30,28 +23,9 @@ def first_existing_path(*candidates: Path) -> Path:
 
 
 @pytest.fixture(scope="module")
-def build_dir():
-    """Fixture to provide build directory path."""
-    return repo_path("build")
-
-
-@pytest.fixture(scope="module")
 def sdkconfig_path():
     """Fixture to provide sdkconfig path."""
     return repo_path("sdkconfig")
-
-
-def test_build_artifacts_exist(build_dir):
-    """Test that essential build artifacts exist."""
-    if not build_dir.exists():
-        pytest.skip("Build directory not present; run 'idf.py build' to generate artifacts")
-
-    # Check for essential build outputs
-    elf_outputs = list(build_dir.glob("*.elf"))
-    bin_outputs = list(build_dir.glob("*.bin"))
-
-    assert elf_outputs or bin_outputs, \
-        "At least one of .elf or .bin should exist"
 
 
 def test_sdkconfig_exists(sdkconfig_path):
@@ -102,24 +76,6 @@ def test_uart_driver_enabled(sdkconfig_path):
     assert 'CONFIG_UART_ISR_IN_IRAM=y' in config_content or \
            'UART' in config_content, \
            "UART should be available"
-
-
-def test_build_output_size_reasonable(build_dir):
-    """Test that build output binary size is reasonable."""
-    if not build_dir.exists():
-        pytest.skip("Build directory not present")
-
-    bin_outputs = list(build_dir.glob("*.bin"))
-
-    if not bin_outputs:
-        pytest.skip("Binary file not found")
-
-    bin_file = bin_outputs[0]
-    file_size = bin_file.stat().st_size
-
-    # Binary should be between 100KB and 4MB for ESP32-C6
-    assert 100 * 1024 < file_size < 4 * 1024 * 1024, \
-        f"Binary size {file_size} bytes seems unusual"
 
 
 def test_protocol_constants_in_config_h():
