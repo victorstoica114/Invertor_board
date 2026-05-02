@@ -1,20 +1,22 @@
 # Test Suite for ESP32 CAN/RS485 Bridge
 
-This directory contains host-based unit tests, pytest integration tests, protocol fixtures, and coverage plumbing for the firmware.
+This directory contains sanity checks, host-based unit tests, integration tests, protocol fixtures, and coverage plumbing for the firmware.
 
 ## Structure
 
 ```text
 tests/
+  sanity/
+    test_repo_sanity.py
   unit/
     test_can_decoder.c
     test_modbus_decoder.c
     test_route_selection.c
+    test_host_unit_coverage.py
     esp_stub/
     host_stubs.c
   integration/
     test_build_artifacts.py
-    test_host_unit_coverage.py
     test_protocol_fixtures.py
     fixtures/protocol_samples.py
   requirements.txt
@@ -28,7 +30,23 @@ Install Python dependencies:
 python -m pip install -r tests/requirements.txt
 ```
 
-The host C integration tests also need `gcc` and `gcov`. If they are missing on a developer machine, those tests skip; in CI they fail so coverage cannot silently disappear.
+The host C unit tests also need `gcc` and `gcov`. If they are missing on a developer machine, those tests skip; in CI they fail so coverage cannot silently disappear.
+
+## Run Sanity Tests
+
+```bash
+python -m pytest tests/sanity -v
+```
+
+Sanity tests verify the repository shape, CI image pinning, expected test entrypoints, ignored generated outputs, and absence of tracked build/coverage artifacts.
+
+## Run Unit Tests
+
+```bash
+python -m pytest tests/unit/test_host_unit_coverage.py -v
+```
+
+Unit tests compile and run the host C test targets for CAN decoder, Modbus decoder, and route selection. They also create gcov data for coverage.
 
 ## Run Integration Tests
 
@@ -36,16 +54,15 @@ The host C integration tests also need `gcc` and `gcov`. If they are missing on 
 python -m pytest tests/integration -v
 ```
 
-These tests verify:
+Integration tests verify:
 
 - expected build artifacts and firmware configuration
 - protocol constants and repository structure
 - protocol fixture shape and Modbus CRC helpers
-- host compilation/execution of C unit tests with coverage instrumentation
 
 ## Host C Coverage
 
-`tests/integration/test_host_unit_coverage.py` compiles the C unit tests with `--coverage`, runs them, and writes gcov output under:
+`tests/unit/test_host_unit_coverage.py` compiles the C unit tests with `--coverage`, runs them, and writes gcov output under:
 
 ```text
 tests/.build/host_unit/coverage/
@@ -76,11 +93,14 @@ gcc -O0 -g -Wall -Wextra -I../../main -I. -Iesp_stub \
 
 ## CI
 
-`.gitlab-ci.yml` builds the ESP32-C6 firmware, runs all pytest integration tests, and publishes:
+`.gitlab-ci.yml` separates the test layers:
 
-- JUnit test report: `tests/integration/junit.xml`
-- Cobertura coverage report: `tests/.build/host_unit/coverage/cobertura.xml`
-- HTML/gcov coverage artifacts under `tests/.build/host_unit/coverage/`
+- `sanity_tests`: fast repo and CI checks
+- `unit_tests`: host C unit tests and Cobertura coverage
+- `build_firmware`: ESP32-C6 firmware build
+- `integration_tests`: build artifact and protocol fixture checks
+
+CI publishes JUnit reports for all pytest layers and Cobertura/HTML coverage artifacts from `unit_tests`.
 
 ## Testing Philosophy
 
