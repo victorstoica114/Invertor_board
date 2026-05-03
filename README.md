@@ -309,6 +309,16 @@ Most compile-time toggles are in `main/config.h`, including:
 - RS485 half-duplex behavior flags
 - default Wi-Fi/web settings
 
+Local Wi-Fi credentials must live in `main/secrets.h`, which is ignored by Git.
+Start from the public template:
+
+```bash
+cp main/secrets.example.h main/secrets.h
+```
+
+Then edit `main/secrets.h` for your device/network. If the local secrets file is
+missing, the firmware still builds using placeholder values from `main/config.h`.
+
 Runtime settings from web API/UI override operational route/mode choices.
 
 ## Testing

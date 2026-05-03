@@ -7,6 +7,12 @@
 #include "protocols/growatt/growatt_registers_map.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_registers_map.h"
 
+#if defined(__has_include)
+#if __has_include("secrets.h")
+#include "secrets.h"
+#endif
+#endif
+
 /* Common log tag */
 #define EXAMPLE_TAG "SNIFFER_BRIDGE"
 
@@ -174,10 +180,19 @@
 #define WEB_INTERFACE_PORT              80
 #define WEB_INTERFACE_TASK_STACK        8192
 #define WEB_INTERFACE_TASK_PRIO         5
-#define WIFI_STA_SSID                   "ED423"
-#define WIFI_STA_PASSWORD               "electr0n!ca"
 #define WIFI_STA_MAX_RETRY              10
+
+#ifndef WIFI_STA_SSID
+#define WIFI_STA_SSID                   "CHANGE_ME_WIFI_SSID"
+#endif
+
+#ifndef WIFI_STA_PASSWORD
+#define WIFI_STA_PASSWORD               "CHANGE_ME_WIFI_PASSWORD"
+#endif
+
+#ifndef WIFI_STA_HOSTNAME
 #define WIFI_STA_HOSTNAME               "esp32-bridge"
+#endif
 
 #ifdef __cplusplus
 extern "C" {

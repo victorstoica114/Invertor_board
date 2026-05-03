@@ -14,3 +14,6 @@ htmlcov/
 *.gcda
 *.gcno
 *.gcov
+
+# Local-only credentials. Keep main/secrets.example.h public as the template.
+main/secrets.h
