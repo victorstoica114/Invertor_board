@@ -11,6 +11,7 @@ tests/
   unit/
     test_can_decoder.c
     test_modbus_decoder.c
+    test_pace_modbus.c
     test_route_selection.c
     test_host_unit_coverage.py
     esp_stub/
@@ -48,7 +49,7 @@ Sanity tests verify the repository shape, CI image pinning, expected test entryp
 python -m pytest tests/unit/test_host_unit_coverage.py -v
 ```
 
-Unit tests compile and run the host C test targets for CAN decoder, Modbus decoder, and route selection. They also create gcov data for coverage.
+Unit tests compile and run the host C test targets for CAN decoder, Modbus decoder, PACE Modbus decoding/polling, route selection, and shared battery/CAN protocol behavior. They also create gcov data for coverage.
 
 ## Run Integration Tests
 
@@ -60,7 +61,7 @@ Integration tests verify:
 
 - firmware configuration
 - protocol constants and repository structure
-- protocol fixture shape and Modbus CRC helpers
+- protocol fixture shape and Modbus CRC helpers, including the PACE RS485 Modbus V1.3 field fixture used as the reference for new protocol work
 
 ## Run Build Tests
 

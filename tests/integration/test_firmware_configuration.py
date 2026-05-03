@@ -166,6 +166,7 @@ def test_protocol_directories_exist():
         'growatt',
         'pylon',
         'jkbms_modbus',
+        'pace_modbus',
         'deye',
     ]
 
@@ -173,6 +174,28 @@ def test_protocol_directories_exist():
         protocol_path = protocols_dir / protocol_dir
         assert protocol_path.exists(), \
             f"Protocol directory {protocol_dir} should exist"
+
+
+def test_pace_modbus_protocol_files_exist():
+    """Test that the PACE RS485 Modbus implementation is complete enough for CI."""
+    protocols_dir = first_existing_path(
+        repo_path("main", "protocols"),
+        repo_path("main", "Protocols"),
+    )
+    pace_dir = protocols_dir / "pace_modbus"
+
+    expected_files = [
+        "pace_modbus_registers_map.h",
+        "pace_modbus_registers_map.c",
+        "pace_modbus_poller.h",
+        "pace_modbus_poller.c",
+        "pace_modbus_bms_task.h",
+        "pace_modbus_bms_task.c",
+    ]
+
+    for file_name in expected_files:
+        assert (pace_dir / file_name).exists(), \
+            f"PACE protocol file {file_name} should exist"
 
 
 def test_decoder_files_exist():

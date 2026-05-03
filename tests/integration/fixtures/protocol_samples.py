@@ -104,6 +104,54 @@ GROWATT_MODBUS_SAMPLES = [
     },
 ]
 
+# Modbus (PACE RS485 Modbus V1.3) field-style register samples
+PACE_MODBUS_V13_SAMPLE = {
+    "slave_id": 0x01,
+    "function": 0x03,
+    "summary_start": 0x0000,
+    "summary_registers": [
+        0,       # current, 10mA units
+        7270,    # pack voltage, 10mV units
+        100,     # SOC
+        100,     # SOH
+        0,
+        0,
+        0,
+        0,
+        0,
+        0x0001,  # warning flags
+        0x0001,  # protection flags
+        0x0800,  # status/fault flags: MOSFET_DCHG
+        0x0000,  # balance flags
+    ],
+    "cells_start": 0x000F,
+    "cells_and_temps": [
+        4528, 4560, 4617, 4509,
+        4516, 4524, 4555, 4530,
+        4589, 4573, 4576, 4476,
+        4519, 4519, 4517, 4584,
+        276, 280, 273, 272, 288, 270,
+    ],
+    "expected_pack_voltage_cv": 7270,
+    "expected_soc": 100,
+    "expected_cell_max_mv": 4617,
+    "expected_cell_max_idx": 3,
+    "expected_cell_min_mv": 4476,
+    "expected_cell_min_idx": 12,
+    "expected_warning_flags": 0x0001,
+    "expected_protection_flags": 0x0001,
+    "expected_status_flags": 0x0800,
+    "expected_temp_deci_c": {
+        "battery_t1": 276,
+        "battery_t2": 280,
+        "battery_t4": 273,
+        "battery_t5": 272,
+        "mos": 288,
+        "environment": 270,
+    },
+    "description": "PACE RS485 Modbus V1.3 live-style summary/cell/temperature registers",
+}
+
 
 def calculate_modbus_crc(data):
     """
