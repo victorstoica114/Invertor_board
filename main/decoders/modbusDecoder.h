@@ -46,6 +46,7 @@ void modbusDecoderFeed(modbusDecoder_t *d, const uint8_t *data, int len, int64_t
 void modbusDecoderFlush(modbusDecoder_t *d);
 void modbusDecoderPrintSnapshot(modbusDecoder_t *d);
 bool modbusDecoderGetCachedReg(const modbusDecoder_t *d, uint16_t addr, uint16_t *valOut);
+int64_t modbusDecoderGetNewestCacheTsUs(const modbusDecoder_t *d);
 void modbusDecoderRecordRequest(modbusDecoder_t *d,
                                 uint8_t slave,
                                 uint8_t func,

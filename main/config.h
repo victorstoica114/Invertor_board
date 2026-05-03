@@ -75,7 +75,7 @@
 #define BRIDGE_SOURCE_STALE_MS 2000u
 
 /* Telemetry cache max age before UI hides stale values. */
-#define WEB_TELEMETRY_STALE_MS 30000u
+#define WEB_TELEMETRY_STALE_MS 10000u
 
 /* --- Global working mode --- */
 #define ACTIVE_WORKING_MODE 0 /* 0=bridge, 1=forward, 2=sniffer */

@@ -20,6 +20,7 @@ idf_component_register(
         "protocols/growatt/growatt_bms_task.c"
         "protocols/growatt/growatt_inverter_task.c"
         "protocols/jkbms_modbus/jkbms_modbus_registers_map.c"
+        "protocols/jkbms_modbus/jkbms_modbus_freshness.c"
         "protocols/jkbms_modbus/jkbms_modbus_poller.c"
         "protocols/jkbms_modbus/jkbms_modbus_bms_task.c"
         "protocols/rs485_growatt/rs485_growatt_bridge.c"

@@ -47,9 +47,18 @@ HOST_C_TESTS = (
         ),
     ),
     HostCTestTarget(
+        name="jkbms_modbus_freshness",
+        sources=(
+            "tests/unit/test_jkbms_modbus_freshness.c",
+            "main/protocols/jkbms_modbus/jkbms_modbus_freshness.c",
+            "main/decoders/modbusDecoder.c",
+        ),
+    ),
+    HostCTestTarget(
         name="route_selection",
         sources=(
             "tests/unit/test_route_selection.c",
+            "tests/unit/route_selection_stubs.c",
             "main/orchestrator/orchestrator.c",
         ),
     ),

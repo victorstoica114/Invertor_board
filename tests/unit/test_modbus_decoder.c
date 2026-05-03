@@ -91,6 +91,7 @@ void test_modbus_decoder_cache_holding_registers(void)
     TEST_ASSERT_TRUE(hasReg2);
     TEST_ASSERT_EQUAL_HEX16(0x1234, value1);
     TEST_ASSERT_EQUAL_HEX16(0x5678, value2);
+    TEST_ASSERT_EQUAL_UINT32(10000u, (uint32_t)modbusDecoderGetNewestCacheTsUs(&g_testDecoder));
 }
 
 /**
@@ -104,6 +105,38 @@ void test_modbus_decoder_empty_feed(void)
     /* Should not crash and cache should be empty */
     uint16_t value = 0;
     TEST_ASSERT_FALSE(modbusDecoderGetCachedReg(&g_testDecoder, 0x0000, &value));
+    TEST_ASSERT_EQUAL_UINT32(0u, (uint32_t)modbusDecoderGetNewestCacheTsUs(&g_testDecoder));
+}
+
+void test_modbus_decoder_newest_cache_timestamp_tracks_latest_response(void)
+{
+    uint8_t response[] = {
+        0x01,
+        0x03,
+        0x02,
+        0x22, 0x22,
+        0x00, 0x00
+    };
+
+    uint16_t crc = 0xFFFF;
+    for (int i = 0; i < 5; i++) {
+        crc ^= response[i];
+        for (int j = 0; j < 8; j++) {
+            if (crc & 0x0001) {
+                crc = (crc >> 1) ^ 0xA001;
+            } else {
+                crc >>= 1;
+            }
+        }
+    }
+    response[5] = crc & 0xFF;
+    response[6] = (crc >> 8) & 0xFF;
+
+    modbusDecoderRecordRequest(&g_testDecoder, 0x01, 0x03, 0x0300, 1, 1000);
+    modbusDecoderFeed(&g_testDecoder, response, sizeof(response), 123000);
+    modbusDecoderFlush(&g_testDecoder);
+
+    TEST_ASSERT_EQUAL_UINT32(123000u, (uint32_t)modbusDecoderGetNewestCacheTsUs(&g_testDecoder));
 }
 
 /**
@@ -254,6 +287,7 @@ int main(void)
     RUN_TEST(test_modbus_decoder_init);
     RUN_TEST(test_modbus_decoder_cache_holding_registers);
     RUN_TEST(test_modbus_decoder_empty_feed);
+    RUN_TEST(test_modbus_decoder_newest_cache_timestamp_tracks_latest_response);
     RUN_TEST(test_modbus_decoder_no_request_match);
     RUN_TEST(test_modbus_decoder_fragmented_data);
     RUN_TEST(test_modbus_decoder_flush);

@@ -9,6 +9,7 @@
 #include "orchestrator/protocol_types.h"
 #include "protocols/common/battery_model.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_poller.h"
+#include "protocols/jkbms_modbus/jkbms_modbus_freshness.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_registers_map.h"
 #include "runtime_settings.h"
 
@@ -34,6 +35,7 @@ static bms_decoded_packet_t g_latestPacket;
 static bool g_haveLatestSnapshot;
 static jkbms_modbus_snapshot_t g_latestSnapshot;
 static int64_t g_lastCellDebugLogUs;
+static int64_t g_lastSourceStaleLogUs;
 static struct {
     bool valid;
     uint8_t cellCount;
@@ -70,6 +72,16 @@ static void jkbmsStoreLatestSnapshot(const jkbms_modbus_snapshot_t *snapshot)
     portEXIT_CRITICAL(&g_latestPacketMux);
 }
 
+static void jkbmsClearLatestData(void)
+{
+    portENTER_CRITICAL(&g_latestPacketMux);
+    g_haveLatestPacket = false;
+    memset(&g_latestPacket, 0, sizeof(g_latestPacket));
+    g_haveLatestSnapshot = false;
+    memset(&g_latestSnapshot, 0, sizeof(g_latestSnapshot));
+    portEXIT_CRITICAL(&g_latestPacketMux);
+}
+
 static bool jkbmsCellAvgLooksConsistent(const jkbms_modbus_snapshot_t *snapshot)
 {
     const uint16_t toleranceMv = 50u;
@@ -92,7 +104,7 @@ static bool jkbmsCellAvgLooksConsistent(const jkbms_modbus_snapshot_t *snapshot)
     return true;
 }
 
-static void jkbmsPublishBatteryModel(const jkbms_modbus_snapshot_t *snapshot, int64_t nowUs)
+static void jkbmsPublishBatteryModel(const jkbms_modbus_snapshot_t *snapshot, int64_t sourceUs)
 {
     battery_model_t model = {0};
     const char *voltageSource = "none";
@@ -103,7 +115,7 @@ static void jkbmsPublishBatteryModel(const jkbms_modbus_snapshot_t *snapshot, in
     }
 
     model.valid = true;
-    model.updatedMs = (uint32_t)(nowUs / 1000LL);
+    model.updatedMs = (uint32_t)(sourceUs / 1000LL);
 
     if (snapshot->hasPackVoltageMv) {
         model.packVoltageV = (float)snapshot->packVoltageMv / 1000.0f;
@@ -1101,6 +1113,7 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
 
 static bool buildPacketFromSnapshot(const jkbms_modbus_snapshot_t *snapshot,
                                     uint32_t sequence,
+                                    int64_t sourceUs,
                                     bms_decoded_packet_t *outPacket)
 {
     if (snapshot == NULL || outPacket == NULL || !snapshot->valid) {
@@ -1110,7 +1123,7 @@ static bool buildPacketFromSnapshot(const jkbms_modbus_snapshot_t *snapshot,
     memset(outPacket, 0, sizeof(*outPacket));
     outPacket->sourceProtocol = PROTOCOL_ID_JKBMS;
     outPacket->sequence = sequence;
-    outPacket->timestampUs = esp_timer_get_time();
+    outPacket->timestampUs = sourceUs;
 
     if (snapshot->hasSoc) {
         outPacket->hasSoc = true;
@@ -1192,13 +1205,32 @@ static void jkbmsModbusBmsTask(void *pv)
 
         if ((nowUs - ctx->lastPublishUs) >= ((int64_t)JKBMS_BMS_PUBLISH_PERIOD_MS * 1000LL)) {
             jkbms_modbus_snapshot_t snapshot = {0};
-            if (buildDecodedSnapshot(&ctx->decoder, &snapshot)) {
+            int64_t newestCacheUs = 0;
+            if (!jkbmsModbusDecoderCacheFresh(&ctx->decoder, nowUs, &newestCacheUs)) {
+                batteryModelClear();
+                jkbmsClearLatestData();
+                if ((nowUs - g_lastSourceStaleLogUs) >= 1000000LL) {
+                    if (newestCacheUs <= 0) {
+                        ESP_LOGW(EXAMPLE_TAG,
+                                 "JKBMS Modbus source stale: clearing published data (no valid BMS response yet)");
+                    } else {
+                        uint32_t ageMs = 0u;
+                        if (nowUs >= newestCacheUs) {
+                            ageMs = (uint32_t)((nowUs - newestCacheUs) / 1000LL);
+                        }
+                        ESP_LOGW(EXAMPLE_TAG,
+                                 "JKBMS Modbus source stale: clearing published data (last_rx_age=%u ms)",
+                                 (unsigned)ageMs);
+                    }
+                    g_lastSourceStaleLogUs = nowUs;
+                }
+            } else if (buildDecodedSnapshot(&ctx->decoder, &snapshot)) {
                 jkbmsStoreLatestSnapshot(&snapshot);
-                jkbmsPublishBatteryModel(&snapshot, nowUs);
+                jkbmsPublishBatteryModel(&snapshot, newestCacheUs);
                 logCellDebug(&ctx->decoder, &snapshot, nowUs);
 
                 bms_decoded_packet_t packet = {0};
-                if (buildPacketFromSnapshot(&snapshot, ++ctx->sequence, &packet)) {
+                if (buildPacketFromSnapshot(&snapshot, ++ctx->sequence, newestCacheUs, &packet)) {
                     jkbmsStoreLatestPacket(&packet);
                     if (xQueueOverwrite(ctx->outQueue, &packet) != pdPASS) {
                         ESP_LOGW(EXAMPLE_TAG, "JKBMS output queue overwrite failed");
@@ -1222,15 +1254,11 @@ esp_err_t jkbmsModbusBmsTaskStart(QueueHandle_t outQueue)
     memset(&g_jkbmsModbusBmsCtx, 0, sizeof(g_jkbmsModbusBmsCtx));
     g_jkbmsModbusBmsCtx.outQueue = outQueue;
     g_lastCellDebugLogUs = 0;
+    g_lastSourceStaleLogUs = 0;
     memset(&g_lastGoodCellMap, 0, sizeof(g_lastGoodCellMap));
     batteryModelClear();
 
-    portENTER_CRITICAL(&g_latestPacketMux);
-    g_haveLatestPacket = false;
-    memset(&g_latestPacket, 0, sizeof(g_latestPacket));
-    g_haveLatestSnapshot = false;
-    memset(&g_latestSnapshot, 0, sizeof(g_latestSnapshot));
-    portEXIT_CRITICAL(&g_latestPacketMux);
+    jkbmsClearLatestData();
 
     BaseType_t taskOk =
         xTaskCreate(jkbmsModbusBmsTask,

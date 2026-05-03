@@ -727,6 +727,26 @@ bool modbusDecoderGetCachedReg(const modbusDecoder_t *d, uint16_t addr, uint16_t
     return false;
 }
 
+int64_t modbusDecoderGetNewestCacheTsUs(const modbusDecoder_t *d)
+{
+    int64_t newestTsUs = 0;
+
+    if (d == NULL) {
+        return 0;
+    }
+
+    for (int i = 0; i < MODBUS_DECODER_CACHE_MAX_REGS; i++) {
+        if (!d->cacheValid[i]) {
+            continue;
+        }
+        if (d->cacheTsUs[i] > newestTsUs) {
+            newestTsUs = d->cacheTsUs[i];
+        }
+    }
+
+    return newestTsUs;
+}
+
 static void printSnapshotDecoded(modbusDecoder_t *d)
 {
     const char *ifn = snapshotIfName(d);
