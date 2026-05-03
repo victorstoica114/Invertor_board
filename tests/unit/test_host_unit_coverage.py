@@ -55,6 +55,13 @@ HOST_C_TESTS = (
         ),
     ),
     HostCTestTarget(
+        name="jkbms_modbus_alerts",
+        sources=(
+            "tests/unit/test_jkbms_modbus_alerts.c",
+            "main/protocols/jkbms_modbus/jkbms_modbus_alerts.c",
+        ),
+    ),
+    HostCTestTarget(
         name="pace_modbus",
         sources=(
             "tests/unit/test_pace_modbus.c",

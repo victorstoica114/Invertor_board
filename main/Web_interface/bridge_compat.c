@@ -8,6 +8,7 @@
 #include "config.h"
 #include "orchestrator/protocol_types.h"
 #include "protocols/growatt/growatt_bms_task.h"
+#include "protocols/jkbms_modbus/jkbms_modbus_alerts.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_bms_task.h"
 #include "protocols/pace_modbus/pace_modbus_bms_task.h"
 #include "protocols/rs485_growatt/rs485_growatt_bridge.h"
@@ -71,41 +72,6 @@ static const char *protocolToStr(uint8_t protocol)
             return "PACE_RS485_MODBUS";
         default:
             return "UNKNOWN";
-    }
-}
-
-static void formatBitList(uint32_t bits, const char *prefix, char *out, size_t outSize)
-{
-    size_t used = 0u;
-    if (out == NULL || outSize == 0u) {
-        return;
-    }
-
-    out[0] = '\0';
-    if (bits == 0u) {
-        return;
-    }
-
-    for (uint8_t i = 0; i < 32u; i++) {
-        if ((bits & (1u << i)) == 0u) {
-            continue;
-        }
-
-        int w = snprintf(out + used,
-                         outSize - used,
-                         "%s%s%u",
-                         (used == 0u) ? "" : ", ",
-                         (prefix != NULL) ? prefix : "B",
-                         (unsigned)i);
-        if (w <= 0) {
-            break;
-        }
-        if ((size_t)w >= (outSize - used)) {
-            used = outSize - 1u;
-            out[used] = '\0';
-            break;
-        }
-        used += (size_t)w;
     }
 }
 
@@ -383,6 +349,7 @@ static void fillTelemetryFromJkbmsSnapshot(const jkbms_modbus_snapshot_t *snapsh
         out->cellVoltagesV[i] = (float)snapshot->cellMv[i] / 1000.0f;
     }
 
+    uint32_t decodedAlarmBits = 0u;
     if (snapshot->hasCellExtremes) {
         out->cellMaxV = (float)snapshot->maxCellMv / 1000.0f;
         out->cellMinV = (float)snapshot->minCellMv / 1000.0f;
@@ -393,9 +360,14 @@ static void fillTelemetryFromJkbmsSnapshot(const jkbms_modbus_snapshot_t *snapsh
 
     if (snapshot->hasAlarmBits) {
         out->alarmRaw = snapshot->alarmBits;
-        formatBitList(snapshot->alarmBits, "A", out->alarms, sizeof(out->alarms));
-        formatBitList(snapshot->alarmBits & 0x0000FFFFu, "P", out->protections, sizeof(out->protections));
-        formatBitList((snapshot->alarmBits >> 16), "W", out->warnings, sizeof(out->warnings));
+        decodedAlarmBits = jkbmsModbusNormalizeAlarmBits(snapshot->alarmBits);
+        jkbmsModbusFormatAlertFields(snapshot->alarmBits,
+                                     out->protections,
+                                     sizeof(out->protections),
+                                     out->alarms,
+                                     sizeof(out->alarms),
+                                     out->warnings,
+                                     sizeof(out->warnings));
     }
 
     if (snapshot->hasPrecharge) {
@@ -404,8 +376,9 @@ static void fillTelemetryFromJkbmsSnapshot(const jkbms_modbus_snapshot_t *snapsh
 
     snprintf(out->stateFlags,
              sizeof(out->stateFlags),
-             "AlarmRaw=0x%08" PRIX32 ", Precharge=%u, Cells=%u",
+             "AlarmRaw=0x%08" PRIX32 ", AlarmDecoded=0x%08" PRIX32 ", Precharge=%u, Cells=%u",
              snapshot->hasAlarmBits ? snapshot->alarmBits : 0u,
+             decodedAlarmBits,
              snapshot->hasPrecharge ? snapshot->prechargeState : 0u,
              (unsigned)snapshot->cellCount);
 }

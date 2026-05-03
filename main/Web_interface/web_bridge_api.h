@@ -44,9 +44,9 @@ typedef struct {
     uint32_t alarmRaw;
     uint8_t prechargeState;
     char stateFlags[128];
-    char protections[256];
-    char alarms[256];
-    char warnings[256];
+    char protections[512];
+    char alarms[512];
+    char warnings[512];
 } bridgeTelemetrySnapshot_t;
 
 void bridgeReloadFromRuntimeSettings(void);

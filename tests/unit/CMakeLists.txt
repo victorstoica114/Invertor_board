@@ -7,6 +7,7 @@ idf_component_register(
 # Add test sources
 target_sources(${COMPONENT_LIB} PRIVATE
     test_can_decoder.c
+    test_jkbms_modbus_alerts.c
     test_modbus_decoder.c
     test_pace_modbus.c
     test_route_selection.c

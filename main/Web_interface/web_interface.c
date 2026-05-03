@@ -673,7 +673,7 @@ static esp_err_t telemetryHandler(httpd_req_t *req)
 {
     bridgeTelemetrySnapshot_t snap = {0};
     const bool fakeOverride = batteryModelIsDebugOverrideEnabled();
-    char json[2048];
+    char json[3072];
     int pos = 0;
 
     bridgeGetTelemetrySnapshot(&snap);
