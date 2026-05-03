@@ -100,6 +100,7 @@ def test_protocol_constants_in_config_h():
         'PROTOCOL_CAN_SOFAR',
         'PROTOCOL_CAN_SMA',
         'PROTOCOL_CAN_VICTRON',
+        'PROTOCOL_RS485_PACE',
     ]
 
     for protocol in expected_protocols:

@@ -31,9 +31,11 @@ Implemented and actively used:
 
 - `RS485_GROWATT` BMS polling/decoding (`Modbus`) + queue publish
 - `JKBMS_MODBUS` BMS polling/decoding (`Modbus`) + rich snapshot
+- `PACE_RS485_MODBUS_V1.3` BMS polling/decoding (`Modbus`) + rich snapshot
 - `GROWATT` inverter CAN sender (publishes frame `0x322`)
 - `CAN_GROWATT | CAN_PYLON | CAN_GOODWE | CAN_SOFAR | CAN_SMA | CAN_VICTRON -> RS485_GROWATT` translator (`main/protocols/rs485_growatt/rs485_growatt_bridge.c`)
 - `RS485_JKBMS -> RS485_GROWATT` translator
+- `RS485_PACE -> RS485_PYLON` translator/responder
 - `RS485_PYLON <-> RS485_PYLON` bridge/responder
 - `CAN_PYLON -> RS485_PYLON` synthetic responder/bridge
 - CAN snapshot decoders for Growatt-like, Pylon, and Deye frame sets
@@ -51,6 +53,7 @@ Current bridge-mode route matrix:
 | --- | --- | --- |
 | CAN -> RS485_GROWATT translator | `bms_line=CAN`, `inv_line=RS485`, `inv_protocol=RS485_GROWATT`, `bms_protocol in {CAN_GROWATT,CAN_PYLON,CAN_GOODWE,CAN_SOFAR,CAN_SMA,CAN_VICTRON}` | Active |
 | RS485_JKBMS -> RS485_GROWATT translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=JKBMS_MODBUS`, `inv_protocol=RS485_GROWATT` | Active |
+| RS485_PACE -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=PACE_RS485_MODBUS`, `inv_protocol=RS485_PYLON` | Active |
 | Pylon RS485 bridge | `RS485_PYLON<->RS485_PYLON` or `CAN_PYLON->RS485_PYLON` | Active |
 | Generic orchestrator route | any other valid combination | Active, depends on protocol task maturity |
 
@@ -77,8 +80,9 @@ Bridge mode route selection is done in `orchestratorStartFromRuntime(...)`:
 
 1. `CAN -> RS485_GROWATT` translator route
 2. `RS485_JKBMS -> RS485_GROWATT` translator route
-3. `Pylon RS485 bridge` route (`RS485_PYLON<->RS485_PYLON` or `CAN_PYLON->RS485_PYLON`)
-4. fallback generic orchestrator route (`protocol_id_t` based)
+3. `RS485_PACE -> RS485_PYLON` translator route
+4. `Pylon RS485 bridge` route (`RS485_PYLON<->RS485_PYLON` or `CAN_PYLON->RS485_PYLON`)
+5. fallback generic orchestrator route (`protocol_id_t` based)
 
 ## Integration Notes
 
@@ -128,6 +132,7 @@ Defined in `main/config.h`:
 - `PROTOCOL_CAN_SOFAR = 8`
 - `PROTOCOL_CAN_SMA = 9`
 - `PROTOCOL_CAN_VICTRON = 10`
+- `PROTOCOL_RS485_PACE = 11`
 
 ## Folder Structure (AI-Oriented)
 
@@ -195,6 +200,12 @@ These are useful for reference/history, but are not the primary active implement
 
 - active JK BMS Modbus poller + decoder + rich snapshot extraction
 
+`main/protocols/pace_modbus/`
+
+- active PACE BMS RS485 Modbus V1.3 poller + decoder
+- supports `RS485_PACE -> RS485_PYLON` bridge-mode translation
+- web/API telemetry includes pack values, all cell voltages, individual temperature registers, protections, alarms/faults, warnings, raw status flags, and Pylon status output
+
 `main/protocols/pylon/`
 
 - `pylon_rs485_bridge.c`: active bridge/responder for Pylon RS485 routes
@@ -233,6 +244,29 @@ Minimum integration checklist (so files are actually used):
 5. update protocol selection UI lists in `main/Web_interface/web_interface.c`
 6. update routing/protocol mapping in `main/orchestrator/orchestrator.c`
 7. update decoders/translators if the new protocol needs telemetry, bridging, or synthetic responses
+
+### Telemetry Quality Standard for New Protocols
+
+`PACE_RS485_MODBUS_V1.3 -> RS485_PYLON` is the reference for how new protocol integrations should look and behave in the web UI/API.
+
+For every new BMS protocol, aim to expose a complete, inspectable telemetry snapshot:
+
+- runtime/source/protocol validity, age, stale state, and inverter-facing status
+- pack voltage, current, power, `SOC`, `SOH`, cycle count, and capacity fields when the source protocol provides them
+- cell min/max, delta, indexes, average, and the full per-cell voltage list instead of only synthesized extremes
+- real temperature registers mapped to their source labels; do not copy one generic/average temperature into every displayed sensor slot
+- protections, alarms/faults, warnings, balance state, and raw status/protocol flags decoded into human-readable names where the protocol map is known
+- unknown bits should still be visible as raw hex/unknown bit labels so field debugging can continue without firmware changes
+
+Validation expectation:
+
+1. add or extend host tests for the register/frame decoder, including cell arrays, temperature arrays, warning/protection/fault bits, and status flags
+2. run the Python/host test suite
+3. build the ESP-IDF firmware
+4. flash the board when hardware is available
+5. verify `/api/telemetry` and the web UI against the vendor/BMS app screenshots or live source data
+
+Avoid temporary UI polish that hides missing decode work. If the source protocol exposes a value, prefer decoding and showing it explicitly; if it is not known yet, show `None`, `-`, or a raw diagnostic value instead of fabricating a plausible value.
 
 ## Important Core Files and Responsibilities
 

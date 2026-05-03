@@ -14,3 +14,7 @@ static inline int uart_read_bytes(uart_port_t uart, void *buf, size_t len, int t
     return 0;
 }
 
+static inline void uart_flush_input(uart_port_t uart)
+{
+    (void)uart;
+}

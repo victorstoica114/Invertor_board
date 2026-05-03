@@ -89,6 +89,7 @@ static const char *protocolToStrLocal(uint8_t protocol)
         case PROTOCOL_CAN_SOFAR: return "CAN_SOFAR";
         case PROTOCOL_CAN_SMA: return "CAN_SMA";
         case PROTOCOL_CAN_VICTRON: return "CAN_VICTRON";
+        case PROTOCOL_RS485_PACE: return "PACE_RS485_MODBUS";
         default: return "UNKNOWN";
     }
 }

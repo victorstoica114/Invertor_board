@@ -11,6 +11,7 @@
 #include "protocols/growatt/growatt_bms_task.h"
 #include "protocols/growatt/growatt_inverter_task.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_bms_task.h"
+#include "protocols/pace_modbus/pace_modbus_bms_task.h"
 #include "protocols/pylon/pylon_bms_task.h"
 #include "protocols/pylon/pylon_inverter_task.h"
 #include "protocols/rs485_growatt/rs485_growatt_bridge.h"
@@ -54,6 +55,8 @@ const char *protocolIdToStr(protocol_id_t id)
             return "PYLON";
         case PROTOCOL_ID_JKBMS:
             return "JKBMS_MODBUS";
+        case PROTOCOL_ID_PACE:
+            return "PACE_RS485_MODBUS";
         default:
             return "UNKNOWN";
     }
@@ -65,18 +68,57 @@ static bool packetEquivalent(const bms_decoded_packet_t *a, const bms_decoded_pa
         return false;
     }
 
-    return (a->hasSoc == b->hasSoc) &&
-           (!a->hasSoc || (a->socPct == b->socPct)) &&
-           (a->hasTemperatureC == b->hasTemperatureC) &&
-           (!a->hasTemperatureC || (a->temperatureC == b->temperatureC)) &&
-           (a->hasPackVoltageCv == b->hasPackVoltageCv) &&
-           (!a->hasPackVoltageCv || (a->packVoltageCv == b->packVoltageCv)) &&
-           (a->hasCellExtremes == b->hasCellExtremes) &&
-           (!a->hasCellExtremes ||
-            ((a->minCellMv == b->minCellMv) &&
-             (a->maxCellMv == b->maxCellMv) &&
-             (a->minCellIndex == b->minCellIndex) &&
-             (a->maxCellIndex == b->maxCellIndex)));
+    if ((a->hasSoc != b->hasSoc) ||
+        (a->hasSoc && (a->socPct != b->socPct)) ||
+        (a->hasTemperatureC != b->hasTemperatureC) ||
+        (a->hasTemperatureC && (a->temperatureC != b->temperatureC)) ||
+        (a->hasPackVoltageCv != b->hasPackVoltageCv) ||
+        (a->hasPackVoltageCv && (a->packVoltageCv != b->packVoltageCv)) ||
+        (a->hasCellExtremes != b->hasCellExtremes) ||
+        (a->hasWarningFlags != b->hasWarningFlags) ||
+        (a->hasWarningFlags && (a->warningFlags != b->warningFlags)) ||
+        (a->hasProtectionFlags != b->hasProtectionFlags) ||
+        (a->hasProtectionFlags && (a->protectionFlags != b->protectionFlags)) ||
+        (a->hasStatusFlags != b->hasStatusFlags) ||
+        (a->hasStatusFlags && (a->statusFlags != b->statusFlags)) ||
+        (a->hasBalanceFlags != b->hasBalanceFlags) ||
+        (a->hasBalanceFlags && (a->balanceFlags != b->balanceFlags))) {
+        return false;
+    }
+
+    if (a->tempCount != b->tempCount) {
+        return false;
+    }
+    if (a->tempCount > 0u) {
+        uint8_t limit = (a->tempCount > BMS_DECODED_PACKET_MAX_TEMPS)
+                            ? BMS_DECODED_PACKET_MAX_TEMPS
+                            : a->tempCount;
+        if (memcmp(a->tempDeciC, b->tempDeciC, (size_t)limit * sizeof(a->tempDeciC[0])) != 0) {
+            return false;
+        }
+    }
+
+    if (a->hasCellExtremes &&
+        ((a->minCellMv != b->minCellMv) ||
+         (a->maxCellMv != b->maxCellMv) ||
+         (a->minCellIndex != b->minCellIndex) ||
+         (a->maxCellIndex != b->maxCellIndex))) {
+        return false;
+    }
+
+    if (a->cellCount != b->cellCount) {
+        return false;
+    }
+    if (a->cellCount > 0u) {
+        uint8_t limit = (a->cellCount > BMS_DECODED_PACKET_MAX_CELLS)
+                            ? BMS_DECODED_PACKET_MAX_CELLS
+                            : a->cellCount;
+        if (memcmp(a->cellMv, b->cellMv, (size_t)limit * sizeof(a->cellMv[0])) != 0) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 static esp_err_t startBmsTask(protocol_id_t protocol, QueueHandle_t outQueue)
@@ -88,6 +130,8 @@ static esp_err_t startBmsTask(protocol_id_t protocol, QueueHandle_t outQueue)
             return pylonBmsTaskStart(outQueue);
         case PROTOCOL_ID_JKBMS:
             return jkbmsModbusBmsTaskStart(outQueue);
+        case PROTOCOL_ID_PACE:
+            return paceModbusBmsTaskStart(outQueue);
         default:
             return ESP_ERR_NOT_SUPPORTED;
     }
@@ -120,6 +164,8 @@ static protocol_id_t protocolIdFromUiProtocol(uint8_t protocol)
             return PROTOCOL_ID_PYLON;
         case PROTOCOL_RS485_JKBMS:
             return PROTOCOL_ID_JKBMS;
+        case PROTOCOL_RS485_PACE:
+            return PROTOCOL_ID_PACE;
         default:
             return PROTOCOL_ID_GROWATT;
     }
@@ -235,6 +281,18 @@ static bool isRsJkbmsToRsPylonRoute(const bridge_runtime_settings_t *settings)
     return (settings->bms_line == LINE_RS485) &&
            (settings->inverter_line == LINE_RS485) &&
            (settings->bms_protocol == PROTOCOL_RS485_JKBMS) &&
+           (settings->inverter_protocol == PROTOCOL_RS485_PYLON);
+}
+
+static bool isRsPaceToRsPylonRoute(const bridge_runtime_settings_t *settings)
+{
+    if (settings == NULL) {
+        return false;
+    }
+
+    return (settings->bms_line == LINE_RS485) &&
+           (settings->inverter_line == LINE_RS485) &&
+           (settings->bms_protocol == PROTOCOL_RS485_PACE) &&
            (settings->inverter_protocol == PROTOCOL_RS485_PYLON);
 }
 
@@ -385,9 +443,10 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
     const bool canToRsGrowatt = isCanToRsGrowattRoute(settings);
     const bool rsJkbmsToRsGrowatt = isRsJkbmsToRsGrowattRoute(settings);
     const bool rsJkbmsToRsPylon = isRsJkbmsToRsPylonRoute(settings);
+    const bool rsPaceToRsPylon = isRsPaceToRsPylonRoute(settings);
     const bool pylonRs485Route = pylonRs485BridgeSupportsRoute(settings);
     ESP_LOGI(EXAMPLE_TAG,
-             "Orchestrator runtime start: bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) canToRsGrowatt=%s rsJkbmsToRsGrowatt=%s rsJkbmsToRsPylon=%s pylonRs485=%s",
+             "Orchestrator runtime start: bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) canToRsGrowatt=%s rsJkbmsToRsGrowatt=%s rsJkbmsToRsPylon=%s rsPaceToRsPylon=%s pylonRs485=%s",
              (unsigned)settings->bms_line,
              (unsigned)settings->bms_protocol,
              (unsigned)settings->bms_port,
@@ -397,6 +456,7 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
              canToRsGrowatt ? "YES" : "NO",
              rsJkbmsToRsGrowatt ? "YES" : "NO",
              rsJkbmsToRsPylon ? "YES" : "NO",
+             rsPaceToRsPylon ? "YES" : "NO",
              pylonRs485Route ? "YES" : "NO");
 
     if (canToRsGrowatt) {
@@ -516,6 +576,42 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
         return ESP_OK;
     }
 
+    if (rsPaceToRsPylon) {
+        if (g_orchestratorTaskHandle != NULL || g_orchestratorCtx.canRs485TranslatorActive) {
+            ESP_LOGW(EXAMPLE_TAG, "Orchestrator already running");
+            return ESP_ERR_INVALID_STATE;
+        }
+
+        memset(&g_orchestratorCtx, 0, sizeof(g_orchestratorCtx));
+        g_orchestratorCtx.bmsProtocol = PROTOCOL_ID_PACE;
+        g_orchestratorCtx.inverterProtocol = PROTOCOL_ID_PYLON;
+
+        g_orchestratorCtx.bmsQueue =
+            xQueueCreate(ORCHESTRATOR_BMS_QUEUE_LEN, sizeof(bms_decoded_packet_t));
+        if (g_orchestratorCtx.bmsQueue == NULL) {
+            orchestratorReset(&g_orchestratorCtx);
+            return ESP_ERR_NO_MEM;
+        }
+
+        esp_err_t err = paceModbusBmsTaskStart(g_orchestratorCtx.bmsQueue);
+        if (err != ESP_OK) {
+            ESP_LOGW(EXAMPLE_TAG,
+                     "PACE BMS task failed for RS485->RS485 Pylon route (err=0x%x)",
+                     (unsigned)err);
+            orchestratorReset(&g_orchestratorCtx);
+            return err;
+        }
+
+        pylonRs485BridgeEnable();
+        g_orchestratorCtx.canRs485TranslatorActive = true;
+        ESP_LOGI(EXAMPLE_TAG,
+                 "Orchestrator started PACE RS485->RS485 Pylon route: BMS(RS485_%u) -> Inverter(%s:%u)",
+                 (unsigned)settings->bms_port,
+                 rsNameByPort(settings->inverter_port),
+                 (unsigned)settings->inverter_port);
+        return ESP_OK;
+    }
+
     if (pylonRs485Route) {
         if (g_orchestratorTaskHandle != NULL || g_orchestratorCtx.canRs485TranslatorActive) {
             ESP_LOGW(EXAMPLE_TAG, "Orchestrator already running");
@@ -559,6 +655,7 @@ esp_err_t orchestratorStop(void)
     (void)growattBmsTaskStop();
     (void)growattInverterTaskStop();
     (void)jkbmsModbusBmsTaskStop();
+    (void)paceModbusBmsTaskStop();
     (void)pylonBmsTaskStop();
     (void)pylonInverterTaskStop();
     clearTransportBuffers();

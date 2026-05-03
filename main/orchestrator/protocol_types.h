@@ -11,7 +11,11 @@ typedef enum {
     PROTOCOL_ID_GROWATT = 0,
     PROTOCOL_ID_PYLON = 1,
     PROTOCOL_ID_JKBMS = 2,
+    PROTOCOL_ID_PACE = 3,
 } protocol_id_t;
+
+#define BMS_DECODED_PACKET_MAX_CELLS 32u
+#define BMS_DECODED_PACKET_MAX_TEMPS 6u
 
 typedef struct {
     protocol_id_t sourceProtocol;
@@ -23,6 +27,8 @@ typedef struct {
 
     bool hasTemperatureC;
     int16_t temperatureC;
+    uint8_t tempCount;
+    int16_t tempDeciC[BMS_DECODED_PACKET_MAX_TEMPS];
 
     bool hasPackVoltageCv;
     uint16_t packVoltageCv;
@@ -32,6 +38,21 @@ typedef struct {
     uint16_t maxCellMv;
     uint8_t minCellIndex;
     uint8_t maxCellIndex;
+
+    uint8_t cellCount;
+    uint16_t cellMv[BMS_DECODED_PACKET_MAX_CELLS];
+
+    bool hasWarningFlags;
+    uint16_t warningFlags;
+
+    bool hasProtectionFlags;
+    uint16_t protectionFlags;
+
+    bool hasStatusFlags;
+    uint16_t statusFlags;
+
+    bool hasBalanceFlags;
+    uint16_t balanceFlags;
 } bms_decoded_packet_t;
 
 const char *protocolIdToStr(protocol_id_t id);

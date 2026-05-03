@@ -8,5 +8,6 @@ idf_component_register(
 target_sources(${COMPONENT_LIB} PRIVATE
     test_can_decoder.c
     test_modbus_decoder.c
+    test_pace_modbus.c
     test_route_selection.c
 )

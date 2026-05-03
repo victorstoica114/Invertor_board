@@ -9,6 +9,7 @@
 #include "orchestrator/protocol_types.h"
 #include "protocols/growatt/growatt_bms_task.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_bms_task.h"
+#include "protocols/pace_modbus/pace_modbus_bms_task.h"
 #include "protocols/rs485_growatt/rs485_growatt_bridge.h"
 #include "runtime_settings.h"
 
@@ -66,6 +67,8 @@ static const char *protocolToStr(uint8_t protocol)
             return "CAN_VICTRON";
         case PROTOCOL_RS485_JKBMS:
             return "JKBMS_MODBUS";
+        case PROTOCOL_RS485_PACE:
+            return "PACE_RS485_MODBUS";
         default:
             return "UNKNOWN";
     }
@@ -103,6 +106,217 @@ static void formatBitList(uint32_t bits, const char *prefix, char *out, size_t o
             break;
         }
         used += (size_t)w;
+    }
+}
+
+typedef struct {
+    uint16_t mask;
+    const char *name;
+} namedFlag_t;
+
+static const namedFlag_t kPaceWarningFlags[] = {
+    {0x0001u, "Cell overvoltage"},
+    {0x0002u, "Cell undervoltage"},
+    {0x0004u, "Pack overvoltage"},
+    {0x0008u, "Pack undervoltage"},
+    {0x0010u, "Charging overcurrent"},
+    {0x0020u, "Discharging overcurrent"},
+    {0x0100u, "Charging overtemperature"},
+    {0x0200u, "Discharging overtemperature"},
+    {0x0400u, "Charging undertemperature"},
+    {0x0800u, "Discharging undertemperature"},
+    {0x1000u, "Environment overtemperature"},
+    {0x2000u, "Environment undertemperature"},
+    {0x4000u, "MOSFET overtemperature"},
+    {0x8000u, "Low state of charge"},
+};
+
+static const namedFlag_t kPaceProtectionFlags[] = {
+    {0x0001u, "Cell overvoltage"},
+    {0x0002u, "Cell undervoltage"},
+    {0x0004u, "Pack overvoltage"},
+    {0x0008u, "Pack undervoltage"},
+    {0x0010u, "Charging overcurrent"},
+    {0x0020u, "Discharging overcurrent"},
+    {0x0040u, "Short circuit"},
+    {0x0080u, "Charging overvoltage"},
+    {0x0100u, "Charging overtemperature"},
+    {0x0200u, "Discharging overtemperature"},
+    {0x0400u, "Charging undertemperature"},
+    {0x0800u, "Discharging undertemperature"},
+    {0x1000u, "MOSFET overtemperature"},
+    {0x2000u, "Environment overtemperature"},
+    {0x4000u, "Environment undertemperature"},
+    {0x8000u, "Battery full"},
+};
+
+static const namedFlag_t kPaceFaultFlags[] = {
+    {0x0001u, "Charging MOSFET fault"},
+    {0x0002u, "Discharging MOSFET fault"},
+    {0x0004u, "Temperature sensor fault"},
+    {0x0010u, "Battery cell fault"},
+    {0x0020u, "AFE communication fault"},
+};
+
+static const namedFlag_t kPaceStatusFlags[] = {
+    {0x0100u, "CHG"},
+    {0x0200u, "DCHG"},
+    {0x0400u, "MOSFET_CHG"},
+    {0x0800u, "MOSFET_DCHG"},
+    {0x1000u, "LIMIT_CHG"},
+    {0x4000u, "Charger inversed"},
+    {0x8000u, "HEAT"},
+};
+
+static void appendListItem(char *out, size_t outSize, const char *item)
+{
+    size_t used = 0u;
+    int w = 0;
+
+    if (out == NULL || outSize == 0u || item == NULL || item[0] == '\0') {
+        return;
+    }
+
+    used = strlen(out);
+    if (used >= (outSize - 1u)) {
+        return;
+    }
+
+    w = snprintf(out + used, outSize - used, "%s%s", (used == 0u) ? "" : ", ", item);
+    if (w <= 0) {
+        return;
+    }
+    if ((size_t)w >= (outSize - used)) {
+        out[outSize - 1u] = '\0';
+    }
+}
+
+static void formatNamedFlagList(uint16_t bits,
+                                const namedFlag_t *map,
+                                size_t mapCount,
+                                char *out,
+                                size_t outSize)
+{
+    uint16_t known = 0u;
+
+    if (out == NULL || outSize == 0u) {
+        return;
+    }
+
+    out[0] = '\0';
+    if (bits == 0u) {
+        return;
+    }
+
+    for (size_t i = 0u; i < mapCount; i++) {
+        known = (uint16_t)(known | map[i].mask);
+        if ((bits & map[i].mask) != 0u) {
+            appendListItem(out, outSize, map[i].name);
+        }
+    }
+
+    uint16_t unknown = (uint16_t)(bits & (uint16_t)(~known));
+    for (uint8_t i = 0u; i < 16u; i++) {
+        uint16_t mask = (uint16_t)(1u << i);
+        if ((unknown & mask) != 0u) {
+            char item[24];
+            snprintf(item, sizeof(item), "Unknown 0x%04X", (unsigned)mask);
+            appendListItem(out, outSize, item);
+        }
+    }
+}
+
+static void fillPaceAlertFields(const bms_decoded_packet_t *packet, bridgeTelemetrySnapshot_t *out)
+{
+    uint16_t warningFlags = 0u;
+    uint16_t protectionFlags = 0u;
+    uint16_t statusFlags = 0u;
+    uint16_t balanceFlags = 0u;
+    char statusText[48] = {0};
+
+    if (packet == NULL || out == NULL || packet->sourceProtocol != PROTOCOL_ID_PACE) {
+        return;
+    }
+
+    if (packet->hasWarningFlags) {
+        warningFlags = packet->warningFlags;
+        formatNamedFlagList(warningFlags,
+                            kPaceWarningFlags,
+                            sizeof(kPaceWarningFlags) / sizeof(kPaceWarningFlags[0]),
+                            out->warnings,
+                            sizeof(out->warnings));
+    }
+    if (packet->hasProtectionFlags) {
+        protectionFlags = packet->protectionFlags;
+        formatNamedFlagList(protectionFlags,
+                            kPaceProtectionFlags,
+                            sizeof(kPaceProtectionFlags) / sizeof(kPaceProtectionFlags[0]),
+                            out->protections,
+                            sizeof(out->protections));
+    }
+    if (packet->hasStatusFlags) {
+        statusFlags = packet->statusFlags;
+        formatNamedFlagList((uint16_t)(statusFlags & 0x00FFu),
+                            kPaceFaultFlags,
+                            sizeof(kPaceFaultFlags) / sizeof(kPaceFaultFlags[0]),
+                            out->alarms,
+                            sizeof(out->alarms));
+        formatNamedFlagList((uint16_t)(statusFlags & 0xFF00u),
+                            kPaceStatusFlags,
+                            sizeof(kPaceStatusFlags) / sizeof(kPaceStatusFlags[0]),
+                            statusText,
+                            sizeof(statusText));
+    }
+    if (packet->hasBalanceFlags) {
+        balanceFlags = packet->balanceFlags;
+    }
+
+    out->alarmRaw = ((uint32_t)warningFlags << 16) | (uint32_t)protectionFlags;
+    snprintf(out->stateFlags,
+             sizeof(out->stateFlags),
+             "Warn=0x%04X, Prot=0x%04X, Fault=0x%02X, Status=0x%02X%s%s, Balance=0x%04X",
+             (unsigned)warningFlags,
+             (unsigned)protectionFlags,
+             (unsigned)(statusFlags & 0x00FFu),
+             (unsigned)((statusFlags & 0xFF00u) >> 8),
+             (statusText[0] != '\0') ? " " : "",
+             statusText,
+             (unsigned)balanceFlags);
+}
+
+static bool pacePacketTempC(const bms_decoded_packet_t *packet, uint8_t index, float *outC)
+{
+    if (packet == NULL || outC == NULL || index >= packet->tempCount ||
+        index >= BMS_DECODED_PACKET_MAX_TEMPS) {
+        return false;
+    }
+
+    *outC = (float)packet->tempDeciC[index] / 10.0f;
+    return true;
+}
+
+static void fillPaceTemperatureFields(const bms_decoded_packet_t *packet, bridgeTelemetrySnapshot_t *out)
+{
+    float tempC = 0.0f;
+
+    if (packet == NULL || out == NULL || packet->sourceProtocol != PROTOCOL_ID_PACE) {
+        return;
+    }
+
+    if (pacePacketTempC(packet, 0u, &tempC)) {
+        out->tempT1C = tempC;
+    }
+    if (pacePacketTempC(packet, 1u, &tempC)) {
+        out->tempT2C = tempC;
+    }
+    if (pacePacketTempC(packet, 2u, &tempC)) {
+        out->tempT4C = tempC;
+    }
+    if (pacePacketTempC(packet, 3u, &tempC)) {
+        out->tempT5C = tempC;
+    }
+    if (pacePacketTempC(packet, 4u, &tempC)) {
+        out->tempMosC = tempC;
     }
 }
 
@@ -314,6 +528,11 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
             }
             return;
         }
+    } else if (settings.bms_protocol == PROTOCOL_RS485_PACE) {
+        hasPacket = paceModbusBmsTaskGetLatestPacket(&packet);
+        if (hasPacket) {
+            srcUpdatedMs = (uint32_t)(packet.timestampUs / 1000ULL);
+        }
     } else {
         hasPacket = growattBmsTaskGetLatestPacket(&packet);
         if (hasPacket) {
@@ -327,14 +546,16 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
     }
 
     ESP_LOGD(BRIDGE_TAG, "[FILL] Using BMS task packet: protocol=%s, soc=%u%%",
-             (settings.bms_protocol == PROTOCOL_RS485_JKBMS) ? "JKBMS" : "GROWATT",
+             (settings.bms_protocol == PROTOCOL_RS485_JKBMS) ? "JKBMS" :
+             ((settings.bms_protocol == PROTOCOL_RS485_PACE) ? "PACE" : "GROWATT"),
              packet.hasSoc ? packet.socPct : 0);
 
     out->valid = true;
     snprintf(out->source,
              sizeof(out->source),
              "%s",
-             (settings.bms_protocol == PROTOCOL_RS485_JKBMS) ? "JKBMS_BMS_TASK" : "GROWATT_BMS_TASK");
+             (settings.bms_protocol == PROTOCOL_RS485_JKBMS) ? "JKBMS_BMS_TASK" :
+             ((settings.bms_protocol == PROTOCOL_RS485_PACE) ? "PACE_BMS_TASK" : "GROWATT_BMS_TASK"));
     snprintf(out->protocol, sizeof(out->protocol), "%s", protocolToStr(settings.bms_protocol));
 
     if (packet.hasSoc) {
@@ -347,6 +568,7 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
         out->tempT4C = (float)packet.temperatureC;
         out->tempT5C = (float)packet.temperatureC;
     }
+    fillPaceTemperatureFields(&packet, out);
     if (packet.hasCellExtremes) {
         out->cellMaxV = (float)packet.maxCellMv / 1000.0f;
         out->cellMinV = (float)packet.minCellMv / 1000.0f;
@@ -354,10 +576,34 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
         out->cellMinIdx = packet.minCellIndex;
         out->deltaV = out->cellMaxV - out->cellMinV;
     }
+    if (packet.cellCount > 0u) {
+        uint32_t sumMv = 0u;
+        uint8_t counted = 0u;
+        uint8_t limit = (packet.cellCount > BMS_DECODED_PACKET_MAX_CELLS)
+                            ? BMS_DECODED_PACKET_MAX_CELLS
+                            : packet.cellCount;
+        out->cellCount = limit;
+        for (uint8_t i = 0u; i < limit && i < 32u; i++) {
+            out->cellVoltagesV[i] = (float)packet.cellMv[i] / 1000.0f;
+            if (packet.cellMv[i] > 0u) {
+                sumMv += packet.cellMv[i];
+                counted++;
+            }
+        }
+        if (counted > 0u) {
+            out->cellAvgV = ((float)sumMv / (float)counted) / 1000.0f;
+        }
+        if (out->deltaV <= 0.0f && out->cellMaxV >= out->cellMinV) {
+            out->cellDiffV = out->cellMaxV - out->cellMinV;
+        } else {
+            out->cellDiffV = out->deltaV;
+        }
+    }
     if (packet.hasPackVoltageCv) {
         out->packVoltageV = (float)packet.packVoltageCv / 100.0f;
         out->currentA = 0.0f;
     }
+    fillPaceAlertFields(&packet, out);
 
     if (srcUpdatedMs != 0u) {
         out->updatedMs = srcUpdatedMs;

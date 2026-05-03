@@ -111,6 +111,7 @@
 #define PROTOCOL_CAN_SOFAR 8
 #define PROTOCOL_CAN_SMA 9
 #define PROTOCOL_CAN_VICTRON 10
+#define PROTOCOL_RS485_PACE 11
 
 #define BMS_line LINE_RS485
 #define Inverter_line LINE_CAN
@@ -145,6 +146,14 @@
 #define JKBMS_BMS_PUBLISH_PERIOD_MS    250
 #define JKBMS_BMS_TASK_STACK           6144
 #define JKBMS_BMS_TASK_PRIORITY        10
+
+/* --- PACE RS485 Modbus task --- */
+#define PACE_BMS_MODBUS_SLAVE_ADDR     0x01u
+#define PACE_BMS_MODBUS_GAP_US         5000
+#define PACE_BMS_QUERY_PERIOD_MS       250
+#define PACE_BMS_PUBLISH_PERIOD_MS     250
+#define PACE_BMS_TASK_STACK            4096
+#define PACE_BMS_TASK_PRIORITY         10
 
 /* --- Pylon placeholders --- */
 #define PYLON_BMS_TASK_STACK           3072

@@ -15,6 +15,10 @@ The goal is practical maintenance:
 - Web UI support for `Fake Inverter Data` runtime override.
 - Shared `battery_model` layer used by inverter-facing synthetic/projection paths.
 - Project documentation for the `JKBMS_MODBUS -> RS485_PYLON` integration behavior.
+- `PACE_RS485_MODBUS_V1.3` BMS poller/decoder for PACE RS485 Modbus sources.
+- `RS485_PACE -> RS485_PYLON` bridge-mode route for Pylon-compatible inverter responders.
+- Web/API telemetry for PACE all-cell voltage lists, individual temperature registers, protections, alarms/faults, warnings, and raw status flags.
+- README telemetry quality standard for future protocol integrations, using `PACE_RS485_MODBUS_V1.3 -> RS485_PYLON` as the reference behavior.
 - GitLab CI pipeline for automatic ESP32-C6 builds and host-side test execution on push/merge request.
 - Separate CI suites for sanity, unit, integration, and firmware-build validation, with JUnit artifacts and coverage reports.
 - Host-side regression tests for `JKBMS_MODBUS` source freshness and Modbus decoder cache timestamps.
@@ -35,6 +39,8 @@ The goal is practical maintenance:
 - README build, test, coverage, and GitLab runner instructions were refreshed for the ESP-IDF 6.0.1 workflow.
 - Local VS Code ESP-IDF settings were removed from version control and ignored because they contain machine-specific paths.
 - Flash size is configured for `8MB`, and the app partition was expanded from `1MB` to `7MB`.
+- `bms_decoded_packet_t` now carries richer decoded telemetry for protocols that expose per-cell voltages, per-sensor temperatures, warning/protection/fault masks, status flags, and balance flags.
+- Pylon synthetic status generation can now use explicit PACE MOSFET charge/discharge flags while keeping the conservative generic fallback for non-native sources.
 
 ### Fixed
 
@@ -65,6 +71,7 @@ Behavior kept in code:
 - Fixed stale `JKBMS_MODBUS` decoder data being republished after the BMS cable was disconnected.
 - Fixed near-full application partition warnings on ESP32-C6-WROOM-1-N8 by using the available `8MB` flash.
 - Removed real Wi-Fi credentials from tracked source files.
+- Fixed early PACE web telemetry showing identical temperature values by mapping PACE temperature registers to their real source labels (`MOS`, `Battery T1`, `Battery T2`, `Battery T4`, `Battery T5`) instead of copying a generic average temperature.
 
 ### Operational Notes
 
@@ -72,6 +79,7 @@ Behavior kept in code:
 - For future `JKBMS -> Pylon` work, compare synthetic `0x63` semantics first before chasing pack-voltage formatting.
 - The ESP32-C6-WROOM-1-N8 build now leaves roughly `86%` of the `7MB` app partition free.
 - Keep real local Wi-Fi credentials in `main/secrets.h`; commit only `main/secrets.example.h`.
+- Future BMS protocol work should match the PACE integration standard: decode real source fields, expose raw diagnostics, add host tests, build firmware, and verify against live `/api/telemetry` plus the vendor/BMS app.
 
 ## Known Issues
 
