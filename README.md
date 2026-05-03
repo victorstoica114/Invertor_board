@@ -10,8 +10,10 @@ See also: [CHANGELOG.md](CHANGELOG.md)
 
 - MCU family: Espressif ESP32
 - Current target in this repository: **ESP32-C6**
+- Field-tested module: **ESP32-C6-WROOM-1-N8** (`8MB` flash)
 - ESP-IDF version used by local builds and CI: **v6.0.1**
 - Suggested IDF target command: `idf.py set-target esp32c6`
+- Current partition layout: single `7MB` factory app partition, no OTA
 
 ## Short Description
 
@@ -285,6 +287,13 @@ Runtime settings are persisted in NVS namespace `bridge_cfg`.
 
 Use ESP-IDF **v6.0.1** and target `esp32c6`.
 
+Before the first local build, create a private secrets file for your Wi-Fi
+credentials:
+
+```bash
+cp main/secrets.example.h main/secrets.h
+```
+
 Typical shell flow:
 
 ```bash
@@ -298,6 +307,9 @@ Notes:
 
 - project name in CMake is `project-name`
 - this repo currently enables `idf_build_set_property(MINIMAL_BUILD ON)`
+- flash size is configured as `8MB`
+- the generated flash command should include `--flash-size 8MB`
+- the custom partition table is `partitions_8mb_singleapp.csv`
 
 ## Configuration Notes
 
@@ -320,6 +332,18 @@ Then edit `main/secrets.h` for your device/network. If the local secrets file is
 missing, the firmware still builds using placeholder values from `main/config.h`.
 
 Runtime settings from web API/UI override operational route/mode choices.
+
+## Public Repository Hygiene
+
+Tracked files should not contain local credentials, machine-specific IDE paths,
+or generated build artifacts.
+
+- `main/secrets.h` is local-only and ignored
+- `main/secrets.example.h` is the public template
+- `.vscode/`, `build/`, `managed_components/`, `.pytest_cache/`, and
+  `pytest-cache-files-*/` are ignored
+- run `git status --ignored --short` when checking for generated artifacts before
+  making the repository public
 
 ## Testing
 

@@ -17,18 +17,24 @@ The goal is practical maintenance:
 - Project documentation for the `JKBMS_MODBUS -> RS485_PYLON` integration behavior.
 - GitLab CI pipeline for automatic ESP32-C6 builds and host-side test execution on push/merge request.
 - Separate CI suites for sanity, unit, integration, and firmware-build validation, with JUnit artifacts and coverage reports.
+- Host-side regression tests for `JKBMS_MODBUS` source freshness and Modbus decoder cache timestamps.
+- Public `main/secrets.example.h` template for Wi-Fi credentials, with local `main/secrets.h` ignored by Git.
+- Custom `8MB` single-app partition table for ESP32-C6-WROOM-1-N8 modules.
 
 ### Changed
 
 - Generic `RS485_PYLON` synthetic `0x61` generation was made more conservative for non-native Pylon sources.
 - Generic `RS485_PYLON` synthetic `0x63` generation now defaults to a permissive `0xC0` status when explicit native Pylon charge/discharge bits are not available.
 - Debug/investigation logs added during root-cause analysis were removed after the fix was validated.
+- `JKBMS_MODBUS` bridge publishing now uses the newest real Modbus response timestamp instead of refreshing stale data with the current publish time.
+- Web telemetry stale timeout was reduced to `10s`, so disconnected or stale BMS data disappears from the UI faster.
 - CI now targets ESP-IDF `v6.0.1` and the ESP32-C6 target explicitly.
 - GitLab CI jobs are routed to the local project runner through the `ubuntu` runner tag.
 - Python CI dependencies are installed into an isolated local virtual environment when possible, with cache reuse for faster repeat runs.
 - Firmware CI sources ESP-IDF from the local `gitlab-runner` installation and installs missing `cmake`/`ninja` tools into the ESP-IDF Python environment when needed.
 - README build, test, coverage, and GitLab runner instructions were refreshed for the ESP-IDF 6.0.1 workflow.
 - Local VS Code ESP-IDF settings were removed from version control and ignored because they contain machine-specific paths.
+- Flash size is configured for `8MB`, and the app partition was expanded from `1MB` to `7MB`.
 
 ### Fixed
 
@@ -56,12 +62,16 @@ Behavior kept in code:
 - Removed the unused managed `led_strip` dependency from the firmware build.
 - Suppressed the legacy TWAI deprecation warning through sdkconfig until the TWAI API migration is done.
 - Fixed GitLab CI failures caused by shared-runner selection, Docker image `IDF_PATH` conflicts, missing `pip`, Ubuntu PEP 668 restrictions, and missing local `cmake`/`ninja`.
+- Fixed stale `JKBMS_MODBUS` decoder data being republished after the BMS cable was disconnected.
+- Fixed near-full application partition warnings on ESP32-C6-WROOM-1-N8 by using the available `8MB` flash.
+- Removed real Wi-Fi credentials from tracked source files.
 
 ### Operational Notes
 
 - `Fake Inverter Data` remains useful as a field diagnostic tool when validating inverter-side protocol behavior independently of live BMS decoding.
 - For future `JKBMS -> Pylon` work, compare synthetic `0x63` semantics first before chasing pack-voltage formatting.
-- The ESP32-C6 application partition has very little free space after the ESP-IDF 6.0.1 build; future features may require a partition layout change or code-size cleanup.
+- The ESP32-C6-WROOM-1-N8 build now leaves roughly `86%` of the `7MB` app partition free.
+- Keep real local Wi-Fi credentials in `main/secrets.h`; commit only `main/secrets.example.h`.
 
 ## Known Issues
 
