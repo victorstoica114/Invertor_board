@@ -38,6 +38,13 @@ static inline void unity_fail_impl(const char *file, int line, const char *expr,
 
 #define TEST_ASSERT_FALSE(condition) TEST_ASSERT_TRUE(!(condition))
 
+#define TEST_ASSERT_EQUAL(expected, actual) \
+    do { \
+        long long e_ = (long long)(expected); \
+        long long a_ = (long long)(actual); \
+        if (e_ != a_) unity_fail_impl(__FILE__, __LINE__, "TEST_ASSERT_EQUAL", NULL); \
+    } while (0)
+
 #define TEST_ASSERT_EQUAL_UINT8(expected, actual) \
     do { \
         uint8_t e_ = (uint8_t)(expected); \
@@ -50,6 +57,13 @@ static inline void unity_fail_impl(const char *file, int line, const char *expr,
         uint16_t e_ = (uint16_t)(expected); \
         uint16_t a_ = (uint16_t)(actual); \
         if (e_ != a_) unity_fail_impl(__FILE__, __LINE__, "TEST_ASSERT_EQUAL_UINT16", NULL); \
+    } while (0)
+
+#define TEST_ASSERT_EQUAL_INT16(expected, actual) \
+    do { \
+        int16_t e_ = (int16_t)(expected); \
+        int16_t a_ = (int16_t)(actual); \
+        if (e_ != a_) unity_fail_impl(__FILE__, __LINE__, "TEST_ASSERT_EQUAL_INT16", NULL); \
     } while (0)
 
 #define TEST_ASSERT_EQUAL_UINT32(expected, actual) \
