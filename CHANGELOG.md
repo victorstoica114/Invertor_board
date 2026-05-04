@@ -26,6 +26,8 @@ The goal is practical maintenance:
 - `RS485_VOLTRONIC -> RS485_PYLON` bridge-mode route for Pylon-compatible inverter responders.
 - `CHINA_TOWER_MODBUS` BMS poller/decoder for JK UART protocol `008 - China tower shared battery cabinet V2.0`, including pack voltage, `SOC`, all-cell voltages, cell extremes, and individual temperatures.
 - `RS485_CHINA_TOWER -> RS485_PYLON` bridge-mode route for Pylon-compatible inverter responders.
+- `WOW_MODBUS` BMS poller/decoder for JK UART protocol `009 - WOW_RS485_Modbus_V1.3`, using a PACE-compatible V1.3 register map as the initial live-test implementation.
+- `RS485_WOW -> RS485_PYLON` bridge-mode route for Pylon-compatible inverter responders.
 - GitLab CI pipeline for automatic ESP32-C6 builds and host-side test execution on push/merge request.
 - Separate CI suites for sanity, unit, integration, and firmware-build validation, with JUnit artifacts and coverage reports.
 - Host-side regression tests for `JKBMS_MODBUS` source freshness and Modbus decoder cache timestamps.
@@ -56,6 +58,9 @@ The goal is practical maintenance:
 - `CHINA_TOWER_MODBUS` uses the bench-observed JK profile `008` register layout, with cell millivolts starting at `0x0009` and temperature registers kept at the live-tested offsets.
 - `CHINA_TOWER_MODBUS` web telemetry now treats the compact summary temperatures as the only confirmed live sensors and hides non-live `Battery T4`/`Battery T5` values instead of displaying Pylon-template leftovers.
 - `CHINA_TOWER_MODBUS` now captures the live-tested raw candidate warning/protection/status registers (`0x0019..0x001B`) without assigning unconfirmed names; non-zero unknown bits are preserved for future correlation with the JK app.
+- `WOW_MODBUS` is integrated as its own runtime/source protocol so JK profile `009` can be validated without reusing or mutating another protocol's cache interpretation.
+- Web/API telemetry and route-selection tests now cover the `WOW_MODBUS -> RS485_PYLON` path.
+- `WOW_MODBUS` has been live-validated with the BMS set to JK UART profile `009`, with the inverter accepting the translated Pylon responder data.
 
 ### Fixed
 

@@ -35,6 +35,7 @@ Implemented and actively used:
 - `PACE_RS485_MODBUS_V1.3` BMS polling/decoding (`Modbus`) + rich snapshot
 - `VOLTRONIC_MODBUS` BMS polling/decoding for JK UART profile `007 - Voltronic_Inverter_and_BMS_485` + rich snapshot
 - `CHINA_TOWER_MODBUS` BMS polling/decoding for JK UART profile `008 - China tower shared battery cabinet V2.0` + pack/cell/temperature snapshot
+- `WOW_MODBUS` BMS polling/decoding for JK UART profile `009 - WOW_RS485_Modbus_V1.3` + PACE-compatible pack/cell/temperature snapshot
 - `GROWATT` inverter CAN sender (publishes frame `0x322`)
 - `CAN_GROWATT | CAN_PYLON | CAN_GOODWE | CAN_SOFAR | CAN_SMA | CAN_VICTRON -> RS485_GROWATT` translator (`main/protocols/rs485_growatt/rs485_growatt_bridge.c`)
 - `RS485_JKBMS -> RS485_GROWATT` translator (`JKBMS_MODBUS` and `JKBMS_RS485_NATIVE`)
@@ -43,6 +44,7 @@ Implemented and actively used:
 - `RS485_PACE -> RS485_PYLON` translator/responder
 - `RS485_VOLTRONIC -> RS485_PYLON` translator/responder, intended for JK UART profile `007 - Voltronic_Inverter_and_BMS_485`
 - `RS485_CHINA_TOWER -> RS485_PYLON` translator/responder, intended for JK UART profile `008 - China tower shared battery cabinet V2.0`
+- `RS485_WOW -> RS485_PYLON` translator/responder, intended for JK UART profile `009 - WOW_RS485_Modbus_V1.3`
 - `RS485_PYLON <-> RS485_PYLON` bridge/responder
 - `CAN_PYLON -> RS485_PYLON` synthetic responder/bridge
 - CAN snapshot decoders for Growatt-like, Pylon, and Deye frame sets
@@ -65,6 +67,7 @@ Current bridge-mode route matrix:
 | RS485_PACE -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=PACE_RS485_MODBUS`, `inv_protocol=RS485_PYLON` | Active |
 | RS485_VOLTRONIC -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=VOLTRONIC_MODBUS`, `inv_protocol=RS485_PYLON` | Active; covers JK UART profile `007` |
 | RS485_CHINA_TOWER -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=CHINA_TOWER_MODBUS`, `inv_protocol=RS485_PYLON` | Active; covers JK UART profile `008` |
+| RS485_WOW -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=WOW_MODBUS`, `inv_protocol=RS485_PYLON` | Active initial implementation; covers JK UART profile `009` with PACE-compatible map |
 | Pylon RS485 bridge | `RS485_PYLON<->RS485_PYLON` or `CAN_PYLON->RS485_PYLON` | Active |
 | Generic orchestrator route | any other valid combination | Active, depends on protocol task maturity |
 
@@ -96,8 +99,9 @@ Bridge mode route selection is done in `orchestratorStartFromRuntime(...)`:
 5. `RS485_PACE -> RS485_PYLON` translator route
 6. `RS485_VOLTRONIC -> RS485_PYLON` translator route
 7. `RS485_CHINA_TOWER -> RS485_PYLON` translator route
-8. `Pylon RS485 bridge` route (`RS485_PYLON<->RS485_PYLON` or `CAN_PYLON->RS485_PYLON`)
-9. fallback generic orchestrator route (`protocol_id_t` based)
+8. `RS485_WOW -> RS485_PYLON` translator route
+9. `Pylon RS485 bridge` route (`RS485_PYLON<->RS485_PYLON` or `CAN_PYLON->RS485_PYLON`)
+10. fallback generic orchestrator route (`protocol_id_t` based)
 
 ## Integration Notes
 
@@ -151,6 +155,7 @@ Defined in `main/config.h`:
 - `PROTOCOL_RS485_JKBMS_NATIVE = 12`
 - `PROTOCOL_RS485_VOLTRONIC = 13`
 - `PROTOCOL_RS485_CHINA_TOWER = 14`
+- `PROTOCOL_RS485_WOW = 15`
 
 ## Folder Structure (AI-Oriented)
 
@@ -248,6 +253,14 @@ These are useful for reference/history, but are not the primary active implement
 - supports `RS485_CHINA_TOWER -> RS485_PYLON` bridge-mode translation through the shared synthetic Pylon responder path
 - web/API telemetry includes pack voltage, `SOC`, all cell voltages, cell min/max/delta, and the three live temperature registers observed in the compact summary block; only `MOS`, `Temp 1`, and `Temp 2` are labeled for this profile because the exact battery-sensor assignment is not yet confirmed
 - named alert bits for China Tower profile `008` are not confirmed yet; non-zero raw candidate warning/protection bits are surfaced as unknown bits until they can be correlated with the JK app
+
+`main/protocols/wow_modbus/`
+
+- active WOW RS485 Modbus poller + decoder for JK UART profile `009 - WOW_RS485_Modbus_V1.3`
+- public WOW/SRNE register documentation is sparse, so the first implementation deliberately uses the PACE-compatible V1.3 register blocks as a separate protocol path instead of sharing cache interpretation with other pollers
+- supports `RS485_WOW -> RS485_PYLON` bridge-mode translation through the shared synthetic Pylon responder path
+- web/API telemetry includes pack values, all cell voltages, PACE-style temperature labels, warning/protection/fault/status fields, and raw diagnostics when the source exposes them
+- field validation on a BMS configured to JK UART profile `009` confirmed stable pack, cell, temperature, and Pylon-responder behavior; alert naming remains conservative until more fault-state captures are available
 
 `main/protocols/pylon/`
 

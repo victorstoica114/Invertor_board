@@ -92,6 +92,8 @@ static const char *protocolToStrLocal(uint8_t protocol)
         case PROTOCOL_RS485_PACE: return "PACE_RS485_MODBUS";
         case PROTOCOL_RS485_JKBMS_NATIVE: return "JKBMS_RS485_NATIVE";
         case PROTOCOL_RS485_VOLTRONIC: return "VOLTRONIC_MODBUS";
+        case PROTOCOL_RS485_CHINA_TOWER: return "CHINA_TOWER_MODBUS";
+        case PROTOCOL_RS485_WOW: return "WOW_MODBUS";
         default: return "UNKNOWN";
     }
 }

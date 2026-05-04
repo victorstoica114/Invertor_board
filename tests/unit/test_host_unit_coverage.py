@@ -113,6 +113,18 @@ HOST_C_TESTS = (
         ),
     ),
     HostCTestTarget(
+        name="wow_modbus",
+        sources=(
+            "tests/unit/test_wow_modbus.c",
+            "tests/unit/pace_modbus_stubs.c",
+            "main/protocols/wow_modbus/wow_modbus_bms_task.c",
+            "main/protocols/pace_modbus/pace_modbus_bms_task.c",
+            "main/protocols/pace_modbus/pace_modbus_poller.c",
+            "main/protocols/pace_modbus/pace_modbus_registers_map.c",
+            "main/decoders/modbusDecoder.c",
+        ),
+    ),
+    HostCTestTarget(
         name="route_selection",
         sources=(
             "tests/unit/test_route_selection.c",

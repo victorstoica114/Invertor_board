@@ -15,6 +15,7 @@
 #include "protocols/pace_modbus/pace_modbus_bms_task.h"
 #include "protocols/rs485_growatt/rs485_growatt_bridge.h"
 #include "protocols/voltronic_modbus/voltronic_modbus_bms_task.h"
+#include "protocols/wow_modbus/wow_modbus_bms_task.h"
 #include "runtime_settings.h"
 
 #include "esp_log.h"
@@ -79,6 +80,8 @@ static const char *protocolToStr(uint8_t protocol)
             return "VOLTRONIC_MODBUS";
         case PROTOCOL_RS485_CHINA_TOWER:
             return "CHINA_TOWER_MODBUS";
+        case PROTOCOL_RS485_WOW:
+            return "WOW_MODBUS";
         default:
             return "UNKNOWN";
     }
@@ -321,7 +324,9 @@ static void fillPaceAlertFields(const bms_decoded_packet_t *packet, bridgeTeleme
     uint16_t balanceFlags = 0u;
     char statusText[48] = {0};
 
-    if (packet == NULL || out == NULL || packet->sourceProtocol != PROTOCOL_ID_PACE) {
+    if (packet == NULL || out == NULL ||
+        (packet->sourceProtocol != PROTOCOL_ID_PACE &&
+         packet->sourceProtocol != PROTOCOL_ID_WOW)) {
         return;
     }
 
@@ -736,7 +741,8 @@ static void fillPaceTemperatureFields(const bms_decoded_packet_t *packet, bridge
 
     if (packet == NULL || out == NULL ||
         (packet->sourceProtocol != PROTOCOL_ID_PACE &&
-         packet->sourceProtocol != PROTOCOL_ID_CHINA_TOWER)) {
+         packet->sourceProtocol != PROTOCOL_ID_CHINA_TOWER &&
+         packet->sourceProtocol != PROTOCOL_ID_WOW)) {
         return;
     }
 
@@ -782,7 +788,8 @@ static void inferFixedTemperatureCount(const bms_decoded_packet_t *packet,
                                        bridgeTelemetrySnapshot_t *out)
 {
     if (packet == NULL || out == NULL || out->tempCount != 0u ||
-        packet->sourceProtocol != PROTOCOL_ID_PACE) {
+        (packet->sourceProtocol != PROTOCOL_ID_PACE &&
+         packet->sourceProtocol != PROTOCOL_ID_WOW)) {
         return;
     }
 
@@ -1007,6 +1014,8 @@ static const char *bridgeBmsTaskDebugName(uint8_t protocol)
             return "VOLTRONIC";
         case PROTOCOL_RS485_CHINA_TOWER:
             return "CHINA_TOWER";
+        case PROTOCOL_RS485_WOW:
+            return "WOW";
         default:
             return "GROWATT";
     }
@@ -1025,6 +1034,8 @@ static const char *bridgeBmsTaskSourceName(uint8_t protocol)
             return "VOLTRONIC_BMS_TASK";
         case PROTOCOL_RS485_CHINA_TOWER:
             return "CHINA_TOWER_BMS_TASK";
+        case PROTOCOL_RS485_WOW:
+            return "WOW_BMS_TASK";
         default:
             return "GROWATT_BMS_TASK";
     }
@@ -1176,6 +1187,11 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
         }
     } else if (settings.bms_protocol == PROTOCOL_RS485_CHINA_TOWER) {
         hasPacket = chinaTowerModbusBmsTaskGetLatestPacket(&packet);
+        if (hasPacket) {
+            srcUpdatedMs = (uint32_t)(packet.timestampUs / 1000ULL);
+        }
+    } else if (settings.bms_protocol == PROTOCOL_RS485_WOW) {
+        hasPacket = wowModbusBmsTaskGetLatestPacket(&packet);
         if (hasPacket) {
             srcUpdatedMs = (uint32_t)(packet.timestampUs / 1000ULL);
         }

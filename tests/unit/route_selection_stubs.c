@@ -18,11 +18,13 @@
 #include "protocols/pylon/pylon_rs485_bridge.h"
 #include "protocols/rs485_growatt/rs485_growatt_bridge.h"
 #include "protocols/voltronic_modbus/voltronic_modbus_bms_task.h"
+#include "protocols/wow_modbus/wow_modbus_bms_task.h"
 #include "runtime_settings.h"
 
 int g_routeStubGrowattBmsStartCount;
 int g_routeStubVoltronicBmsStartCount;
 int g_routeStubChinaTowerBmsStartCount;
+int g_routeStubWowBmsStartCount;
 int g_routeStubPylonInverterStartCount;
 int g_routeStubPylonBridgeEnableCount;
 
@@ -31,6 +33,7 @@ void routeSelectionStubReset(void)
     g_routeStubGrowattBmsStartCount = 0;
     g_routeStubVoltronicBmsStartCount = 0;
     g_routeStubChinaTowerBmsStartCount = 0;
+    g_routeStubWowBmsStartCount = 0;
     g_routeStubPylonInverterStartCount = 0;
     g_routeStubPylonBridgeEnableCount = 0;
 }
@@ -129,6 +132,18 @@ esp_err_t chinaTowerModbusBmsTaskStart(QueueHandle_t outQueue)
 }
 
 esp_err_t chinaTowerModbusBmsTaskStop(void)
+{
+    return ESP_OK;
+}
+
+esp_err_t wowModbusBmsTaskStart(QueueHandle_t outQueue)
+{
+    (void)outQueue;
+    g_routeStubWowBmsStartCount++;
+    return ESP_OK;
+}
+
+esp_err_t wowModbusBmsTaskStop(void)
 {
     return ESP_OK;
 }

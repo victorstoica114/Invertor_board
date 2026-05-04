@@ -115,6 +115,7 @@
 #define PROTOCOL_RS485_JKBMS_NATIVE 12
 #define PROTOCOL_RS485_VOLTRONIC 13
 #define PROTOCOL_RS485_CHINA_TOWER 14
+#define PROTOCOL_RS485_WOW 15
 
 #define BMS_line LINE_RS485
 #define Inverter_line LINE_CAN
@@ -178,6 +179,14 @@
 #define CHINA_TOWER_BMS_PUBLISH_PERIOD_MS  250
 #define CHINA_TOWER_BMS_TASK_STACK         4096
 #define CHINA_TOWER_BMS_TASK_PRIORITY      10
+
+/* --- WOW RS485 Modbus protocol task (JK UART protocol 009 / SRNE-WOW profile) --- */
+#define WOW_BMS_MODBUS_SLAVE_ADDR          0x01u
+#define WOW_BMS_MODBUS_GAP_US              5000
+#define WOW_BMS_QUERY_PERIOD_MS            250
+#define WOW_BMS_PUBLISH_PERIOD_MS          250
+#define WOW_BMS_TASK_STACK                 4096
+#define WOW_BMS_TASK_PRIORITY              10
 
 /* --- Pylon placeholders --- */
 #define PYLON_BMS_TASK_STACK           3072
