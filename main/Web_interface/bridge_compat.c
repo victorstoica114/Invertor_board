@@ -13,6 +13,7 @@
 #include "protocols/jkbms_rs485/jkbms_rs485_bms_task.h"
 #include "protocols/pace_modbus/pace_modbus_bms_task.h"
 #include "protocols/rs485_growatt/rs485_growatt_bridge.h"
+#include "protocols/voltronic_modbus/voltronic_modbus_bms_task.h"
 #include "runtime_settings.h"
 
 #include "esp_log.h"
@@ -73,6 +74,8 @@ static const char *protocolToStr(uint8_t protocol)
             return "PACE_RS485_MODBUS";
         case PROTOCOL_RS485_JKBMS_NATIVE:
             return "JKBMS_RS485_NATIVE";
+        case PROTOCOL_RS485_VOLTRONIC:
+            return "VOLTRONIC_MODBUS";
         default:
             return "UNKNOWN";
     }
@@ -172,6 +175,60 @@ static const namedFlag_t kGrowattProtectionFlags[] = {
     {0x4000u, "Ambient undertemperature"},
 };
 
+static const namedFlag_t kVoltronicChargeAlarmFlags[] = {
+    {0x0001u, "Charge overtemperature alarm"},
+    {0x0002u, "Cell overvoltage alarm"},
+    {0x0004u, "Charge low-temperature alarm"},
+    {0x0008u, "Charge overcurrent alarm"},
+};
+
+static const namedFlag_t kVoltronicDischargeAlarmFlags[] = {
+    {0x0001u, "Discharge overtemperature alarm"},
+    {0x0002u, "Discharge low-temperature alarm"},
+    {0x0004u, "MOSFET overtemperature alarm"},
+    {0x0008u, "Cell undervoltage alarm"},
+};
+
+static const namedFlag_t kVoltronicChargeProtectFlags[] = {
+    {0x0001u, "In-system signal missing"},
+    {0x0002u, "MOSFET driver not ready"},
+    {0x0004u, "AFE communication fail"},
+    {0x0008u, "AFE charge overcurrent"},
+    {0x0010u, "AFE discharge overcurrent"},
+    {0x0020u, "AFE discharge short-circuit"},
+    {0x0040u, "MOSFET overtemperature"},
+    {0x0080u, "Safety undervoltage"},
+    {0x0100u, "Charge overtemperature"},
+    {0x0200u, "Charge low-temperature"},
+    {0x0400u, "Cell overvoltage"},
+    {0x0800u, "Charge overcurrent"},
+    {0x1000u, "Second-level cell overvoltage"},
+    {0x2000u, "CAN ID distribution incomplete"},
+    {0x8000u, "Second-level charge overcurrent"},
+};
+
+static const namedFlag_t kVoltronicChargeProtect2Flags[] = {
+    {0x0001u, "Shutdown by command"},
+    {0x0002u, "Low-voltage shutdown"},
+    {0x0004u, "Charge short-circuit detected"},
+    {0x0008u, "CAN ID error"},
+};
+
+static const namedFlag_t kVoltronicDischargeProtectFlags[] = {
+    {0x0001u, "In-system signal missing"},
+    {0x0002u, "MOSFET driver not ready"},
+    {0x0004u, "AFE charge overcurrent"},
+    {0x0008u, "AFE discharge overcurrent"},
+    {0x0010u, "AFE discharge short-circuit"},
+    {0x0040u, "CAN ID error"},
+    {0x0400u, "MOSFET overtemperature"},
+    {0x0800u, "Cell undervoltage"},
+    {0x1000u, "Discharge overcurrent"},
+    {0x2000u, "Discharge low-temperature"},
+    {0x4000u, "Discharge overtemperature"},
+    {0x8000u, "Low-voltage shutdown"},
+};
+
 static void appendListItem(char *out, size_t outSize, const char *item)
 {
     size_t used = 0u;
@@ -228,6 +285,29 @@ static void formatNamedFlagList(uint16_t bits,
             appendListItem(out, outSize, item);
         }
     }
+}
+
+static void appendPrefixedNamedFlagList(char *out,
+                                        size_t outSize,
+                                        const char *prefix,
+                                        uint16_t bits,
+                                        const namedFlag_t *map,
+                                        size_t mapCount)
+{
+    char flags[256];
+    char item[320];
+
+    if (out == NULL || outSize == 0u || bits == 0u) {
+        return;
+    }
+
+    formatNamedFlagList(bits, map, mapCount, flags, sizeof(flags));
+    if (flags[0] == '\0') {
+        return;
+    }
+
+    snprintf(item, sizeof(item), "%s%s", (prefix != NULL) ? prefix : "", flags);
+    appendListItem(out, outSize, item);
 }
 
 static void fillPaceAlertFields(const bms_decoded_packet_t *packet, bridgeTelemetrySnapshot_t *out)
@@ -376,6 +456,217 @@ static void fillGrowattAlertFields(const bms_decoded_packet_t *packet, bridgeTel
              growattSpStatus(statusFlags),
              (unsigned)warningFlags,
              (unsigned)protectionFlags);
+}
+
+static const char *voltronicWarningStateText(uint8_t state)
+{
+    switch (state) {
+        case 0x00u:
+            return "";
+        case 0x01u:
+            return "below lower limit";
+        case 0x02u:
+            return "above higher limit";
+        case 0xF0u:
+            return "other error";
+        default:
+            return "unknown state";
+    }
+}
+
+static void appendVoltronicWarningState(char *out,
+                                        size_t outSize,
+                                        const char *label,
+                                        uint8_t index,
+                                        uint8_t state)
+{
+    char item[80];
+    const char *stateText = voltronicWarningStateText(state);
+
+    if (out == NULL || outSize == 0u || label == NULL || stateText[0] == '\0') {
+        return;
+    }
+
+    if (index > 0u) {
+        snprintf(item, sizeof(item), "%s %u %s", label, (unsigned)index, stateText);
+    } else {
+        snprintf(item, sizeof(item), "%s %s", label, stateText);
+    }
+    appendListItem(out, outSize, item);
+}
+
+static void fillVoltronicAlertFields(const voltronic_modbus_snapshot_t *snapshot,
+                                     bridgeTelemetrySnapshot_t *out)
+{
+    static const char *const moduleLabels[VOLTRONIC_MB_MODULE_STATE_COUNT] = {
+        "Module charge voltage",
+        "Module discharge voltage",
+        "Cell charge voltage",
+        "Cell discharge voltage",
+        "Module charge current",
+        "Module discharge current",
+        "Module charge temperature",
+        "Module discharge temperature",
+        "Cell charge temperature",
+        "Cell discharge temperature",
+    };
+
+    if (snapshot == NULL || out == NULL || !snapshot->valid) {
+        return;
+    }
+
+    if (snapshot->hasAlarmRegisters) {
+        appendPrefixedNamedFlagList(out->alarms,
+                                    sizeof(out->alarms),
+                                    "Charge: ",
+                                    snapshot->chargeAlarm,
+                                    kVoltronicChargeAlarmFlags,
+                                    sizeof(kVoltronicChargeAlarmFlags) / sizeof(kVoltronicChargeAlarmFlags[0]));
+        appendPrefixedNamedFlagList(out->alarms,
+                                    sizeof(out->alarms),
+                                    "Discharge: ",
+                                    snapshot->dischargeAlarm,
+                                    kVoltronicDischargeAlarmFlags,
+                                    sizeof(kVoltronicDischargeAlarmFlags) / sizeof(kVoltronicDischargeAlarmFlags[0]));
+        appendPrefixedNamedFlagList(out->protections,
+                                    sizeof(out->protections),
+                                    "Charge: ",
+                                    snapshot->chargeProtect,
+                                    kVoltronicChargeProtectFlags,
+                                    sizeof(kVoltronicChargeProtectFlags) / sizeof(kVoltronicChargeProtectFlags[0]));
+        appendPrefixedNamedFlagList(out->protections,
+                                    sizeof(out->protections),
+                                    "Charge2: ",
+                                    snapshot->chargeProtect2,
+                                    kVoltronicChargeProtect2Flags,
+                                    sizeof(kVoltronicChargeProtect2Flags) / sizeof(kVoltronicChargeProtect2Flags[0]));
+        appendPrefixedNamedFlagList(out->protections,
+                                    sizeof(out->protections),
+                                    "Discharge: ",
+                                    snapshot->dischargeProtect,
+                                    kVoltronicDischargeProtectFlags,
+                                    sizeof(kVoltronicDischargeProtectFlags) / sizeof(kVoltronicDischargeProtectFlags[0]));
+    }
+
+    for (uint8_t i = 0u; i < snapshot->cellStateCount && i < VOLTRONIC_MB_MAX_CELLS; i++) {
+        appendVoltronicWarningState(out->warnings,
+                                    sizeof(out->warnings),
+                                    "Cell",
+                                    (uint8_t)(i + 1u),
+                                    snapshot->cellState[i]);
+    }
+    for (uint8_t i = 0u; i < snapshot->tempStateCount && i < VOLTRONIC_MB_MAX_TEMPS; i++) {
+        appendVoltronicWarningState(out->warnings,
+                                    sizeof(out->warnings),
+                                    "Temperature",
+                                    (uint8_t)(i + 1u),
+                                    snapshot->tempState[i]);
+    }
+    for (uint8_t i = 0u; i < VOLTRONIC_MB_MODULE_STATE_COUNT; i++) {
+        appendVoltronicWarningState(out->warnings,
+                                    sizeof(out->warnings),
+                                    moduleLabels[i],
+                                    0u,
+                                    snapshot->moduleState[i]);
+    }
+
+    out->alarmRaw = ((uint32_t)snapshot->chargeAlarm << 16) |
+                    (uint32_t)snapshot->dischargeAlarm;
+    snprintf(out->stateFlags,
+             sizeof(out->stateFlags),
+             "Status=0x%04X CHG=%s DSG=%s Now=%s/%s FullReq=%s CA=0x%04X DA=0x%04X CP=0x%04X CP2=0x%04X DP=0x%04X DP2=0x%04X BMS=0x%04X",
+             snapshot->hasStatusFlags ? (unsigned)snapshot->statusFlags : 0u,
+             snapshot->chargeEnabled ? "ON" : "OFF",
+             snapshot->dischargeEnabled ? "ON" : "OFF",
+             snapshot->chargeImmediately ? "YES" : "NO",
+             snapshot->chargeImmediately2 ? "YES" : "NO",
+             snapshot->fullChargeRequested ? "YES" : "NO",
+             (unsigned)snapshot->chargeAlarm,
+             (unsigned)snapshot->dischargeAlarm,
+             (unsigned)snapshot->chargeProtect,
+             (unsigned)snapshot->chargeProtect2,
+             (unsigned)snapshot->dischargeProtect,
+             (unsigned)snapshot->dischargeProtect2,
+             (unsigned)snapshot->bmsState);
+}
+
+static void fillTelemetryFromVoltronicSnapshot(const voltronic_modbus_snapshot_t *snapshot,
+                                               bridgeTelemetrySnapshot_t *out)
+{
+    uint32_t sumMv = 0u;
+    uint8_t counted = 0u;
+
+    if (snapshot == NULL || out == NULL || !snapshot->valid) {
+        return;
+    }
+
+    out->valid = true;
+    snprintf(out->source, sizeof(out->source), "%s", "VOLTRONIC_BMS_TASK");
+    snprintf(out->protocol, sizeof(out->protocol), "%s", "VOLTRONIC_MODBUS");
+
+    if (snapshot->hasSoc) {
+        out->socPct = snapshot->socPct;
+    }
+    out->sohPct = 100u;
+    if (snapshot->hasPackVoltage) {
+        out->packVoltageV = snapshot->packVoltageV;
+    }
+    if (snapshot->hasPackCurrent) {
+        out->currentA = snapshot->packCurrentA;
+    }
+    if (snapshot->hasPackPower) {
+        out->packPowerW = snapshot->packPowerW;
+    }
+    if (snapshot->hasFullMah) {
+        out->fullAh = (float)snapshot->fullMah / 1000.0f;
+    }
+    if (snapshot->hasRemainMah) {
+        out->remainingAh = (float)snapshot->remainMah / 1000.0f;
+    }
+    if (snapshot->hasStatusFlags) {
+        out->pylonStatus63 = (uint8_t)((snapshot->chargeEnabled ? 0x80u : 0u) |
+                                       (snapshot->dischargeEnabled ? 0x40u : 0u));
+    }
+
+    if (snapshot->tempCount > 0u) {
+        if (snapshot->tempCount > 5u) {
+            out->tempMosC = (float)snapshot->tempDeciC[5] / 10.0f;
+        } else {
+            out->tempMosC = (float)snapshot->tempDeciC[0] / 10.0f;
+        }
+        out->tempT1C = (float)snapshot->tempDeciC[0] / 10.0f;
+    }
+    if (snapshot->tempCount > 1u) {
+        out->tempT2C = (float)snapshot->tempDeciC[1] / 10.0f;
+    }
+    if (snapshot->tempCount > 3u) {
+        out->tempT4C = (float)snapshot->tempDeciC[3] / 10.0f;
+    }
+    if (snapshot->tempCount > 4u) {
+        out->tempT5C = (float)snapshot->tempDeciC[4] / 10.0f;
+    }
+
+    out->cellCount = snapshot->cellCount;
+    for (uint8_t i = 0u; i < snapshot->cellCount && i < 32u; i++) {
+        out->cellVoltagesV[i] = (float)snapshot->cellMv[i] / 1000.0f;
+        if (snapshot->cellMv[i] > 0u) {
+            sumMv += snapshot->cellMv[i];
+            counted++;
+        }
+    }
+    if (counted > 0u) {
+        out->cellAvgV = ((float)sumMv / (float)counted) / 1000.0f;
+    }
+    if (snapshot->hasCellExtremes) {
+        out->cellMaxV = (float)snapshot->maxCellMv / 1000.0f;
+        out->cellMinV = (float)snapshot->minCellMv / 1000.0f;
+        out->cellMaxIdx = snapshot->maxCellIndex;
+        out->cellMinIdx = snapshot->minCellIndex;
+        out->deltaV = out->cellMaxV - out->cellMinV;
+        out->cellDiffV = out->deltaV;
+    }
+
+    fillVoltronicAlertFields(snapshot, out);
 }
 
 static bool pacePacketTempC(const bms_decoded_packet_t *packet, uint8_t index, float *outC)
@@ -738,6 +1029,28 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
         if (hasPacket) {
             srcUpdatedMs = (uint32_t)(packet.timestampUs / 1000ULL);
         }
+    } else if (settings.bms_protocol == PROTOCOL_RS485_VOLTRONIC) {
+        voltronic_modbus_snapshot_t snapshot = {0};
+        bool haveSnapshot = voltronicModbusBmsTaskGetLatestSnapshot(&snapshot);
+        hasPacket = voltronicModbusBmsTaskGetLatestPacket(&packet);
+        if (hasPacket) {
+            srcUpdatedMs = (uint32_t)(packet.timestampUs / 1000ULL);
+        }
+        if (haveSnapshot) {
+            ESP_LOGD(BRIDGE_TAG, "[FILL] Using Voltronic snapshot: soc=%u%%, v=%.2fV",
+                     snapshot.socPct, (double)snapshot.packVoltageV);
+            fillTelemetryFromVoltronicSnapshot(&snapshot, out);
+            if (srcUpdatedMs == 0u && snapshot.timestampUs > 0) {
+                srcUpdatedMs = (uint32_t)(snapshot.timestampUs / 1000ULL);
+            }
+            if (srcUpdatedMs != 0u) {
+                out->updatedMs = srcUpdatedMs;
+                if (updatedMsOut != NULL) {
+                    *updatedMsOut = srcUpdatedMs;
+                }
+            }
+            return;
+        }
     } else {
         hasPacket = growattBmsTaskGetLatestPacket(&packet);
         if (hasPacket) {
@@ -753,7 +1066,8 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
     ESP_LOGD(BRIDGE_TAG, "[FILL] Using BMS task packet: protocol=%s, soc=%u%%",
              (settings.bms_protocol == PROTOCOL_RS485_JKBMS) ? "JKBMS" :
              ((settings.bms_protocol == PROTOCOL_RS485_JKBMS_NATIVE) ? "JKBMS_NATIVE" :
-             ((settings.bms_protocol == PROTOCOL_RS485_PACE) ? "PACE" : "GROWATT")),
+             ((settings.bms_protocol == PROTOCOL_RS485_PACE) ? "PACE" :
+             ((settings.bms_protocol == PROTOCOL_RS485_VOLTRONIC) ? "VOLTRONIC" : "GROWATT"))),
              packet.hasSoc ? packet.socPct : 0);
 
     out->valid = true;
@@ -762,7 +1076,8 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
              "%s",
              (settings.bms_protocol == PROTOCOL_RS485_JKBMS) ? "JKBMS_BMS_TASK" :
              ((settings.bms_protocol == PROTOCOL_RS485_JKBMS_NATIVE) ? "JKBMS_NATIVE_TASK" :
-             ((settings.bms_protocol == PROTOCOL_RS485_PACE) ? "PACE_BMS_TASK" : "GROWATT_BMS_TASK")));
+             ((settings.bms_protocol == PROTOCOL_RS485_PACE) ? "PACE_BMS_TASK" :
+             ((settings.bms_protocol == PROTOCOL_RS485_VOLTRONIC) ? "VOLTRONIC_BMS_TASK" : "GROWATT_BMS_TASK"))));
     snprintf(out->protocol, sizeof(out->protocol), "%s", protocolToStr(settings.bms_protocol));
 
     if (packet.hasSoc) {

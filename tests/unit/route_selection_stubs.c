@@ -16,15 +16,18 @@
 #include "protocols/pylon/pylon_inverter_task.h"
 #include "protocols/pylon/pylon_rs485_bridge.h"
 #include "protocols/rs485_growatt/rs485_growatt_bridge.h"
+#include "protocols/voltronic_modbus/voltronic_modbus_bms_task.h"
 #include "runtime_settings.h"
 
 int g_routeStubGrowattBmsStartCount;
+int g_routeStubVoltronicBmsStartCount;
 int g_routeStubPylonInverterStartCount;
 int g_routeStubPylonBridgeEnableCount;
 
 void routeSelectionStubReset(void)
 {
     g_routeStubGrowattBmsStartCount = 0;
+    g_routeStubVoltronicBmsStartCount = 0;
     g_routeStubPylonInverterStartCount = 0;
     g_routeStubPylonBridgeEnableCount = 0;
 }
@@ -99,6 +102,18 @@ esp_err_t paceModbusBmsTaskStart(QueueHandle_t outQueue)
 }
 
 esp_err_t paceModbusBmsTaskStop(void)
+{
+    return ESP_OK;
+}
+
+esp_err_t voltronicModbusBmsTaskStart(QueueHandle_t outQueue)
+{
+    (void)outQueue;
+    g_routeStubVoltronicBmsStartCount++;
+    return ESP_OK;
+}
+
+esp_err_t voltronicModbusBmsTaskStop(void)
 {
     return ESP_OK;
 }

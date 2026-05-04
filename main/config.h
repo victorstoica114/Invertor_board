@@ -113,6 +113,7 @@
 #define PROTOCOL_CAN_VICTRON 10
 #define PROTOCOL_RS485_PACE 11
 #define PROTOCOL_RS485_JKBMS_NATIVE 12
+#define PROTOCOL_RS485_VOLTRONIC 13
 
 #define BMS_line LINE_RS485
 #define Inverter_line LINE_CAN
@@ -160,6 +161,14 @@
 #define PACE_BMS_PUBLISH_PERIOD_MS     250
 #define PACE_BMS_TASK_STACK            4096
 #define PACE_BMS_TASK_PRIORITY         10
+
+/* --- Voltronic Inverter and BMS 485 protocol task (JK UART protocol 007) --- */
+#define VOLTRONIC_BMS_MODBUS_SLAVE_ADDR    0x01u
+#define VOLTRONIC_BMS_MODBUS_GAP_US        5000
+#define VOLTRONIC_BMS_QUERY_PERIOD_MS      250
+#define VOLTRONIC_BMS_PUBLISH_PERIOD_MS    250
+#define VOLTRONIC_BMS_TASK_STACK           4096
+#define VOLTRONIC_BMS_TASK_PRIORITY        10
 
 /* --- Pylon placeholders --- */
 #define PYLON_BMS_TASK_STACK           3072

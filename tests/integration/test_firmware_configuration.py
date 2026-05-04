@@ -102,6 +102,7 @@ def test_protocol_constants_in_config_h():
         'PROTOCOL_CAN_VICTRON',
         'PROTOCOL_RS485_PACE',
         'PROTOCOL_RS485_JKBMS_NATIVE',
+        'PROTOCOL_RS485_VOLTRONIC',
     ]
 
     for protocol in expected_protocols:
@@ -169,6 +170,7 @@ def test_protocol_directories_exist():
         'jkbms_modbus',
         'jkbms_rs485',
         'pace_modbus',
+        'voltronic_modbus',
         'deye',
     ]
 

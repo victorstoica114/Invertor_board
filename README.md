@@ -33,12 +33,14 @@ Implemented and actively used:
 - `JKBMS_MODBUS` BMS polling/decoding (`Modbus`) + rich snapshot
 - `JKBMS_RS485_NATIVE` experimental BMS polling/decoding (`4E 57` native RS485 read-all frames) + rich snapshot
 - `PACE_RS485_MODBUS_V1.3` BMS polling/decoding (`Modbus`) + rich snapshot
+- `VOLTRONIC_MODBUS` BMS polling/decoding for JK UART profile `007 - Voltronic_Inverter_and_BMS_485` + rich snapshot
 - `GROWATT` inverter CAN sender (publishes frame `0x322`)
 - `CAN_GROWATT | CAN_PYLON | CAN_GOODWE | CAN_SOFAR | CAN_SMA | CAN_VICTRON -> RS485_GROWATT` translator (`main/protocols/rs485_growatt/rs485_growatt_bridge.c`)
 - `RS485_JKBMS -> RS485_GROWATT` translator (`JKBMS_MODBUS` and `JKBMS_RS485_NATIVE`)
 - `RS485_JKBMS -> RS485_PYLON` translator/responder (`JKBMS_MODBUS` and `JKBMS_RS485_NATIVE`)
 - `RS485_GROWATT -> RS485_PYLON` translator/responder, intended for JK UART profile `006 - Growatt_BMS_RS485_Protocol_1xSxxP_ESS_Rev2.01`
 - `RS485_PACE -> RS485_PYLON` translator/responder
+- `RS485_VOLTRONIC -> RS485_PYLON` translator/responder, intended for JK UART profile `007 - Voltronic_Inverter_and_BMS_485`
 - `RS485_PYLON <-> RS485_PYLON` bridge/responder
 - `CAN_PYLON -> RS485_PYLON` synthetic responder/bridge
 - CAN snapshot decoders for Growatt-like, Pylon, and Deye frame sets
@@ -59,6 +61,7 @@ Current bridge-mode route matrix:
 | RS485_JKBMS -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol in {JKBMS_MODBUS,JKBMS_RS485_NATIVE}`, `inv_protocol=RS485_PYLON` | Active for Modbus; native is experimental |
 | RS485_GROWATT -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=RS485_GROWATT`, `inv_protocol=RS485_PYLON` | Active; covers JK UART profile `006` |
 | RS485_PACE -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=PACE_RS485_MODBUS`, `inv_protocol=RS485_PYLON` | Active |
+| RS485_VOLTRONIC -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=VOLTRONIC_MODBUS`, `inv_protocol=RS485_PYLON` | Active; covers JK UART profile `007` |
 | Pylon RS485 bridge | `RS485_PYLON<->RS485_PYLON` or `CAN_PYLON->RS485_PYLON` | Active |
 | Generic orchestrator route | any other valid combination | Active, depends on protocol task maturity |
 
@@ -88,8 +91,9 @@ Bridge mode route selection is done in `orchestratorStartFromRuntime(...)`:
 3. `RS485_JKBMS -> RS485_PYLON` translator route
 4. `RS485_GROWATT -> RS485_PYLON` translator route
 5. `RS485_PACE -> RS485_PYLON` translator route
-6. `Pylon RS485 bridge` route (`RS485_PYLON<->RS485_PYLON` or `CAN_PYLON->RS485_PYLON`)
-7. fallback generic orchestrator route (`protocol_id_t` based)
+6. `RS485_VOLTRONIC -> RS485_PYLON` translator route
+7. `Pylon RS485 bridge` route (`RS485_PYLON<->RS485_PYLON` or `CAN_PYLON->RS485_PYLON`)
+8. fallback generic orchestrator route (`protocol_id_t` based)
 
 ## Integration Notes
 
@@ -141,6 +145,7 @@ Defined in `main/config.h`:
 - `PROTOCOL_CAN_VICTRON = 10`
 - `PROTOCOL_RS485_PACE = 11`
 - `PROTOCOL_RS485_JKBMS_NATIVE = 12`
+- `PROTOCOL_RS485_VOLTRONIC = 13`
 
 ## Folder Structure (AI-Oriented)
 
@@ -222,6 +227,14 @@ These are useful for reference/history, but are not the primary active implement
 - active PACE BMS RS485 Modbus V1.3 poller + decoder
 - supports `RS485_PACE -> RS485_PYLON` bridge-mode translation
 - web/API telemetry includes pack values, all cell voltages, individual temperature registers, protections, alarms/faults, warnings, raw status flags, and Pylon status output
+
+`main/protocols/voltronic_modbus/`
+
+- active Voltronic RS485 Modbus poller + decoder for JK UART profile `007 - Voltronic_Inverter_and_BMS_485`
+- polls the public Voltronic map blocks around `0x0010` status/cells/temperatures, `0x0040` warning states, and `0x0070` charge/discharge limits/status
+- uses the Voltronic-published RTU byte order (`function`, then BMS address/slave ID `1`) while decoding responses into the shared register cache
+- supports `RS485_VOLTRONIC -> RS485_PYLON` bridge-mode translation through the shared synthetic Pylon responder path
+- web/API telemetry includes pack values, all cell voltages, individual temperature registers, alarm/protection registers, warning state registers, charge/discharge status, and raw protocol flags
 
 `main/protocols/pylon/`
 

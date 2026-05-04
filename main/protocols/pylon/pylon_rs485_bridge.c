@@ -91,6 +91,7 @@ static const char *protocolToStrLocal(uint8_t protocol)
         case PROTOCOL_CAN_VICTRON: return "CAN_VICTRON";
         case PROTOCOL_RS485_PACE: return "PACE_RS485_MODBUS";
         case PROTOCOL_RS485_JKBMS_NATIVE: return "JKBMS_RS485_NATIVE";
+        case PROTOCOL_RS485_VOLTRONIC: return "VOLTRONIC_MODBUS";
         default: return "UNKNOWN";
     }
 }

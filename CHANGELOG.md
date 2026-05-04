@@ -22,6 +22,8 @@ The goal is practical maintenance:
 - Experimental `JKBMS_RS485_NATIVE` BMS poller/decoder for JK native binary RS485 frames, including all-cell voltage, temperature, status, and alarm-bit telemetry.
 - `RS485_JKBMS_NATIVE -> RS485_PYLON` and `RS485_JKBMS_NATIVE -> RS485_GROWATT` bridge-mode route selection through the existing synthetic responder paths.
 - `RS485_GROWATT -> RS485_PYLON` bridge-mode route for JK UART protocol `006 - Growatt_BMS_RS485_Protocol_1xSxxP_ESS_Rev2.01`.
+- `VOLTRONIC_MODBUS` BMS poller/decoder for JK UART protocol `007 - Voltronic_Inverter_and_BMS_485`, including all-cell voltages, individual temperatures, warning states, alarm/protection registers, and charge/discharge limit/status telemetry.
+- `RS485_VOLTRONIC -> RS485_PYLON` bridge-mode route for Pylon-compatible inverter responders.
 - GitLab CI pipeline for automatic ESP32-C6 builds and host-side test execution on push/merge request.
 - Separate CI suites for sanity, unit, integration, and firmware-build validation, with JUnit artifacts and coverage reports.
 - Host-side regression tests for `JKBMS_MODBUS` source freshness and Modbus decoder cache timestamps.
@@ -47,6 +49,8 @@ The goal is practical maintenance:
 - `RS485_GROWATT` BMS polling now follows the selected BMS RS485 port, expires stale Modbus cache data, and publishes per-cell voltage registers when available.
 - `RS485_GROWATT` BMS telemetry now decodes Growatt `0x0014` error/protection bits and `0x0022` warning bits for JK UART profile `006` instead of leaving the web alert cards empty.
 - `RS485_GROWATT` web telemetry now displays only the single live pack temperature exposed by register `0x0018`, instead of duplicating it as MOS/T1/T2/T4/T5.
+- `VOLTRONIC_MODBUS` web telemetry follows the PACE/Growatt integration standard: expose real cells and temperatures, keep raw alert/status diagnostics visible, and feed the existing Pylon responder with the decoded battery model.
+- `VOLTRONIC_MODBUS` poll frames use the Voltronic-published function-first byte order with BMS address/slave ID `1`, while the shared Modbus decoder now accepts both classic and Voltronic `0x03` response ordering.
 
 ### Fixed
 

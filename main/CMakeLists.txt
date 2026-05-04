@@ -33,6 +33,9 @@ idf_component_register(
         "protocols/rs485_growatt/rs485_growatt_registers_map.c"
         "protocols/rs485_growatt/rs485_growatt_modbus_poller.c"
         "protocols/rs485_growatt/rs485_growatt_bms_task.c"
+        "protocols/voltronic_modbus/voltronic_modbus_registers_map.c"
+        "protocols/voltronic_modbus/voltronic_modbus_poller.c"
+        "protocols/voltronic_modbus/voltronic_modbus_bms_task.c"
         "protocols/pylon/pylon_bms_task.c"
         "protocols/pylon/pylon_inverter_task.c"
     INCLUDE_DIRS
