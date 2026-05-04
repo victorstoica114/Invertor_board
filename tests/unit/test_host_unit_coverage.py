@@ -102,6 +102,17 @@ HOST_C_TESTS = (
         ),
     ),
     HostCTestTarget(
+        name="china_tower_modbus",
+        sources=(
+            "tests/unit/test_china_tower_modbus.c",
+            "tests/unit/pace_modbus_stubs.c",
+            "main/protocols/china_tower_modbus/china_tower_modbus_bms_task.c",
+            "main/protocols/china_tower_modbus/china_tower_modbus_poller.c",
+            "main/protocols/china_tower_modbus/china_tower_modbus_registers_map.c",
+            "main/decoders/modbusDecoder.c",
+        ),
+    ),
+    HostCTestTarget(
         name="route_selection",
         sources=(
             "tests/unit/test_route_selection.c",

@@ -110,6 +110,7 @@ static const char *protocolToStr(int protocol)
         case PROTOCOL_RS485_PACE: return "PACE_RS485_MODBUS";
         case PROTOCOL_RS485_JKBMS_NATIVE: return "JKBMS_RS485_NATIVE";
         case PROTOCOL_RS485_VOLTRONIC: return "VOLTRONIC_MODBUS";
+        case PROTOCOL_RS485_CHINA_TOWER: return "CHINA_TOWER_MODBUS";
         default: return "UNKNOWN";
     }
 }
@@ -462,6 +463,7 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "const nativeJk=t.protocol==='JKBMS_RS485_NATIVE';"
         "const growatt=t.protocol==='RS485_GROWATT';"
         "const voltronic=t.protocol==='VOLTRONIC_MODBUS';"
+        "const china=t.protocol==='CHINA_TOWER_MODBUS';"
         "if(growatt){return card('Temperatures',[row('Pack',hasData?fmt(t.temp_mos_c,1,' C'):'-')]);}"
         "if(voltronic){"
         "const n=isNum(t.temp_count)?t.temp_count:0;"
@@ -469,7 +471,7 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "if(n===3){return card('Temperatures',[row('MOS',v('temp_mos_c',true)),row('Battery T1',v('temp_t1_c',true)),row('Battery T2',v('temp_t2_c',true)),row('Battery T4','-'),row('Battery T5','-')]);}"
         "return card('Temperatures',[row('MOS',v('temp_mos_c',n>5)),row('Battery T1',v('temp_t1_c',n>0)),row('Battery T2',v('temp_t2_c',n>1)),row('Battery T4',v('temp_t4_c',n>3)),row('Battery T5',v('temp_t5_c',n>4))]);"
         "}"
-        "const labels=(pace||voltronic)?['MOS','Battery T1','Battery T2','Battery T4','Battery T5']:(nativeJk?['Tube/MOS','Battery','Box','T4','T5']:['MOS','T1','T2','T4','T5']);"
+        "const labels=(pace||voltronic||china)?['MOS','Battery T1','Battery T2','Battery T4','Battery T5']:(nativeJk?['Tube/MOS','Battery','Box','T4','T5']:['MOS','T1','T2','T4','T5']);"
         "return card('Temperatures',[row(labels[0],hasData?fmt(t.temp_mos_c,1,' C'):'-'),row(labels[1],hasData?fmt(t.temp_t1_c,1,' C'):'-'),row(labels[2],hasData?fmt(t.temp_t2_c,1,' C'):'-'),row(labels[3],hasData?fmt(t.temp_t4_c,1,' C'):'-'),row(labels[4],hasData?fmt(t.temp_t5_c,1,' C'):'-')]);"
         "}"
         "function renderTelemetry(t){"
@@ -499,7 +501,7 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "const modeOpts=[{value:1,label:'sniffer'},{value:2,label:'forward'},{value:3,label:'bridge'}];"
         "const lineOpts=[{value:1,label:'CAN'},{value:2,label:'RS485'}];"
         "const bmsCanProtoOpts=[{value:1,label:'CAN_GROWATT (CAN BMS)'},{value:4,label:'CAN_PYLON'},{value:5,label:'CAN_DEYE'},{value:7,label:'CAN_GOODWE'},{value:8,label:'CAN_SOFAR'},{value:9,label:'CAN_SMA'},{value:10,label:'CAN_VICTRON'}];"
-        "const bmsRsProtoOpts=[{value:2,label:'RS485_GROWATT (Modbus Poller)'},{value:6,label:'JKBMS_MODBUS (RS485 Poller)'},{value:12,label:'JKBMS_RS485_NATIVE (Native Poller)'},{value:11,label:'PACE_RS485_MODBUS_V1.3 (Modbus Poller)'},{value:13,label:'VOLTRONIC_MODBUS / JK 007 (RS485 Poller)'},{value:3,label:'RS485_PYLON'}];"
+        "const bmsRsProtoOpts=[{value:2,label:'RS485_GROWATT (Modbus Poller)'},{value:6,label:'JKBMS_MODBUS (RS485 Poller)'},{value:12,label:'JKBMS_RS485_NATIVE (Native Poller)'},{value:11,label:'PACE_RS485_MODBUS_V1.3 (Modbus Poller)'},{value:13,label:'VOLTRONIC_MODBUS / JK 007 (RS485 Poller)'},{value:14,label:'CHINA_TOWER_MODBUS / JK 008 (RS485 Poller)'},{value:3,label:'RS485_PYLON'}];"
         "const invCanProtoOpts=[{value:1,label:'CAN_GROWATT'},{value:4,label:'CAN_PYLON'},{value:5,label:'CAN_DEYE'},{value:7,label:'CAN_GOODWE'},{value:8,label:'CAN_SOFAR'},{value:9,label:'CAN_SMA'},{value:10,label:'CAN_VICTRON'}];"
         "const invRsProtoOpts=[{value:2,label:'RS485_GROWATT'},{value:3,label:'RS485_PYLON'}];"
         "const portOpts=[{value:1,label:'1'},{value:2,label:'2'}];"
@@ -543,10 +545,12 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "else if(bl===2&&bp===11&&il===2&&ip===3){txt='Special route active: PACE_RS485_MODBUS_V1.3 (RS485_'+bport+') -> RS485_PYLON responder (RS485_'+iport+').';}"
         "else if(bl===2&&bp===2&&il===2&&ip===3){txt='Special route active: RS485_GROWATT / JK 006 (RS485_'+bport+') -> RS485_PYLON responder (RS485_'+iport+').';}"
         "else if(bl===2&&bp===13&&il===2&&ip===3){txt='Special route active: VOLTRONIC_MODBUS / JK 007 (RS485_'+bport+') -> RS485_PYLON responder (RS485_'+iport+').';}"
+        "else if(bl===2&&bp===14&&il===2&&ip===3){txt='Special route active: CHINA_TOWER_MODBUS / JK 008 (RS485_'+bport+') -> RS485_PYLON responder (RS485_'+iport+').';}"
         "else if(bl===2&&bp===6){txt='Testing JKBMS_Modbus poller on RS485_'+bport+'.';}"
         "else if(bl===2&&bp===12){txt='Testing JKBMS_RS485_NATIVE poller on RS485_'+bport+'.';}"
         "else if(bl===2&&bp===11){txt='Testing PACE_RS485_MODBUS_V1.3 poller on RS485_'+bport+'.';}"
         "else if(bl===2&&bp===13){txt='Testing VOLTRONIC_MODBUS / JK 007 poller on RS485_'+bport+'.';}"
+        "else if(bl===2&&bp===14){txt='Testing CHINA_TOWER_MODBUS / JK 008 poller on RS485_'+bport+'.';}"
         "else if(bl===2&&bp===2){txt='Testing RS485_GROWATT poller on RS485_'+bport+'.';}"
         "else if(bl===1&&bp===1&&il===2&&ip===2){txt='Special route active: CAN_GROWATT -> RS485_GROWATT translator.';}"
         "else if(bl===1&&bp===4&&il===2&&ip===2){txt='Special route active: CAN_PYLON -> RS485_GROWATT translator.';}"

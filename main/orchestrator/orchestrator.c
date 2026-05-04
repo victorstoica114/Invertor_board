@@ -8,6 +8,7 @@
 #include "decoders/CAN_Decoder.h"
 #include "modes/can_forward_sniffer.h"
 #include "config.h"
+#include "protocols/china_tower_modbus/china_tower_modbus_bms_task.h"
 #include "protocols/growatt/growatt_bms_task.h"
 #include "protocols/growatt/growatt_inverter_task.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_bms_task.h"
@@ -63,6 +64,8 @@ const char *protocolIdToStr(protocol_id_t id)
             return "JKBMS_RS485_NATIVE";
         case PROTOCOL_ID_VOLTRONIC:
             return "VOLTRONIC_MODBUS";
+        case PROTOCOL_ID_CHINA_TOWER:
+            return "CHINA_TOWER_MODBUS";
         default:
             return "UNKNOWN";
     }
@@ -142,6 +145,8 @@ static esp_err_t startBmsTask(protocol_id_t protocol, QueueHandle_t outQueue)
             return jkbmsRs485BmsTaskStart(outQueue);
         case PROTOCOL_ID_VOLTRONIC:
             return voltronicModbusBmsTaskStart(outQueue);
+        case PROTOCOL_ID_CHINA_TOWER:
+            return chinaTowerModbusBmsTaskStart(outQueue);
         default:
             return ESP_ERR_NOT_SUPPORTED;
     }
@@ -180,6 +185,8 @@ static protocol_id_t protocolIdFromUiProtocol(uint8_t protocol)
             return PROTOCOL_ID_JKBMS_NATIVE;
         case PROTOCOL_RS485_VOLTRONIC:
             return PROTOCOL_ID_VOLTRONIC;
+        case PROTOCOL_RS485_CHINA_TOWER:
+            return PROTOCOL_ID_CHINA_TOWER;
         default:
             return PROTOCOL_ID_GROWATT;
     }
@@ -354,6 +361,18 @@ static bool isRsVoltronicToRsPylonRoute(const bridge_runtime_settings_t *setting
            (settings->inverter_protocol == PROTOCOL_RS485_PYLON);
 }
 
+static bool isRsChinaTowerToRsPylonRoute(const bridge_runtime_settings_t *settings)
+{
+    if (settings == NULL) {
+        return false;
+    }
+
+    return (settings->bms_line == LINE_RS485) &&
+           (settings->inverter_line == LINE_RS485) &&
+           (settings->bms_protocol == PROTOCOL_RS485_CHINA_TOWER) &&
+           (settings->inverter_protocol == PROTOCOL_RS485_PYLON);
+}
+
 static void clearTransportBuffers(void)
 {
     uint8_t sink[64];
@@ -504,9 +523,10 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
     const bool rsGrowattToRsPylon = isRsGrowattToRsPylonRoute(settings);
     const bool rsPaceToRsPylon = isRsPaceToRsPylonRoute(settings);
     const bool rsVoltronicToRsPylon = isRsVoltronicToRsPylonRoute(settings);
+    const bool rsChinaTowerToRsPylon = isRsChinaTowerToRsPylonRoute(settings);
     const bool pylonRs485Route = pylonRs485BridgeSupportsRoute(settings);
     ESP_LOGI(EXAMPLE_TAG,
-             "Orchestrator runtime start: bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) canToRsGrowatt=%s rsJkbmsToRsGrowatt=%s rsJkbmsToRsPylon=%s rsGrowattToRsPylon=%s rsPaceToRsPylon=%s rsVoltronicToRsPylon=%s pylonRs485=%s",
+             "Orchestrator runtime start: bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) canToRsGrowatt=%s rsJkbmsToRsGrowatt=%s rsJkbmsToRsPylon=%s rsGrowattToRsPylon=%s rsPaceToRsPylon=%s rsVoltronicToRsPylon=%s rsChinaTowerToRsPylon=%s pylonRs485=%s",
              (unsigned)settings->bms_line,
              (unsigned)settings->bms_protocol,
              (unsigned)settings->bms_port,
@@ -519,6 +539,7 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
              rsGrowattToRsPylon ? "YES" : "NO",
              rsPaceToRsPylon ? "YES" : "NO",
              rsVoltronicToRsPylon ? "YES" : "NO",
+             rsChinaTowerToRsPylon ? "YES" : "NO",
              pylonRs485Route ? "YES" : "NO");
 
     if (canToRsGrowatt) {
@@ -748,6 +769,42 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
         return ESP_OK;
     }
 
+    if (rsChinaTowerToRsPylon) {
+        if (g_orchestratorTaskHandle != NULL || g_orchestratorCtx.canRs485TranslatorActive) {
+            ESP_LOGW(EXAMPLE_TAG, "Orchestrator already running");
+            return ESP_ERR_INVALID_STATE;
+        }
+
+        memset(&g_orchestratorCtx, 0, sizeof(g_orchestratorCtx));
+        g_orchestratorCtx.bmsProtocol = PROTOCOL_ID_CHINA_TOWER;
+        g_orchestratorCtx.inverterProtocol = PROTOCOL_ID_PYLON;
+
+        g_orchestratorCtx.bmsQueue =
+            xQueueCreate(ORCHESTRATOR_BMS_QUEUE_LEN, sizeof(bms_decoded_packet_t));
+        if (g_orchestratorCtx.bmsQueue == NULL) {
+            orchestratorReset(&g_orchestratorCtx);
+            return ESP_ERR_NO_MEM;
+        }
+
+        esp_err_t err = chinaTowerModbusBmsTaskStart(g_orchestratorCtx.bmsQueue);
+        if (err != ESP_OK) {
+            ESP_LOGW(EXAMPLE_TAG,
+                     "China Tower BMS task failed for RS485->RS485 Pylon route (err=0x%x)",
+                     (unsigned)err);
+            orchestratorReset(&g_orchestratorCtx);
+            return err;
+        }
+
+        pylonRs485BridgeEnable();
+        g_orchestratorCtx.canRs485TranslatorActive = true;
+        ESP_LOGI(EXAMPLE_TAG,
+                 "Orchestrator started China Tower RS485->RS485 Pylon route: BMS(RS485_%u) -> Inverter(%s:%u)",
+                 (unsigned)settings->bms_port,
+                 rsNameByPort(settings->inverter_port),
+                 (unsigned)settings->inverter_port);
+        return ESP_OK;
+    }
+
     if (pylonRs485Route) {
         if (g_orchestratorTaskHandle != NULL || g_orchestratorCtx.canRs485TranslatorActive) {
             ESP_LOGW(EXAMPLE_TAG, "Orchestrator already running");
@@ -794,6 +851,7 @@ esp_err_t orchestratorStop(void)
     (void)jkbmsRs485BmsTaskStop();
     (void)paceModbusBmsTaskStop();
     (void)voltronicModbusBmsTaskStop();
+    (void)chinaTowerModbusBmsTaskStop();
     (void)pylonBmsTaskStop();
     (void)pylonInverterTaskStop();
     clearTransportBuffers();

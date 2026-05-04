@@ -6,6 +6,7 @@
 #include "Drivers/RS485/rs485_driver.h"
 #include "esp_err.h"
 #include "modes/can_forward_sniffer.h"
+#include "protocols/china_tower_modbus/china_tower_modbus_bms_task.h"
 #include "protocols/common/battery_model.h"
 #include "protocols/growatt/growatt_bms_task.h"
 #include "protocols/growatt/growatt_inverter_task.h"
@@ -21,6 +22,7 @@
 
 int g_routeStubGrowattBmsStartCount;
 int g_routeStubVoltronicBmsStartCount;
+int g_routeStubChinaTowerBmsStartCount;
 int g_routeStubPylonInverterStartCount;
 int g_routeStubPylonBridgeEnableCount;
 
@@ -28,6 +30,7 @@ void routeSelectionStubReset(void)
 {
     g_routeStubGrowattBmsStartCount = 0;
     g_routeStubVoltronicBmsStartCount = 0;
+    g_routeStubChinaTowerBmsStartCount = 0;
     g_routeStubPylonInverterStartCount = 0;
     g_routeStubPylonBridgeEnableCount = 0;
 }
@@ -114,6 +117,18 @@ esp_err_t voltronicModbusBmsTaskStart(QueueHandle_t outQueue)
 }
 
 esp_err_t voltronicModbusBmsTaskStop(void)
+{
+    return ESP_OK;
+}
+
+esp_err_t chinaTowerModbusBmsTaskStart(QueueHandle_t outQueue)
+{
+    (void)outQueue;
+    g_routeStubChinaTowerBmsStartCount++;
+    return ESP_OK;
+}
+
+esp_err_t chinaTowerModbusBmsTaskStop(void)
 {
     return ESP_OK;
 }

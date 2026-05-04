@@ -24,6 +24,8 @@ The goal is practical maintenance:
 - `RS485_GROWATT -> RS485_PYLON` bridge-mode route for JK UART protocol `006 - Growatt_BMS_RS485_Protocol_1xSxxP_ESS_Rev2.01`.
 - `VOLTRONIC_MODBUS` BMS poller/decoder for JK UART protocol `007 - Voltronic_Inverter_and_BMS_485`, including all-cell voltages, individual temperatures, warning states, alarm/protection registers, and charge/discharge limit/status telemetry.
 - `RS485_VOLTRONIC -> RS485_PYLON` bridge-mode route for Pylon-compatible inverter responders.
+- `CHINA_TOWER_MODBUS` BMS poller/decoder for JK UART protocol `008 - China tower shared battery cabinet V2.0`, including pack voltage, `SOC`, all-cell voltages, cell extremes, and individual temperatures.
+- `RS485_CHINA_TOWER -> RS485_PYLON` bridge-mode route for Pylon-compatible inverter responders.
 - GitLab CI pipeline for automatic ESP32-C6 builds and host-side test execution on push/merge request.
 - Separate CI suites for sanity, unit, integration, and firmware-build validation, with JUnit artifacts and coverage reports.
 - Host-side regression tests for `JKBMS_MODBUS` source freshness and Modbus decoder cache timestamps.
@@ -51,6 +53,7 @@ The goal is practical maintenance:
 - `RS485_GROWATT` web telemetry now displays only the single live pack temperature exposed by register `0x0018`, instead of duplicating it as MOS/T1/T2/T4/T5.
 - `VOLTRONIC_MODBUS` web telemetry follows the PACE/Growatt integration standard: expose real cells and temperatures, keep raw alert/status diagnostics visible, and feed the existing Pylon responder with the decoded battery model.
 - `VOLTRONIC_MODBUS` poll frames use the Voltronic-published function-first byte order with BMS address/slave ID `1`, while the shared Modbus decoder now accepts both classic and Voltronic `0x03` response ordering.
+- `CHINA_TOWER_MODBUS` uses the bench-observed JK profile `008` register layout, with cell millivolts starting at `0x0009` and temperature registers kept at the live-tested offsets.
 
 ### Fixed
 

@@ -7,6 +7,7 @@
 #include "modes/mode_manager.h"
 #include "config.h"
 #include "orchestrator/protocol_types.h"
+#include "protocols/china_tower_modbus/china_tower_modbus_bms_task.h"
 #include "protocols/growatt/growatt_bms_task.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_alerts.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_bms_task.h"
@@ -76,6 +77,8 @@ static const char *protocolToStr(uint8_t protocol)
             return "JKBMS_RS485_NATIVE";
         case PROTOCOL_RS485_VOLTRONIC:
             return "VOLTRONIC_MODBUS";
+        case PROTOCOL_RS485_CHINA_TOWER:
+            return "CHINA_TOWER_MODBUS";
         default:
             return "UNKNOWN";
     }
@@ -318,7 +321,9 @@ static void fillPaceAlertFields(const bms_decoded_packet_t *packet, bridgeTeleme
     uint16_t balanceFlags = 0u;
     char statusText[48] = {0};
 
-    if (packet == NULL || out == NULL || packet->sourceProtocol != PROTOCOL_ID_PACE) {
+    if (packet == NULL || out == NULL ||
+        (packet->sourceProtocol != PROTOCOL_ID_PACE &&
+         packet->sourceProtocol != PROTOCOL_ID_CHINA_TOWER)) {
         return;
     }
 
@@ -694,10 +699,15 @@ static void fillPaceTemperatureFields(const bms_decoded_packet_t *packet, bridge
 {
     float tempC = 0.0f;
 
-    if (packet == NULL || out == NULL || packet->sourceProtocol != PROTOCOL_ID_PACE) {
+    if (packet == NULL || out == NULL ||
+        (packet->sourceProtocol != PROTOCOL_ID_PACE &&
+         packet->sourceProtocol != PROTOCOL_ID_CHINA_TOWER)) {
         return;
     }
 
+    if (packet->tempCount > 0u) {
+        out->tempCount = packet->tempCount;
+    }
     if (pacePacketTempC(packet, 0u, &tempC)) {
         out->tempT1C = tempC;
     }
@@ -712,6 +722,21 @@ static void fillPaceTemperatureFields(const bms_decoded_packet_t *packet, bridge
     }
     if (pacePacketTempC(packet, 4u, &tempC)) {
         out->tempMosC = tempC;
+    }
+}
+
+static void inferFixedTemperatureCount(const bms_decoded_packet_t *packet,
+                                       bridgeTelemetrySnapshot_t *out)
+{
+    if (packet == NULL || out == NULL || out->tempCount != 0u ||
+        (packet->sourceProtocol != PROTOCOL_ID_PACE &&
+         packet->sourceProtocol != PROTOCOL_ID_CHINA_TOWER)) {
+        return;
+    }
+
+    if (out->tempMosC != 0.0f || out->tempT1C != 0.0f || out->tempT2C != 0.0f ||
+        out->tempT4C != 0.0f || out->tempT5C != 0.0f) {
+        out->tempCount = 5u;
     }
 }
 
@@ -917,6 +942,42 @@ static void bridgeFormatBmsInterface(char *out, size_t outSize, const bridge_run
     snprintf(out, outSize, "CAN%u", (unsigned)port);
 }
 
+static const char *bridgeBmsTaskDebugName(uint8_t protocol)
+{
+    switch (protocol) {
+        case PROTOCOL_RS485_JKBMS:
+            return "JKBMS";
+        case PROTOCOL_RS485_JKBMS_NATIVE:
+            return "JKBMS_NATIVE";
+        case PROTOCOL_RS485_PACE:
+            return "PACE";
+        case PROTOCOL_RS485_VOLTRONIC:
+            return "VOLTRONIC";
+        case PROTOCOL_RS485_CHINA_TOWER:
+            return "CHINA_TOWER";
+        default:
+            return "GROWATT";
+    }
+}
+
+static const char *bridgeBmsTaskSourceName(uint8_t protocol)
+{
+    switch (protocol) {
+        case PROTOCOL_RS485_JKBMS:
+            return "JKBMS_BMS_TASK";
+        case PROTOCOL_RS485_JKBMS_NATIVE:
+            return "JKBMS_NATIVE_TASK";
+        case PROTOCOL_RS485_PACE:
+            return "PACE_BMS_TASK";
+        case PROTOCOL_RS485_VOLTRONIC:
+            return "VOLTRONIC_BMS_TASK";
+        case PROTOCOL_RS485_CHINA_TOWER:
+            return "CHINA_TOWER_BMS_TASK";
+        default:
+            return "GROWATT_BMS_TASK";
+    }
+}
+
 static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32_t *updatedMsOut)
 {
     bms_decoded_packet_t packet = {0};
@@ -1061,6 +1122,11 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
             }
             return;
         }
+    } else if (settings.bms_protocol == PROTOCOL_RS485_CHINA_TOWER) {
+        hasPacket = chinaTowerModbusBmsTaskGetLatestPacket(&packet);
+        if (hasPacket) {
+            srcUpdatedMs = (uint32_t)(packet.timestampUs / 1000ULL);
+        }
     } else {
         hasPacket = growattBmsTaskGetLatestPacket(&packet);
         if (hasPacket) {
@@ -1074,20 +1140,14 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
     }
 
     ESP_LOGD(BRIDGE_TAG, "[FILL] Using BMS task packet: protocol=%s, soc=%u%%",
-             (settings.bms_protocol == PROTOCOL_RS485_JKBMS) ? "JKBMS" :
-             ((settings.bms_protocol == PROTOCOL_RS485_JKBMS_NATIVE) ? "JKBMS_NATIVE" :
-             ((settings.bms_protocol == PROTOCOL_RS485_PACE) ? "PACE" :
-             ((settings.bms_protocol == PROTOCOL_RS485_VOLTRONIC) ? "VOLTRONIC" : "GROWATT"))),
+             bridgeBmsTaskDebugName(settings.bms_protocol),
              packet.hasSoc ? packet.socPct : 0);
 
     out->valid = true;
     snprintf(out->source,
              sizeof(out->source),
              "%s",
-             (settings.bms_protocol == PROTOCOL_RS485_JKBMS) ? "JKBMS_BMS_TASK" :
-             ((settings.bms_protocol == PROTOCOL_RS485_JKBMS_NATIVE) ? "JKBMS_NATIVE_TASK" :
-             ((settings.bms_protocol == PROTOCOL_RS485_PACE) ? "PACE_BMS_TASK" :
-             ((settings.bms_protocol == PROTOCOL_RS485_VOLTRONIC) ? "VOLTRONIC_BMS_TASK" : "GROWATT_BMS_TASK"))));
+             bridgeBmsTaskSourceName(settings.bms_protocol));
     snprintf(out->protocol, sizeof(out->protocol), "%s", protocolToStr(settings.bms_protocol));
 
     if (packet.hasSoc) {
@@ -1103,6 +1163,7 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
         }
     }
     fillPaceTemperatureFields(&packet, out);
+    inferFixedTemperatureCount(&packet, out);
     if (packet.hasCellExtremes) {
         out->cellMaxV = (float)packet.maxCellMv / 1000.0f;
         out->cellMinV = (float)packet.minCellMv / 1000.0f;

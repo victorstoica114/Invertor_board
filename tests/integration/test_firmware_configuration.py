@@ -103,6 +103,7 @@ def test_protocol_constants_in_config_h():
         'PROTOCOL_RS485_PACE',
         'PROTOCOL_RS485_JKBMS_NATIVE',
         'PROTOCOL_RS485_VOLTRONIC',
+        'PROTOCOL_RS485_CHINA_TOWER',
     ]
 
     for protocol in expected_protocols:
@@ -171,6 +172,7 @@ def test_protocol_directories_exist():
         'jkbms_rs485',
         'pace_modbus',
         'voltronic_modbus',
+        'china_tower_modbus',
         'deye',
     ]
 
