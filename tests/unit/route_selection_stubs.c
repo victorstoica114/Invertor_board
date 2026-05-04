@@ -18,6 +18,17 @@
 #include "protocols/rs485_growatt/rs485_growatt_bridge.h"
 #include "runtime_settings.h"
 
+int g_routeStubGrowattBmsStartCount;
+int g_routeStubPylonInverterStartCount;
+int g_routeStubPylonBridgeEnableCount;
+
+void routeSelectionStubReset(void)
+{
+    g_routeStubGrowattBmsStartCount = 0;
+    g_routeStubPylonInverterStartCount = 0;
+    g_routeStubPylonBridgeEnableCount = 0;
+}
+
 bridge_runtime_settings_t runtimeSettingsGet(void)
 {
     bridge_runtime_settings_t s = {0};
@@ -39,6 +50,7 @@ bool batteryModelIsDebugOverrideEnabled(void)
 esp_err_t growattBmsTaskStart(QueueHandle_t outQueue)
 {
     (void)outQueue;
+    g_routeStubGrowattBmsStartCount++;
     return ESP_OK;
 }
 
@@ -105,6 +117,7 @@ esp_err_t growattInverterTaskStop(void)
 esp_err_t pylonInverterTaskStart(QueueHandle_t inQueue)
 {
     (void)inQueue;
+    g_routeStubPylonInverterStartCount++;
     return ESP_OK;
 }
 
@@ -151,6 +164,7 @@ bool pylonRs485BridgeSupportsRoute(const bridge_runtime_settings_t *settings)
 
 void pylonRs485BridgeEnable(void)
 {
+    g_routeStubPylonBridgeEnableCount++;
 }
 
 void pylonRs485BridgeStop(void)

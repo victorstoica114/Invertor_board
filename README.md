@@ -29,7 +29,7 @@ Main goals:
 
 Implemented and actively used:
 
-- `RS485_GROWATT` BMS polling/decoding (`Modbus`) + queue publish
+- `RS485_GROWATT` BMS polling/decoding (`Modbus`) + queue publish, including JK UART profile `006` cell voltages and Growatt warning/error bits
 - `JKBMS_MODBUS` BMS polling/decoding (`Modbus`) + rich snapshot
 - `JKBMS_RS485_NATIVE` experimental BMS polling/decoding (`4E 57` native RS485 read-all frames) + rich snapshot
 - `PACE_RS485_MODBUS_V1.3` BMS polling/decoding (`Modbus`) + rich snapshot
@@ -37,6 +37,7 @@ Implemented and actively used:
 - `CAN_GROWATT | CAN_PYLON | CAN_GOODWE | CAN_SOFAR | CAN_SMA | CAN_VICTRON -> RS485_GROWATT` translator (`main/protocols/rs485_growatt/rs485_growatt_bridge.c`)
 - `RS485_JKBMS -> RS485_GROWATT` translator (`JKBMS_MODBUS` and `JKBMS_RS485_NATIVE`)
 - `RS485_JKBMS -> RS485_PYLON` translator/responder (`JKBMS_MODBUS` and `JKBMS_RS485_NATIVE`)
+- `RS485_GROWATT -> RS485_PYLON` translator/responder, intended for JK UART profile `006 - Growatt_BMS_RS485_Protocol_1xSxxP_ESS_Rev2.01`
 - `RS485_PACE -> RS485_PYLON` translator/responder
 - `RS485_PYLON <-> RS485_PYLON` bridge/responder
 - `CAN_PYLON -> RS485_PYLON` synthetic responder/bridge
@@ -56,6 +57,7 @@ Current bridge-mode route matrix:
 | CAN -> RS485_GROWATT translator | `bms_line=CAN`, `inv_line=RS485`, `inv_protocol=RS485_GROWATT`, `bms_protocol in {CAN_GROWATT,CAN_PYLON,CAN_GOODWE,CAN_SOFAR,CAN_SMA,CAN_VICTRON}` | Active |
 | RS485_JKBMS -> RS485_GROWATT translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol in {JKBMS_MODBUS,JKBMS_RS485_NATIVE}`, `inv_protocol=RS485_GROWATT` | Active for Modbus; native is experimental |
 | RS485_JKBMS -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol in {JKBMS_MODBUS,JKBMS_RS485_NATIVE}`, `inv_protocol=RS485_PYLON` | Active for Modbus; native is experimental |
+| RS485_GROWATT -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=RS485_GROWATT`, `inv_protocol=RS485_PYLON` | Active; covers JK UART profile `006` |
 | RS485_PACE -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=PACE_RS485_MODBUS`, `inv_protocol=RS485_PYLON` | Active |
 | Pylon RS485 bridge | `RS485_PYLON<->RS485_PYLON` or `CAN_PYLON->RS485_PYLON` | Active |
 | Generic orchestrator route | any other valid combination | Active, depends on protocol task maturity |
@@ -83,9 +85,11 @@ Bridge mode route selection is done in `orchestratorStartFromRuntime(...)`:
 
 1. `CAN -> RS485_GROWATT` translator route
 2. `RS485_JKBMS -> RS485_GROWATT` translator route
-3. `RS485_PACE -> RS485_PYLON` translator route
-4. `Pylon RS485 bridge` route (`RS485_PYLON<->RS485_PYLON` or `CAN_PYLON->RS485_PYLON`)
-5. fallback generic orchestrator route (`protocol_id_t` based)
+3. `RS485_JKBMS -> RS485_PYLON` translator route
+4. `RS485_GROWATT -> RS485_PYLON` translator route
+5. `RS485_PACE -> RS485_PYLON` translator route
+6. `Pylon RS485 bridge` route (`RS485_PYLON<->RS485_PYLON` or `CAN_PYLON->RS485_PYLON`)
+7. fallback generic orchestrator route (`protocol_id_t` based)
 
 ## Integration Notes
 
@@ -199,6 +203,8 @@ These are useful for reference/history, but are not the primary active implement
 `main/protocols/rs485_growatt/`
 
 - active Modbus poller + decoder integration for Growatt BMS over RS485
+- decodes pack voltage, SOC, the single live pack temperature exposed by `0x0018`, per-cell voltages, cell min/max, Growatt `0x0014` error/protection bits, `0x0022` warning bits, and raw `0x0013` status flags when the BMS exposes them
+- web telemetry intentionally shows only one temperature for this protocol; the Growatt RS485 status block does not expose separate MOS/T1/T2/T4/T5 live temperatures
 
 `main/protocols/jkbms_modbus/`
 

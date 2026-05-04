@@ -80,6 +80,17 @@ HOST_C_TESTS = (
         ),
     ),
     HostCTestTarget(
+        name="rs485_growatt",
+        sources=(
+            "tests/unit/test_rs485_growatt.c",
+            "tests/unit/pace_modbus_stubs.c",
+            "main/protocols/rs485_growatt/rs485_growatt_bms_task.c",
+            "main/protocols/rs485_growatt/rs485_growatt_modbus_poller.c",
+            "main/protocols/rs485_growatt/rs485_growatt_registers_map.c",
+            "main/decoders/modbusDecoder.c",
+        ),
+    ),
+    HostCTestTarget(
         name="route_selection",
         sources=(
             "tests/unit/test_route_selection.c",

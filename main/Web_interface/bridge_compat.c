@@ -137,6 +137,41 @@ static const namedFlag_t kPaceStatusFlags[] = {
     {0x8000u, "HEAT"},
 };
 
+static const namedFlag_t kGrowattWarningFlags[] = {
+    {0x0001u, "Cell overvoltage"},
+    {0x0002u, "Cell undervoltage"},
+    {0x0004u, "Pack overvoltage"},
+    {0x0008u, "Pack undervoltage"},
+    {0x0010u, "Discharge overcurrent"},
+    {0x0020u, "Charge overcurrent"},
+    {0x0040u, "Discharge overtemperature"},
+    {0x0080u, "Discharge undertemperature"},
+    {0x0100u, "Charge overtemperature"},
+    {0x0200u, "Charge undertemperature"},
+    {0x0400u, "MOS overtemperature"},
+    {0x0800u, "Ambient overtemperature"},
+    {0x1000u, "Ambient undertemperature"},
+    {0x2000u, "System low voltage"},
+};
+
+static const namedFlag_t kGrowattProtectionFlags[] = {
+    {0x0001u, "Discharge overcurrent"},
+    {0x0002u, "Discharge short circuit"},
+    {0x0004u, "Pack overvoltage"},
+    {0x0008u, "Pack undervoltage"},
+    {0x0010u, "Discharge overtemperature"},
+    {0x0020u, "Charge overtemperature"},
+    {0x0040u, "Discharge undertemperature"},
+    {0x0080u, "Charge undertemperature"},
+    {0x0100u, "Soft-start failure"},
+    {0x0200u, "Permanent fault"},
+    {0x0400u, "Cell voltage delta"},
+    {0x0800u, "Charge overcurrent"},
+    {0x1000u, "MOS overtemperature"},
+    {0x2000u, "Ambient overtemperature"},
+    {0x4000u, "Ambient undertemperature"},
+};
+
 static void appendListItem(char *out, size_t outSize, const char *item)
 {
     size_t used = 0u;
@@ -251,6 +286,96 @@ static void fillPaceAlertFields(const bms_decoded_packet_t *packet, bridgeTeleme
              (statusText[0] != '\0') ? " " : "",
              statusText,
              (unsigned)balanceFlags);
+}
+
+static const char *growattRunMode(uint16_t statusFlags)
+{
+    switch (statusFlags & 0x0003u) {
+        case 0u:
+            return "soft_starting";
+        case 1u:
+            return "standby";
+        case 2u:
+            return "charging";
+        case 3u:
+            return "discharging";
+        default:
+            return "unknown";
+    }
+}
+
+static const char *growattMasterMode(uint16_t statusFlags)
+{
+    switch ((statusFlags >> 8) & 0x0003u) {
+        case 0u:
+            return "standalone";
+        case 1u:
+            return "parallel";
+        case 2u:
+            return "parallel_ready";
+        default:
+            return "reserved";
+    }
+}
+
+static const char *growattSpStatus(uint16_t statusFlags)
+{
+    switch ((statusFlags >> 10) & 0x0003u) {
+        case 0u:
+            return "none";
+        case 1u:
+            return "standby";
+        case 2u:
+            return "charging";
+        case 3u:
+            return "discharging";
+        default:
+            return "unknown";
+    }
+}
+
+static void fillGrowattAlertFields(const bms_decoded_packet_t *packet, bridgeTelemetrySnapshot_t *out)
+{
+    uint16_t warningFlags = 0u;
+    uint16_t protectionFlags = 0u;
+    uint16_t statusFlags = 0u;
+
+    if (packet == NULL || out == NULL || packet->sourceProtocol != PROTOCOL_ID_GROWATT) {
+        return;
+    }
+
+    if (packet->hasWarningFlags) {
+        warningFlags = packet->warningFlags;
+        formatNamedFlagList(warningFlags,
+                            kGrowattWarningFlags,
+                            sizeof(kGrowattWarningFlags) / sizeof(kGrowattWarningFlags[0]),
+                            out->warnings,
+                            sizeof(out->warnings));
+    }
+    if (packet->hasProtectionFlags) {
+        protectionFlags = packet->protectionFlags;
+        formatNamedFlagList(protectionFlags,
+                            kGrowattProtectionFlags,
+                            sizeof(kGrowattProtectionFlags) / sizeof(kGrowattProtectionFlags[0]),
+                            out->protections,
+                            sizeof(out->protections));
+    }
+    if (packet->hasStatusFlags) {
+        statusFlags = packet->statusFlags;
+    }
+
+    out->alarmRaw = ((uint32_t)warningFlags << 16) | (uint32_t)protectionFlags;
+    snprintf(out->stateFlags,
+             sizeof(out->stateFlags),
+             "Status=0x%04X mode=%s err=%s bal=%s master=%s sp=%s Warn=0x%04X Prot=0x%04X",
+             (unsigned)statusFlags,
+             growattRunMode(statusFlags),
+             (statusFlags & 0x0004u) ? "YES" : "NO",
+             (statusFlags & 0x0008u) ? "ON" : "OFF",
+             growattMasterMode(statusFlags),
+             growattSpStatus(statusFlags),
+             (unsigned)warningFlags,
+             (unsigned)protectionFlags);
 }
 
 static bool pacePacketTempC(const bms_decoded_packet_t *packet, uint8_t index, float *outC)
@@ -645,10 +770,12 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
     }
     if (packet.hasTemperatureC) {
         out->tempMosC = (float)packet.temperatureC;
-        out->tempT1C = (float)packet.temperatureC;
-        out->tempT2C = (float)packet.temperatureC;
-        out->tempT4C = (float)packet.temperatureC;
-        out->tempT5C = (float)packet.temperatureC;
+        if (packet.sourceProtocol != PROTOCOL_ID_GROWATT) {
+            out->tempT1C = (float)packet.temperatureC;
+            out->tempT2C = (float)packet.temperatureC;
+            out->tempT4C = (float)packet.temperatureC;
+            out->tempT5C = (float)packet.temperatureC;
+        }
     }
     fillPaceTemperatureFields(&packet, out);
     if (packet.hasCellExtremes) {
@@ -686,6 +813,7 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
         out->currentA = 0.0f;
     }
     fillPaceAlertFields(&packet, out);
+    fillGrowattAlertFields(&packet, out);
 
     if (srcUpdatedMs != 0u) {
         out->updatedMs = srcUpdatedMs;
