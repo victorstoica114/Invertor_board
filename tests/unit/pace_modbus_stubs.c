@@ -6,6 +6,15 @@
 #include "protocols/common/battery_model.h"
 #include "runtime_settings.h"
 
+uint8_t g_rs485StubLastWrite[256];
+int g_rs485StubLastWriteLen;
+
+void rs485StubResetLastWrite(void)
+{
+    memset(g_rs485StubLastWrite, 0, sizeof(g_rs485StubLastWrite));
+    g_rs485StubLastWriteLen = 0;
+}
+
 bridge_runtime_settings_t runtimeSettingsGet(void)
 {
     bridge_runtime_settings_t s = {0};
@@ -62,9 +71,19 @@ esp_err_t rs485WriteBytes(uart_port_t uart,
 {
     (void)uart;
     (void)dirPin;
-    (void)data;
-    (void)len;
     (void)txTimeoutTicks;
+
+    if (data != NULL && len > 0) {
+        int copyLen = len;
+        if (copyLen > (int)sizeof(g_rs485StubLastWrite)) {
+            copyLen = (int)sizeof(g_rs485StubLastWrite);
+        }
+        memcpy(g_rs485StubLastWrite, data, (size_t)copyLen);
+        g_rs485StubLastWriteLen = copyLen;
+    } else {
+        rs485StubResetLastWrite();
+    }
+
     return ESP_OK;
 }
 

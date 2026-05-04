@@ -7,9 +7,35 @@
 
 #include "unity.h"
 #include "decoders/modbusDecoder.h"
+#include "protocols/voltronic_modbus/voltronic_modbus_registers_map.h"
 #include <string.h>
 
 static modbusDecoder_t g_testDecoder;
+
+static void put_be16(uint8_t *dst, uint16_t value)
+{
+    dst[0] = (uint8_t)(value >> 8);
+    dst[1] = (uint8_t)(value & 0xFFu);
+}
+
+static void fill_modbus_crc(uint8_t *frame, int len)
+{
+    uint16_t crc = 0xFFFF;
+
+    for (int i = 0; i < len - 2; i++) {
+        crc ^= frame[i];
+        for (int j = 0; j < 8; j++) {
+            if (crc & 0x0001) {
+                crc = (crc >> 1) ^ 0xA001;
+            } else {
+                crc >>= 1;
+            }
+        }
+    }
+
+    frame[len - 2] = (uint8_t)(crc & 0xFFu);
+    frame[len - 1] = (uint8_t)(crc >> 8);
+}
 
 /* Test fixture setup/teardown */
 void setUp(void)
@@ -254,6 +280,73 @@ void test_modbus_decoder_request_recording(void)
     TEST_ASSERT_LESS_OR_EQUAL_UINT8(3, g_testDecoder.reqQSize);
 }
 
+void test_modbus_decoder_drops_stale_request_match(void)
+{
+    uint8_t response[] = {
+        0x01,
+        0x03,
+        0x02,
+        0x12, 0x34,
+        0x00, 0x00
+    };
+    fill_modbus_crc(response, sizeof(response));
+
+    modbusDecoderRecordRequest(&g_testDecoder, 0x01, 0x03, 0x0100, 1, 0);
+    modbusDecoderFeed(&g_testDecoder, response, sizeof(response), 2000000);
+    modbusDecoderFlush(&g_testDecoder);
+
+    uint16_t value = 0;
+    TEST_ASSERT_FALSE(modbusDecoderGetCachedReg(&g_testDecoder, 0x0100, &value));
+    TEST_ASSERT_EQUAL_UINT8(0, g_testDecoder.reqQSize);
+}
+
+void test_modbus_decoder_uses_fresh_request_after_stale_one(void)
+{
+    uint8_t response[] = {
+        0x01,
+        0x03,
+        0x02,
+        0xBE, 0xEF,
+        0x00, 0x00
+    };
+    fill_modbus_crc(response, sizeof(response));
+
+    modbusDecoderRecordRequest(&g_testDecoder, 0x01, 0x03, 0x0100, 1, 0);
+    modbusDecoderRecordRequest(&g_testDecoder, 0x01, 0x03, 0x0200, 1, 1500000);
+    modbusDecoderFeed(&g_testDecoder, response, sizeof(response), 1501000);
+    modbusDecoderFlush(&g_testDecoder);
+
+    uint16_t value = 0;
+    TEST_ASSERT_FALSE(modbusDecoderGetCachedReg(&g_testDecoder, 0x0100, &value));
+    TEST_ASSERT_TRUE(modbusDecoderGetCachedReg(&g_testDecoder, 0x0200, &value));
+    TEST_ASSERT_EQUAL_HEX16(0xBEEF, value);
+}
+
+void test_modbus_decoder_auto_maps_voltronic_status_even_with_wrong_request(void)
+{
+    uint8_t response[3 + (48 * 2) + 2] = { 0 };
+
+    response[0] = 0x01;
+    response[1] = 0x03;
+    response[2] = 48 * 2;
+    put_be16(&response[3], 16);
+    for (int i = 0; i < 16; i++) {
+        put_be16(&response[3 + ((1 + i) * 2)], 45);
+    }
+    put_be16(&response[3 + (35 * 2)], 100);
+    fill_modbus_crc(response, sizeof(response));
+
+    modbusDecoderRecordRequest(&g_testDecoder, 0x01, 0x03, 0x1200, 48, 1000);
+    modbusDecoderFeed(&g_testDecoder, response, sizeof(response), 2000);
+    modbusDecoderFlush(&g_testDecoder);
+
+    uint16_t value = 0;
+    TEST_ASSERT_FALSE(modbusDecoderGetCachedReg(&g_testDecoder, 0x1200, &value));
+    TEST_ASSERT_TRUE(modbusDecoderGetCachedReg(&g_testDecoder, VOLTRONIC_MB_REG_STATUS_START, &value));
+    TEST_ASSERT_EQUAL_UINT16(16, value);
+    TEST_ASSERT_EQUAL_UINT8(0, g_testDecoder.reqQSize);
+}
+
 /**
  * Test: Modbus decoder should handle CRC errors gracefully
  */
@@ -292,6 +385,9 @@ int main(void)
     RUN_TEST(test_modbus_decoder_fragmented_data);
     RUN_TEST(test_modbus_decoder_flush);
     RUN_TEST(test_modbus_decoder_request_recording);
+    RUN_TEST(test_modbus_decoder_drops_stale_request_match);
+    RUN_TEST(test_modbus_decoder_uses_fresh_request_after_stale_one);
+    RUN_TEST(test_modbus_decoder_auto_maps_voltronic_status_even_with_wrong_request);
     RUN_TEST(test_modbus_decoder_crc_error);
 
     return UNITY_END();
