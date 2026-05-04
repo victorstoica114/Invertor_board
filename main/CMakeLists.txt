@@ -24,6 +24,8 @@ idf_component_register(
         "protocols/jkbms_modbus/jkbms_modbus_freshness.c"
         "protocols/jkbms_modbus/jkbms_modbus_poller.c"
         "protocols/jkbms_modbus/jkbms_modbus_bms_task.c"
+        "protocols/jkbms_rs485/jkbms_rs485_native.c"
+        "protocols/jkbms_rs485/jkbms_rs485_bms_task.c"
         "protocols/pace_modbus/pace_modbus_registers_map.c"
         "protocols/pace_modbus/pace_modbus_poller.c"
         "protocols/pace_modbus/pace_modbus_bms_task.c"

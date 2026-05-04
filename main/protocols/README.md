@@ -4,7 +4,8 @@ This folder contains the active protocol implementation used by the firmware.
 
 ## Naming Rules
 
-- Each protocol folder must provide a canonical `*_registers_map.h`.
+- Register-based protocol folders must provide a canonical `*_registers_map.h`.
+- Native binary protocols that do not expose registers should provide a canonical parser/codec header instead.
 - Runtime/task code should include `*_registers_map.h` (not legacy aliases).
 - Common, protocol-agnostic models live in `common/`.
 
@@ -13,7 +14,7 @@ This folder contains the active protocol implementation used by the firmware.
 When adding a new protocol, create:
 
 - `main/protocols/<protocol_name>/`
-- `main/protocols/<protocol_name>/<protocol_name>_registers_map.h` (mandatory)
+- `main/protocols/<protocol_name>/<protocol_name>_registers_map.h` for register-based protocols, or a parser/codec header for native binary protocols
 - `main/protocols/<protocol_name>/<protocol_name>_registers_map.c` (optional)
 - protocol runtime files as needed:
 - `<protocol_name>_bms_task.c/.h`

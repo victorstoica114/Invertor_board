@@ -10,6 +10,7 @@
 #include "protocols/growatt/growatt_bms_task.h"
 #include "protocols/growatt/growatt_inverter_task.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_bms_task.h"
+#include "protocols/jkbms_rs485/jkbms_rs485_bms_task.h"
 #include "protocols/pace_modbus/pace_modbus_bms_task.h"
 #include "protocols/pylon/pylon_bms_task.h"
 #include "protocols/pylon/pylon_inverter_task.h"
@@ -64,6 +65,17 @@ esp_err_t jkbmsModbusBmsTaskStart(QueueHandle_t outQueue)
 }
 
 esp_err_t jkbmsModbusBmsTaskStop(void)
+{
+    return ESP_OK;
+}
+
+esp_err_t jkbmsRs485BmsTaskStart(QueueHandle_t outQueue)
+{
+    (void)outQueue;
+    return ESP_OK;
+}
+
+esp_err_t jkbmsRs485BmsTaskStop(void)
 {
     return ESP_OK;
 }

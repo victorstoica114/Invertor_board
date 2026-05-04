@@ -31,10 +31,12 @@ Implemented and actively used:
 
 - `RS485_GROWATT` BMS polling/decoding (`Modbus`) + queue publish
 - `JKBMS_MODBUS` BMS polling/decoding (`Modbus`) + rich snapshot
+- `JKBMS_RS485_NATIVE` experimental BMS polling/decoding (`4E 57` native RS485 read-all frames) + rich snapshot
 - `PACE_RS485_MODBUS_V1.3` BMS polling/decoding (`Modbus`) + rich snapshot
 - `GROWATT` inverter CAN sender (publishes frame `0x322`)
 - `CAN_GROWATT | CAN_PYLON | CAN_GOODWE | CAN_SOFAR | CAN_SMA | CAN_VICTRON -> RS485_GROWATT` translator (`main/protocols/rs485_growatt/rs485_growatt_bridge.c`)
-- `RS485_JKBMS -> RS485_GROWATT` translator
+- `RS485_JKBMS -> RS485_GROWATT` translator (`JKBMS_MODBUS` and `JKBMS_RS485_NATIVE`)
+- `RS485_JKBMS -> RS485_PYLON` translator/responder (`JKBMS_MODBUS` and `JKBMS_RS485_NATIVE`)
 - `RS485_PACE -> RS485_PYLON` translator/responder
 - `RS485_PYLON <-> RS485_PYLON` bridge/responder
 - `CAN_PYLON -> RS485_PYLON` synthetic responder/bridge
@@ -52,7 +54,8 @@ Current bridge-mode route matrix:
 | Route | Condition | Status |
 | --- | --- | --- |
 | CAN -> RS485_GROWATT translator | `bms_line=CAN`, `inv_line=RS485`, `inv_protocol=RS485_GROWATT`, `bms_protocol in {CAN_GROWATT,CAN_PYLON,CAN_GOODWE,CAN_SOFAR,CAN_SMA,CAN_VICTRON}` | Active |
-| RS485_JKBMS -> RS485_GROWATT translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=JKBMS_MODBUS`, `inv_protocol=RS485_GROWATT` | Active |
+| RS485_JKBMS -> RS485_GROWATT translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol in {JKBMS_MODBUS,JKBMS_RS485_NATIVE}`, `inv_protocol=RS485_GROWATT` | Active for Modbus; native is experimental |
+| RS485_JKBMS -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol in {JKBMS_MODBUS,JKBMS_RS485_NATIVE}`, `inv_protocol=RS485_PYLON` | Active for Modbus; native is experimental |
 | RS485_PACE -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=PACE_RS485_MODBUS`, `inv_protocol=RS485_PYLON` | Active |
 | Pylon RS485 bridge | `RS485_PYLON<->RS485_PYLON` or `CAN_PYLON->RS485_PYLON` | Active |
 | Generic orchestrator route | any other valid combination | Active, depends on protocol task maturity |
@@ -133,6 +136,7 @@ Defined in `main/config.h`:
 - `PROTOCOL_CAN_SMA = 9`
 - `PROTOCOL_CAN_VICTRON = 10`
 - `PROTOCOL_RS485_PACE = 11`
+- `PROTOCOL_RS485_JKBMS_NATIVE = 12`
 
 ## Folder Structure (AI-Oriented)
 
@@ -199,6 +203,13 @@ These are useful for reference/history, but are not the primary active implement
 `main/protocols/jkbms_modbus/`
 
 - active JK BMS Modbus poller + decoder + rich snapshot extraction
+
+`main/protocols/jkbms_rs485/`
+
+- experimental JK BMS native RS485 poller for binary frames starting with `4E 57`
+- decodes pack voltage/current/power, `SOC`, `SOH` fallback, cycles, capacity, per-cell voltages, cell min/max/avg/delta, tube/MOS temperature, battery temperature, box temperature, raw alarm bits, charge/discharge MOS status, and balance status
+- supports `RS485_JKBMS -> RS485_PYLON` and `RS485_JKBMS -> RS485_GROWATT` bridge-mode translation through the shared battery model
+- field note: on the tested JK BMS setup, the same RS485 port responds correctly to `JKBMS_MODBUS` at `9600`, but does not respond to the native `4E 57` read-all request, so `JKBMS_MODBUS` remains the recommended setting for that hardware
 
 `main/protocols/pace_modbus/`
 
