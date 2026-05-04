@@ -10,6 +10,7 @@
 #include "protocols/common/battery_model.h"
 #include "protocols/rs485_growatt/rs485_growatt_modbus_poller.h"
 #include "protocols/rs485_growatt/rs485_growatt_registers_map.h"
+#include "runtime_settings.h"
 
 #include "driver/uart.h"
 #include "esp_log.h"
@@ -30,6 +31,24 @@ static TaskHandle_t g_rs485GrowattBmsTaskHandle;
 static portMUX_TYPE g_latestPacketMux = portMUX_INITIALIZER_UNLOCKED;
 static bool g_haveLatestPacket;
 static bms_decoded_packet_t g_latestPacket;
+static int64_t g_lastSourceStaleLogUs;
+
+#define GROWATT_MIN_CELL_MV 1000u
+#define GROWATT_MAX_CELL_MV 6000u
+#define GROWATT_WARNING_CODE_MASK 0x3FFFu
+#define GROWATT_ERROR_CODE_MASK   0x7FFFu
+
+static bool decoderCacheFresh(const modbusDecoder_t *decoder, int64_t nowUs, int64_t *newestCacheUsOut)
+{
+    const int64_t newestCacheUs = modbusDecoderGetNewestCacheTsUs(decoder);
+    const int64_t maxAgeUs = (int64_t)BRIDGE_SOURCE_STALE_MS * 1000LL;
+    const int64_t ageUs = (nowUs >= newestCacheUs) ? (nowUs - newestCacheUs) : 0;
+
+    if (newestCacheUsOut != NULL) {
+        *newestCacheUsOut = newestCacheUs;
+    }
+    return (newestCacheUs > 0) && (ageUs <= maxAgeUs);
+}
 
 static void rs485GrowattStoreLatestPacket(const bms_decoded_packet_t *packet)
 {
@@ -40,6 +59,14 @@ static void rs485GrowattStoreLatestPacket(const bms_decoded_packet_t *packet)
     portENTER_CRITICAL(&g_latestPacketMux);
     g_latestPacket = *packet;
     g_haveLatestPacket = true;
+    portEXIT_CRITICAL(&g_latestPacketMux);
+}
+
+static void rs485GrowattClearLatestPacket(void)
+{
+    portENTER_CRITICAL(&g_latestPacketMux);
+    g_haveLatestPacket = false;
+    memset(&g_latestPacket, 0, sizeof(g_latestPacket));
     portEXIT_CRITICAL(&g_latestPacketMux);
 }
 
@@ -105,9 +132,9 @@ static void rs485GrowattPublishBatteryModel(const modbusDecoder_t *decoder,
     batteryModelSet(&model);
 }
 
-static bool rs485GrowattBuildDecodedPacket(const modbusDecoder_t *decoder,
-                                           uint32_t sequence,
-                                           bms_decoded_packet_t *outPacket)
+bool rs485GrowattBuildDecodedPacket(const modbusDecoder_t *decoder,
+                                    uint32_t sequence,
+                                    bms_decoded_packet_t *outPacket)
 {
     if (decoder == NULL || outPacket == NULL) {
         return false;
@@ -131,6 +158,18 @@ static bool rs485GrowattBuildDecodedPacket(const modbusDecoder_t *decoder,
         outPacket->hasPackVoltageCv = true;
         outPacket->packVoltageCv = regVal;
     }
+    if (modbusDecoderGetCachedReg(decoder, RS485_GROWATT_MB_REG_STATUS_FLAGS, &regVal)) {
+        outPacket->hasStatusFlags = true;
+        outPacket->statusFlags = regVal;
+    }
+    if (modbusDecoderGetCachedReg(decoder, RS485_GROWATT_MB_REG_ERROR_CODE, &regVal)) {
+        outPacket->hasProtectionFlags = true;
+        outPacket->protectionFlags = (uint16_t)(regVal & GROWATT_ERROR_CODE_MASK);
+    }
+    if (modbusDecoderGetCachedReg(decoder, RS485_GROWATT_MB_REG_WARNING_CODE, &regVal)) {
+        outPacket->hasWarningFlags = true;
+        outPacket->warningFlags = (uint16_t)(regVal & GROWATT_WARNING_CODE_MASK);
+    }
 
     uint16_t minCell = 0;
     uint16_t maxCell = 0;
@@ -148,23 +187,66 @@ static bool rs485GrowattBuildDecodedPacket(const modbusDecoder_t *decoder,
         outPacket->maxCellIndex = clampU8(maxIdx, UINT8_MAX);
     }
 
+    uint16_t computedMinCell = UINT16_MAX;
+    uint16_t computedMaxCell = 0u;
+    uint8_t computedMinIdx = 0u;
+    uint8_t computedMaxIdx = 0u;
+    uint8_t validCells = 0u;
+    for (uint8_t i = 0u; i < RS485_GROWATT_MB_CELL_COUNT; i++) {
+        const uint16_t addr = (uint16_t)(RS485_GROWATT_MB_REG_CELL_BASE + i);
+        if (!modbusDecoderGetCachedReg(decoder, addr, &regVal)) {
+            continue;
+        }
+        if (regVal < GROWATT_MIN_CELL_MV || regVal > GROWATT_MAX_CELL_MV) {
+            continue;
+        }
+        if (i < BMS_DECODED_PACKET_MAX_CELLS) {
+            outPacket->cellMv[i] = regVal;
+            outPacket->cellCount = (uint8_t)(i + 1u);
+        }
+        validCells++;
+        if (regVal < computedMinCell) {
+            computedMinCell = regVal;
+            computedMinIdx = (uint8_t)(i + 1u);
+        }
+        if (regVal > computedMaxCell) {
+            computedMaxCell = regVal;
+            computedMaxIdx = (uint8_t)(i + 1u);
+        }
+    }
+    if (validCells > 0u && !outPacket->hasCellExtremes) {
+        outPacket->hasCellExtremes = true;
+        outPacket->minCellMv = computedMinCell;
+        outPacket->maxCellMv = computedMaxCell;
+        outPacket->minCellIndex = computedMinIdx;
+        outPacket->maxCellIndex = computedMaxIdx;
+    }
+
     return outPacket->hasSoc ||
            outPacket->hasTemperatureC ||
            outPacket->hasPackVoltageCv ||
-           outPacket->hasCellExtremes;
+           outPacket->hasCellExtremes ||
+           (outPacket->cellCount > 0u) ||
+           outPacket->hasStatusFlags ||
+           outPacket->hasProtectionFlags ||
+           outPacket->hasWarningFlags;
 }
 
 static void rs485GrowattBmsTask(void *pv)
 {
     rs485GrowattBmsTaskCtx_t *ctx = (rs485GrowattBmsTaskCtx_t *)pv;
     uint8_t rxChunk[RS485_BUF_SIZE];
-    const uart_port_t rxUart = rs485GetUart1();
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+    const uint8_t bmsPort = (settings.bms_port == 2u) ? 2u : 1u;
+    const uart_port_t rxUart = (bmsPort == 2u) ? rs485GetUart2() : rs485GetUart1();
+    const gpio_num_t dirPin = (bmsPort == 2u) ? rs485GetDir2() : rs485GetDir1();
+    const char *ifName = (bmsPort == 2u) ? "GROWATT_RS485_2" : "GROWATT_RS485_1";
     int64_t lastRecordedReqUs = 0;
 
-    modbusDecoderInit(&ctx->decoder, "GROWATT_BMS_RS485", GROWATT_BMS_MODBUS_GAP_US);
+    modbusDecoderInit(&ctx->decoder, ifName, GROWATT_BMS_MODBUS_GAP_US);
     rs485GrowattModbusPollerInit(&ctx->poller,
-                                 rs485GetUart1(),
-                                 rs485GetDir1(),
+                                 rxUart,
+                                 dirPin,
                                  (uint8_t)GROWATT_BMS_MODBUS_SLAVE_ADDR);
     uart_flush_input(rxUart);
 
@@ -195,12 +277,30 @@ static void rs485GrowattBmsTask(void *pv)
         }
 
         if ((nowUs - ctx->lastPublishUs) >= ((int64_t)GROWATT_BMS_PUBLISH_PERIOD_MS * 1000LL)) {
-            bms_decoded_packet_t packet = {0};
-            if (rs485GrowattBuildDecodedPacket(&ctx->decoder, ++ctx->sequence, &packet)) {
-                rs485GrowattStoreLatestPacket(&packet);
-                rs485GrowattPublishBatteryModel(&ctx->decoder, &packet);
-                if (xQueueOverwrite(ctx->outQueue, &packet) != pdPASS) {
-                    ESP_LOGW(EXAMPLE_TAG, "RS485 Growatt output queue overwrite failed");
+            int64_t newestCacheUs = 0;
+            if (!decoderCacheFresh(&ctx->decoder, nowUs, &newestCacheUs)) {
+                batteryModelClear();
+                rs485GrowattClearLatestPacket();
+                if ((nowUs - g_lastSourceStaleLogUs) >= 1000000LL) {
+                    if (newestCacheUs <= 0) {
+                        ESP_LOGW(EXAMPLE_TAG,
+                                 "RS485 Growatt source stale: clearing published data (no valid BMS response yet)");
+                    } else {
+                        const uint32_t ageMs = (uint32_t)((nowUs - newestCacheUs) / 1000LL);
+                        ESP_LOGW(EXAMPLE_TAG,
+                                 "RS485 Growatt source stale: clearing published data (last_rx_age=%u ms)",
+                                 (unsigned)ageMs);
+                    }
+                    g_lastSourceStaleLogUs = nowUs;
+                }
+            } else {
+                bms_decoded_packet_t packet = {0};
+                if (rs485GrowattBuildDecodedPacket(&ctx->decoder, ++ctx->sequence, &packet)) {
+                    rs485GrowattStoreLatestPacket(&packet);
+                    rs485GrowattPublishBatteryModel(&ctx->decoder, &packet);
+                    if (xQueueOverwrite(ctx->outQueue, &packet) != pdPASS) {
+                        ESP_LOGW(EXAMPLE_TAG, "RS485 Growatt output queue overwrite failed");
+                    }
                 }
             }
             ctx->lastPublishUs = nowUs;
@@ -219,7 +319,9 @@ esp_err_t rs485GrowattBmsTaskStart(QueueHandle_t outQueue)
 
     memset(&g_rs485GrowattBmsCtx, 0, sizeof(g_rs485GrowattBmsCtx));
     g_rs485GrowattBmsCtx.outQueue = outQueue;
+    g_lastSourceStaleLogUs = 0;
     batteryModelClear();
+    rs485GrowattClearLatestPacket();
 
     BaseType_t taskOk =
         xTaskCreate(rs485GrowattBmsTask,
@@ -234,7 +336,8 @@ esp_err_t rs485GrowattBmsTaskStart(QueueHandle_t outQueue)
     }
 
     ESP_LOGI(EXAMPLE_TAG,
-             "RS485 Growatt BMS task started (poll=%dms, publish=%dms)",
+             "RS485 Growatt BMS task started (slave=%u poll=%dms, publish=%dms)",
+             (unsigned)GROWATT_BMS_MODBUS_SLAVE_ADDR,
              GROWATT_BMS_QUERY_PERIOD_MS,
              GROWATT_BMS_PUBLISH_PERIOD_MS);
     return ESP_OK;

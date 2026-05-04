@@ -21,6 +21,7 @@ The goal is practical maintenance:
 - README telemetry quality standard for future protocol integrations, using `PACE_RS485_MODBUS_V1.3 -> RS485_PYLON` as the reference behavior.
 - Experimental `JKBMS_RS485_NATIVE` BMS poller/decoder for JK native binary RS485 frames, including all-cell voltage, temperature, status, and alarm-bit telemetry.
 - `RS485_JKBMS_NATIVE -> RS485_PYLON` and `RS485_JKBMS_NATIVE -> RS485_GROWATT` bridge-mode route selection through the existing synthetic responder paths.
+- `RS485_GROWATT -> RS485_PYLON` bridge-mode route for JK UART protocol `006 - Growatt_BMS_RS485_Protocol_1xSxxP_ESS_Rev2.01`.
 - GitLab CI pipeline for automatic ESP32-C6 builds and host-side test execution on push/merge request.
 - Separate CI suites for sanity, unit, integration, and firmware-build validation, with JUnit artifacts and coverage reports.
 - Host-side regression tests for `JKBMS_MODBUS` source freshness and Modbus decoder cache timestamps.
@@ -43,6 +44,9 @@ The goal is practical maintenance:
 - Flash size is configured for `8MB`, and the app partition was expanded from `1MB` to `7MB`.
 - `bms_decoded_packet_t` now carries richer decoded telemetry for protocols that expose per-cell voltages, per-sensor temperatures, warning/protection/fault masks, status flags, and balance flags.
 - Pylon synthetic status generation can now use explicit PACE MOSFET charge/discharge flags while keeping the conservative generic fallback for non-native sources.
+- `RS485_GROWATT` BMS polling now follows the selected BMS RS485 port, expires stale Modbus cache data, and publishes per-cell voltage registers when available.
+- `RS485_GROWATT` BMS telemetry now decodes Growatt `0x0014` error/protection bits and `0x0022` warning bits for JK UART profile `006` instead of leaving the web alert cards empty.
+- `RS485_GROWATT` web telemetry now displays only the single live pack temperature exposed by register `0x0018`, instead of duplicating it as MOS/T1/T2/T4/T5.
 
 ### Fixed
 
