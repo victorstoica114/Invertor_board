@@ -108,6 +108,7 @@ static const char *protocolToStr(int protocol)
         case PROTOCOL_CAN_VICTRON: return "CAN_VICTRON";
         case PROTOCOL_RS485_JKBMS: return "JKBMS_MODBUS";
         case PROTOCOL_RS485_PACE: return "PACE_RS485_MODBUS";
+        case PROTOCOL_RS485_JKBMS_NATIVE: return "JKBMS_RS485_NATIVE";
         default: return "UNKNOWN";
     }
 }
@@ -445,18 +446,20 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "]);"
         "}"
         "function jkbmsCard(t,hasData){"
-        "if(t.protocol!=='JKBMS_MODBUS'||!hasData){return '';}"
-        "return card('JKBMS Runtime',["
+        "if((t.protocol!=='JKBMS_MODBUS'&&t.protocol!=='JKBMS_RS485_NATIVE')||!hasData){return '';}"
+        "const rows=["
         "row('Balance Current',fmt(t.balance_current_a,3,' A')),"
         "row('Remaining / Full',fmt(t.remaining_ah,3,' Ah')+' / '+fmt(t.full_ah,3,' Ah')),"
         "row('Cell Avg / Diff',fmt(t.cell_avg_v,3,' V')+' / '+fmt(t.cell_diff_v,3,' V')),"
-        "row('Alarm Raw',isNum(t.alarm_raw)?'0x'+t.alarm_raw.toString(16).toUpperCase().padStart(8,'0'):'-'),"
-        "row('Precharge',isNum(t.precharge_state)?String(t.precharge_state):'-')"
-        "]);"
+        "row('Alarm Raw',isNum(t.alarm_raw)?'0x'+t.alarm_raw.toString(16).toUpperCase().padStart(t.protocol==='JKBMS_RS485_NATIVE'?4:8,'0'):'-')"
+        "];"
+        "if(t.protocol==='JKBMS_MODBUS'){rows.push(row('Precharge',isNum(t.precharge_state)?String(t.precharge_state):'-'));}"
+        "return card('JKBMS Runtime',rows);"
         "}"
         "function temperatureCard(t,hasData){"
         "const pace=t.protocol==='PACE_RS485_MODBUS';"
-        "const labels=pace?['MOS','Battery T1','Battery T2','Battery T4','Battery T5']:['MOS','T1','T2','T4','T5'];"
+        "const nativeJk=t.protocol==='JKBMS_RS485_NATIVE';"
+        "const labels=pace?['MOS','Battery T1','Battery T2','Battery T4','Battery T5']:(nativeJk?['Tube/MOS','Battery','Box','T4','T5']:['MOS','T1','T2','T4','T5']);"
         "return card('Temperatures',[row(labels[0],hasData?fmt(t.temp_mos_c,1,' C'):'-'),row(labels[1],hasData?fmt(t.temp_t1_c,1,' C'):'-'),row(labels[2],hasData?fmt(t.temp_t2_c,1,' C'):'-'),row(labels[3],hasData?fmt(t.temp_t4_c,1,' C'):'-'),row(labels[4],hasData?fmt(t.temp_t5_c,1,' C'):'-')]);"
         "}"
         "function renderTelemetry(t){"
@@ -486,7 +489,7 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "const modeOpts=[{value:1,label:'sniffer'},{value:2,label:'forward'},{value:3,label:'bridge'}];"
         "const lineOpts=[{value:1,label:'CAN'},{value:2,label:'RS485'}];"
         "const bmsCanProtoOpts=[{value:1,label:'CAN_GROWATT (CAN BMS)'},{value:4,label:'CAN_PYLON'},{value:5,label:'CAN_DEYE'},{value:7,label:'CAN_GOODWE'},{value:8,label:'CAN_SOFAR'},{value:9,label:'CAN_SMA'},{value:10,label:'CAN_VICTRON'}];"
-        "const bmsRsProtoOpts=[{value:2,label:'RS485_GROWATT (Modbus Poller)'},{value:6,label:'JKBMS_MODBUS (RS485 Poller)'},{value:11,label:'PACE_RS485_MODBUS_V1.3 (Modbus Poller)'},{value:3,label:'RS485_PYLON'}];"
+        "const bmsRsProtoOpts=[{value:2,label:'RS485_GROWATT (Modbus Poller)'},{value:6,label:'JKBMS_MODBUS (RS485 Poller)'},{value:12,label:'JKBMS_RS485_NATIVE (Native Poller)'},{value:11,label:'PACE_RS485_MODBUS_V1.3 (Modbus Poller)'},{value:3,label:'RS485_PYLON'}];"
         "const invCanProtoOpts=[{value:1,label:'CAN_GROWATT'},{value:4,label:'CAN_PYLON'},{value:5,label:'CAN_DEYE'},{value:7,label:'CAN_GOODWE'},{value:8,label:'CAN_SOFAR'},{value:9,label:'CAN_SMA'},{value:10,label:'CAN_VICTRON'}];"
         "const invRsProtoOpts=[{value:2,label:'RS485_GROWATT'},{value:3,label:'RS485_PYLON'}];"
         "const portOpts=[{value:1,label:'1'},{value:2,label:'2'}];"
@@ -525,10 +528,11 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "const iport=parseInt(document.getElementById('inverter_port').value,10);"
         "let txt='';"
         "if(mode!==3){txt='Bridge inactive in this mode.';}"
-        "else if(bl===2&&bp===6&&il===2&&ip===2){txt='Special route active: JKBMS_MODBUS (RS485_'+bport+') -> RS485_GROWATT responder (RS485_'+iport+').';}"
-        "else if(bl===2&&bp===6&&il===2&&ip===3){txt='Special route active: JKBMS_MODBUS (RS485_'+bport+') -> RS485_PYLON responder (RS485_'+iport+').';}"
+        "else if(bl===2&&(bp===6||bp===12)&&il===2&&ip===2){txt='Special route active: '+protoLabel(bp)+' (RS485_'+bport+') -> RS485_GROWATT responder (RS485_'+iport+').';}"
+        "else if(bl===2&&(bp===6||bp===12)&&il===2&&ip===3){txt='Special route active: '+protoLabel(bp)+' (RS485_'+bport+') -> RS485_PYLON responder (RS485_'+iport+').';}"
         "else if(bl===2&&bp===11&&il===2&&ip===3){txt='Special route active: PACE_RS485_MODBUS_V1.3 (RS485_'+bport+') -> RS485_PYLON responder (RS485_'+iport+').';}"
         "else if(bl===2&&bp===6){txt='Testing JKBMS_Modbus poller on RS485_'+bport+'.';}"
+        "else if(bl===2&&bp===12){txt='Testing JKBMS_RS485_NATIVE poller on RS485_'+bport+'.';}"
         "else if(bl===2&&bp===11){txt='Testing PACE_RS485_MODBUS_V1.3 poller on RS485_'+bport+'.';}"
         "else if(bl===2&&bp===2){txt='Testing RS485_GROWATT poller on RS485_'+bport+'.';}"
         "else if(bl===1&&bp===1&&il===2&&ip===2){txt='Special route active: CAN_GROWATT -> RS485_GROWATT translator.';}"

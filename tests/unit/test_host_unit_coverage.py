@@ -62,6 +62,13 @@ HOST_C_TESTS = (
         ),
     ),
     HostCTestTarget(
+        name="jkbms_rs485_native",
+        sources=(
+            "tests/unit/test_jkbms_rs485_native.c",
+            "main/protocols/jkbms_rs485/jkbms_rs485_native.c",
+        ),
+    ),
+    HostCTestTarget(
         name="pace_modbus",
         sources=(
             "tests/unit/test_pace_modbus.c",

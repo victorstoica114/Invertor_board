@@ -101,6 +101,7 @@ def test_protocol_constants_in_config_h():
         'PROTOCOL_CAN_SMA',
         'PROTOCOL_CAN_VICTRON',
         'PROTOCOL_RS485_PACE',
+        'PROTOCOL_RS485_JKBMS_NATIVE',
     ]
 
     for protocol in expected_protocols:
@@ -166,6 +167,7 @@ def test_protocol_directories_exist():
         'growatt',
         'pylon',
         'jkbms_modbus',
+        'jkbms_rs485',
         'pace_modbus',
         'deye',
     ]

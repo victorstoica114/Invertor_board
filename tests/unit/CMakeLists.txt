@@ -8,6 +8,7 @@ idf_component_register(
 target_sources(${COMPONENT_LIB} PRIVATE
     test_can_decoder.c
     test_jkbms_modbus_alerts.c
+    test_jkbms_rs485_native.c
     test_modbus_decoder.c
     test_pace_modbus.c
     test_route_selection.c

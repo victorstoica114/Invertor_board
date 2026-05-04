@@ -11,6 +11,7 @@
 #include "protocols/growatt/growatt_bms_task.h"
 #include "protocols/growatt/growatt_inverter_task.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_bms_task.h"
+#include "protocols/jkbms_rs485/jkbms_rs485_bms_task.h"
 #include "protocols/pace_modbus/pace_modbus_bms_task.h"
 #include "protocols/pylon/pylon_bms_task.h"
 #include "protocols/pylon/pylon_inverter_task.h"
@@ -57,6 +58,8 @@ const char *protocolIdToStr(protocol_id_t id)
             return "JKBMS_MODBUS";
         case PROTOCOL_ID_PACE:
             return "PACE_RS485_MODBUS";
+        case PROTOCOL_ID_JKBMS_NATIVE:
+            return "JKBMS_RS485_NATIVE";
         default:
             return "UNKNOWN";
     }
@@ -132,6 +135,8 @@ static esp_err_t startBmsTask(protocol_id_t protocol, QueueHandle_t outQueue)
             return jkbmsModbusBmsTaskStart(outQueue);
         case PROTOCOL_ID_PACE:
             return paceModbusBmsTaskStart(outQueue);
+        case PROTOCOL_ID_JKBMS_NATIVE:
+            return jkbmsRs485BmsTaskStart(outQueue);
         default:
             return ESP_ERR_NOT_SUPPORTED;
     }
@@ -166,9 +171,31 @@ static protocol_id_t protocolIdFromUiProtocol(uint8_t protocol)
             return PROTOCOL_ID_JKBMS;
         case PROTOCOL_RS485_PACE:
             return PROTOCOL_ID_PACE;
+        case PROTOCOL_RS485_JKBMS_NATIVE:
+            return PROTOCOL_ID_JKBMS_NATIVE;
         default:
             return PROTOCOL_ID_GROWATT;
     }
+}
+
+static bool isJkbmsRs485Protocol(uint8_t protocol)
+{
+    return (protocol == PROTOCOL_RS485_JKBMS) ||
+           (protocol == PROTOCOL_RS485_JKBMS_NATIVE);
+}
+
+static esp_err_t startJkbmsRs485TaskForUiProtocol(uint8_t protocol, QueueHandle_t outQueue)
+{
+    if (protocol == PROTOCOL_RS485_JKBMS_NATIVE) {
+        return jkbmsRs485BmsTaskStart(outQueue);
+    }
+    return jkbmsModbusBmsTaskStart(outQueue);
+}
+
+static void stopJkbmsRs485Tasks(void)
+{
+    (void)jkbmsModbusBmsTaskStop();
+    (void)jkbmsRs485BmsTaskStop();
 }
 
 static const char *canNameByPort(uint8_t port)
@@ -224,7 +251,7 @@ static bool isRsJkbmsToRsGrowattRoute(const bridge_runtime_settings_t *settings)
 
     return (settings->bms_line == LINE_RS485) &&
            (settings->inverter_line == LINE_RS485) &&
-           (settings->bms_protocol == PROTOCOL_RS485_JKBMS) &&
+           isJkbmsRs485Protocol(settings->bms_protocol) &&
            (settings->inverter_protocol == PROTOCOL_RS485_GROWATT);
 }
 
@@ -280,7 +307,7 @@ static bool isRsJkbmsToRsPylonRoute(const bridge_runtime_settings_t *settings)
 
     return (settings->bms_line == LINE_RS485) &&
            (settings->inverter_line == LINE_RS485) &&
-           (settings->bms_protocol == PROTOCOL_RS485_JKBMS) &&
+           isJkbmsRs485Protocol(settings->bms_protocol) &&
            (settings->inverter_protocol == PROTOCOL_RS485_PYLON);
 }
 
@@ -500,7 +527,7 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
         }
 
         memset(&g_orchestratorCtx, 0, sizeof(g_orchestratorCtx));
-        g_orchestratorCtx.bmsProtocol = PROTOCOL_ID_JKBMS;
+        g_orchestratorCtx.bmsProtocol = protocolIdFromUiProtocol(settings->bms_protocol);
         g_orchestratorCtx.inverterProtocol = PROTOCOL_ID_GROWATT;
 
         g_orchestratorCtx.bmsQueue =
@@ -510,10 +537,11 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
             return ESP_ERR_NO_MEM;
         }
 
-        esp_err_t err = jkbmsModbusBmsTaskStart(g_orchestratorCtx.bmsQueue);
+        esp_err_t err = startJkbmsRs485TaskForUiProtocol(settings->bms_protocol,
+                                                         g_orchestratorCtx.bmsQueue);
         if (err != ESP_OK) {
             ESP_LOGW(EXAMPLE_TAG,
-                     "JKBMS BMS task failed for RS485->RS485 Growatt route (err=0x%x)",
+                     "JKBMS RS485 BMS task failed for RS485->RS485 Growatt route (err=0x%x)",
                      (unsigned)err);
             orchestratorReset(&g_orchestratorCtx);
             return err;
@@ -526,7 +554,7 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
             ESP_LOGW(EXAMPLE_TAG,
                      "JKBMS->RS485 Growatt route failed to start translator (err=0x%x)",
                      (unsigned)err);
-            (void)jkbmsModbusBmsTaskStop();
+            stopJkbmsRs485Tasks();
             orchestratorReset(&g_orchestratorCtx);
             return err;
         }
@@ -547,7 +575,7 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
         }
 
         memset(&g_orchestratorCtx, 0, sizeof(g_orchestratorCtx));
-        g_orchestratorCtx.bmsProtocol = PROTOCOL_ID_JKBMS;
+        g_orchestratorCtx.bmsProtocol = protocolIdFromUiProtocol(settings->bms_protocol);
         g_orchestratorCtx.inverterProtocol = PROTOCOL_ID_PYLON;
 
         g_orchestratorCtx.bmsQueue =
@@ -557,10 +585,11 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
             return ESP_ERR_NO_MEM;
         }
 
-        esp_err_t err = jkbmsModbusBmsTaskStart(g_orchestratorCtx.bmsQueue);
+        esp_err_t err = startJkbmsRs485TaskForUiProtocol(settings->bms_protocol,
+                                                         g_orchestratorCtx.bmsQueue);
         if (err != ESP_OK) {
             ESP_LOGW(EXAMPLE_TAG,
-                     "JKBMS BMS task failed for RS485->RS485 Pylon route (err=0x%x)",
+                     "JKBMS RS485 BMS task failed for RS485->RS485 Pylon route (err=0x%x)",
                      (unsigned)err);
             orchestratorReset(&g_orchestratorCtx);
             return err;
@@ -655,6 +684,7 @@ esp_err_t orchestratorStop(void)
     (void)growattBmsTaskStop();
     (void)growattInverterTaskStop();
     (void)jkbmsModbusBmsTaskStop();
+    (void)jkbmsRs485BmsTaskStop();
     (void)paceModbusBmsTaskStop();
     (void)pylonBmsTaskStop();
     (void)pylonInverterTaskStop();

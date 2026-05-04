@@ -32,12 +32,14 @@ void test_protocol_id_to_string(void)
     const char *pylonStr = protocolIdToStr(PROTOCOL_ID_PYLON);
     const char *jkbmsStr = protocolIdToStr(PROTOCOL_ID_JKBMS);
     const char *paceStr = protocolIdToStr(PROTOCOL_ID_PACE);
+    const char *jkbmsNativeStr = protocolIdToStr(PROTOCOL_ID_JKBMS_NATIVE);
     const char *unknownStr = protocolIdToStr(99);
 
     TEST_ASSERT_EQUAL_STRING("GROWATT", growattStr);
     TEST_ASSERT_EQUAL_STRING("PYLON", pylonStr);
     TEST_ASSERT_EQUAL_STRING("JKBMS_MODBUS", jkbmsStr);
     TEST_ASSERT_EQUAL_STRING("PACE_RS485_MODBUS", paceStr);
+    TEST_ASSERT_EQUAL_STRING("JKBMS_RS485_NATIVE", jkbmsNativeStr);
     TEST_ASSERT_EQUAL_STRING("UNKNOWN", unknownStr);
 }
 
@@ -208,6 +210,26 @@ void test_route_pace_rs485_to_rs485_pylon_valid(void)
 }
 
 /**
+ * Test: Configuration validation for JKBMS_RS485_NATIVE -> RS485_PYLON bridge
+ */
+void test_route_jkbms_native_to_rs485_pylon_valid(void)
+{
+    bridge_runtime_settings_t settings = {0};
+
+    settings.bms_line = LINE_RS485;
+    settings.bms_protocol = PROTOCOL_RS485_JKBMS_NATIVE;
+    settings.bms_port = 1;
+    settings.inverter_line = LINE_RS485;
+    settings.inverter_protocol = PROTOCOL_RS485_PYLON;
+    settings.inverter_port = 2;
+
+    TEST_ASSERT_EQUAL_UINT8(LINE_RS485, settings.bms_line);
+    TEST_ASSERT_EQUAL_UINT8(PROTOCOL_RS485_JKBMS_NATIVE, settings.bms_protocol);
+    TEST_ASSERT_EQUAL_UINT8(LINE_RS485, settings.inverter_line);
+    TEST_ASSERT_EQUAL_UINT8(PROTOCOL_RS485_PYLON, settings.inverter_protocol);
+}
+
+/**
  * Test: Invalid configuration - mismatched lines
  */
 void test_route_invalid_same_line_both_sides(void)
@@ -243,6 +265,7 @@ void test_protocol_constants_defined(void)
     TEST_ASSERT_EQUAL_UINT8(9, PROTOCOL_CAN_SMA);
     TEST_ASSERT_EQUAL_UINT8(10, PROTOCOL_CAN_VICTRON);
     TEST_ASSERT_EQUAL_UINT8(11, PROTOCOL_RS485_PACE);
+    TEST_ASSERT_EQUAL_UINT8(12, PROTOCOL_RS485_JKBMS_NATIVE);
 }
 
 /**
@@ -295,6 +318,7 @@ int main(void)
     RUN_TEST(test_route_pylon_rs485_bridge_valid);
     RUN_TEST(test_route_can_pylon_to_rs485_pylon_valid);
     RUN_TEST(test_route_pace_rs485_to_rs485_pylon_valid);
+    RUN_TEST(test_route_jkbms_native_to_rs485_pylon_valid);
     RUN_TEST(test_route_invalid_same_line_both_sides);
     RUN_TEST(test_protocol_constants_defined);
     RUN_TEST(test_line_constants_defined);

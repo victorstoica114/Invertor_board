@@ -19,6 +19,8 @@ The goal is practical maintenance:
 - `RS485_PACE -> RS485_PYLON` bridge-mode route for Pylon-compatible inverter responders.
 - Web/API telemetry for PACE all-cell voltage lists, individual temperature registers, protections, alarms/faults, warnings, and raw status flags.
 - README telemetry quality standard for future protocol integrations, using `PACE_RS485_MODBUS_V1.3 -> RS485_PYLON` as the reference behavior.
+- Experimental `JKBMS_RS485_NATIVE` BMS poller/decoder for JK native binary RS485 frames, including all-cell voltage, temperature, status, and alarm-bit telemetry.
+- `RS485_JKBMS_NATIVE -> RS485_PYLON` and `RS485_JKBMS_NATIVE -> RS485_GROWATT` bridge-mode route selection through the existing synthetic responder paths.
 - GitLab CI pipeline for automatic ESP32-C6 builds and host-side test execution on push/merge request.
 - Separate CI suites for sanity, unit, integration, and firmware-build validation, with JUnit artifacts and coverage reports.
 - Host-side regression tests for `JKBMS_MODBUS` source freshness and Modbus decoder cache timestamps.

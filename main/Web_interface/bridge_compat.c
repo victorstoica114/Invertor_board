@@ -10,6 +10,7 @@
 #include "protocols/growatt/growatt_bms_task.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_alerts.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_bms_task.h"
+#include "protocols/jkbms_rs485/jkbms_rs485_bms_task.h"
 #include "protocols/pace_modbus/pace_modbus_bms_task.h"
 #include "protocols/rs485_growatt/rs485_growatt_bridge.h"
 #include "runtime_settings.h"
@@ -70,6 +71,8 @@ static const char *protocolToStr(uint8_t protocol)
             return "JKBMS_MODBUS";
         case PROTOCOL_RS485_PACE:
             return "PACE_RS485_MODBUS";
+        case PROTOCOL_RS485_JKBMS_NATIVE:
+            return "JKBMS_RS485_NATIVE";
         default:
             return "UNKNOWN";
     }
@@ -383,6 +386,91 @@ static void fillTelemetryFromJkbmsSnapshot(const jkbms_modbus_snapshot_t *snapsh
              (unsigned)snapshot->cellCount);
 }
 
+static void fillTelemetryFromJkbmsNativeSnapshot(const jkbms_rs485_native_snapshot_t *snapshot,
+                                                 bridgeTelemetrySnapshot_t *out)
+{
+    if (snapshot == NULL || out == NULL || !snapshot->valid) {
+        return;
+    }
+
+    out->valid = true;
+    snprintf(out->source, sizeof(out->source), "%s", "JKBMS_NATIVE_TASK");
+    snprintf(out->protocol, sizeof(out->protocol), "%s", "JKBMS_RS485_NATIVE");
+
+    if (snapshot->hasSoc) {
+        out->socPct = snapshot->socPct;
+    }
+    if (snapshot->hasSoh) {
+        out->sohPct = snapshot->sohPct;
+    }
+    if (snapshot->hasCycles) {
+        out->cycles = (uint16_t)((snapshot->cycles > 65535u) ? 65535u : snapshot->cycles);
+    }
+    if (snapshot->hasPackVoltageMv) {
+        out->packVoltageV = (float)snapshot->packVoltageMv / 1000.0f;
+    }
+    if (snapshot->hasPackCurrentMa) {
+        out->currentA = (float)snapshot->packCurrentMa / 1000.0f;
+    }
+    if (snapshot->hasPackPowerMw) {
+        out->packPowerW = (float)snapshot->packPowerMw / 1000.0f;
+    }
+    if (snapshot->hasFullMah) {
+        out->fullAh = (float)snapshot->fullMah / 1000.0f;
+    }
+
+    if (snapshot->hasTempMosC) {
+        out->tempMosC = (float)snapshot->tempMosC;
+    }
+    if (snapshot->hasTempBat1C) {
+        out->tempT1C = (float)snapshot->tempBat1C;
+    }
+    if (snapshot->hasTempBat2C) {
+        out->tempT2C = (float)snapshot->tempBat2C;
+    }
+
+    if (snapshot->hasCellAvgMv) {
+        out->cellAvgV = (float)snapshot->cellAvgMv / 1000.0f;
+    }
+    if (snapshot->hasCellDiffMaxMv) {
+        out->cellDiffV = (float)snapshot->cellDiffMaxMv / 1000.0f;
+    }
+
+    out->cellCount = snapshot->cellCount;
+    for (uint8_t i = 0; i < snapshot->cellCount && i < 32u; i++) {
+        out->cellVoltagesV[i] = (float)snapshot->cellMv[i] / 1000.0f;
+    }
+
+    if (snapshot->hasCellExtremes) {
+        out->cellMaxV = (float)snapshot->maxCellMv / 1000.0f;
+        out->cellMinV = (float)snapshot->minCellMv / 1000.0f;
+        out->cellMaxIdx = snapshot->maxCellIndex;
+        out->cellMinIdx = snapshot->minCellIndex;
+        out->deltaV = out->cellMaxV - out->cellMinV;
+    }
+
+    if (snapshot->hasAlarmBits) {
+        out->alarmRaw = snapshot->alarmBits;
+        jkbmsRs485NativeFormatAlertFields(snapshot->alarmBits,
+                                          out->protections,
+                                          sizeof(out->protections),
+                                          out->alarms,
+                                          sizeof(out->alarms),
+                                          out->warnings,
+                                          sizeof(out->warnings));
+    }
+
+    snprintf(out->stateFlags,
+             sizeof(out->stateFlags),
+             "AlarmRaw=0x%04X, Status=0x%04X, CHG=%s, DSG=%s, BAL=%s, Cells=%u",
+             snapshot->hasAlarmBits ? snapshot->alarmBits : 0u,
+             snapshot->hasStatusFlags ? snapshot->statusFlags : 0u,
+             snapshot->chargeEnabled ? "ON" : "OFF",
+             snapshot->dischargeEnabled ? "ON" : "OFF",
+             snapshot->balanceActive ? "ON" : "OFF",
+             (unsigned)snapshot->cellCount);
+}
+
 static void bridgeFormatBmsInterface(char *out, size_t outSize, const bridge_runtime_settings_t *settings)
 {
     uint8_t port = 1u;
@@ -501,6 +589,25 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
             }
             return;
         }
+    } else if (settings.bms_protocol == PROTOCOL_RS485_JKBMS_NATIVE) {
+        jkbms_rs485_native_snapshot_t snapshot = {0};
+        bool haveSnapshot = jkbmsRs485BmsTaskGetLatestSnapshot(&snapshot);
+        hasPacket = jkbmsRs485BmsTaskGetLatestPacket(&packet);
+        if (hasPacket) {
+            srcUpdatedMs = (uint32_t)(packet.timestampUs / 1000ULL);
+        }
+        if (haveSnapshot) {
+            ESP_LOGD(BRIDGE_TAG, "[FILL] Using JKBMS native snapshot: soc=%u%%, v=%.2fV",
+                     snapshot.socPct, (double)snapshot.packVoltageMv / 1000.0);
+            fillTelemetryFromJkbmsNativeSnapshot(&snapshot, out);
+            if (srcUpdatedMs != 0u) {
+                out->updatedMs = srcUpdatedMs;
+                if (updatedMsOut != NULL) {
+                    *updatedMsOut = srcUpdatedMs;
+                }
+            }
+            return;
+        }
     } else if (settings.bms_protocol == PROTOCOL_RS485_PACE) {
         hasPacket = paceModbusBmsTaskGetLatestPacket(&packet);
         if (hasPacket) {
@@ -520,7 +627,8 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
 
     ESP_LOGD(BRIDGE_TAG, "[FILL] Using BMS task packet: protocol=%s, soc=%u%%",
              (settings.bms_protocol == PROTOCOL_RS485_JKBMS) ? "JKBMS" :
-             ((settings.bms_protocol == PROTOCOL_RS485_PACE) ? "PACE" : "GROWATT"),
+             ((settings.bms_protocol == PROTOCOL_RS485_JKBMS_NATIVE) ? "JKBMS_NATIVE" :
+             ((settings.bms_protocol == PROTOCOL_RS485_PACE) ? "PACE" : "GROWATT")),
              packet.hasSoc ? packet.socPct : 0);
 
     out->valid = true;
@@ -528,7 +636,8 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
              sizeof(out->source),
              "%s",
              (settings.bms_protocol == PROTOCOL_RS485_JKBMS) ? "JKBMS_BMS_TASK" :
-             ((settings.bms_protocol == PROTOCOL_RS485_PACE) ? "PACE_BMS_TASK" : "GROWATT_BMS_TASK"));
+             ((settings.bms_protocol == PROTOCOL_RS485_JKBMS_NATIVE) ? "JKBMS_NATIVE_TASK" :
+             ((settings.bms_protocol == PROTOCOL_RS485_PACE) ? "PACE_BMS_TASK" : "GROWATT_BMS_TASK")));
     snprintf(out->protocol, sizeof(out->protocol), "%s", protocolToStr(settings.bms_protocol));
 
     if (packet.hasSoc) {

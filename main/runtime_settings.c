@@ -45,10 +45,10 @@ static bool validateSettings(const bridge_runtime_settings_t *s)
     if (s->inverter_line < LINE_CAN || s->inverter_line > LINE_RS485) {
         return false;
     }
-    if (s->bms_protocol < PROTOCOL_CAN_GROWATT || s->bms_protocol > PROTOCOL_RS485_PACE) {
+    if (s->bms_protocol < PROTOCOL_CAN_GROWATT || s->bms_protocol > PROTOCOL_RS485_JKBMS_NATIVE) {
         return false;
     }
-    if (s->inverter_protocol < PROTOCOL_CAN_GROWATT || s->inverter_protocol > PROTOCOL_RS485_PACE) {
+    if (s->inverter_protocol < PROTOCOL_CAN_GROWATT || s->inverter_protocol > PROTOCOL_RS485_JKBMS_NATIVE) {
         return false;
     }
     if (s->bms_port < 1u || s->bms_port > 2u) {
@@ -87,7 +87,8 @@ static bool validateSettings(const bridge_runtime_settings_t *s)
         (s->bms_protocol != PROTOCOL_RS485_GROWATT) &&
         (s->bms_protocol != PROTOCOL_RS485_PYLON) &&
         (s->bms_protocol != PROTOCOL_RS485_JKBMS) &&
-        (s->bms_protocol != PROTOCOL_RS485_PACE)) {
+        (s->bms_protocol != PROTOCOL_RS485_PACE) &&
+        (s->bms_protocol != PROTOCOL_RS485_JKBMS_NATIVE)) {
         return false;
     }
     if ((s->inverter_line == LINE_RS485) &&
