@@ -33,6 +33,7 @@ typedef struct {
     float tempT2C;
     float tempT4C;
     float tempT5C;
+    uint8_t tempCount;
     uint8_t pylonStatus63;
     uint8_t deyeStatus35C;
     uint8_t deyeTempMaxSensor;

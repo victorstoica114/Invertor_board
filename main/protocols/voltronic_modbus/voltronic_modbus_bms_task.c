@@ -387,6 +387,17 @@ static void logDecodedSnapshot(const voltronic_modbus_snapshot_t *snapshot, int6
                  (unsigned)snapshot->dischargeProtect2,
                  (unsigned)snapshot->bmsState);
     }
+    if (snapshot->tempCount > 0u) {
+        ESP_LOGI(EXAMPLE_TAG,
+                 "Voltronic temps: count=%u t0=%.1fC t1=%.1fC t2=%.1fC t3=%.1fC t4=%.1fC t5=%.1fC",
+                 (unsigned)snapshot->tempCount,
+                 (double)snapshot->tempDeciC[0] / 10.0,
+                 (snapshot->tempCount > 1u) ? ((double)snapshot->tempDeciC[1] / 10.0) : 0.0,
+                 (snapshot->tempCount > 2u) ? ((double)snapshot->tempDeciC[2] / 10.0) : 0.0,
+                 (snapshot->tempCount > 3u) ? ((double)snapshot->tempDeciC[3] / 10.0) : 0.0,
+                 (snapshot->tempCount > 4u) ? ((double)snapshot->tempDeciC[4] / 10.0) : 0.0,
+                 (snapshot->tempCount > 5u) ? ((double)snapshot->tempDeciC[5] / 10.0) : 0.0);
+    }
 }
 
 static void decodeJkCompatSnapshot(const modbusDecoder_t *decoder,

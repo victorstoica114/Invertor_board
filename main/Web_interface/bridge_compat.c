@@ -628,22 +628,32 @@ static void fillTelemetryFromVoltronicSnapshot(const voltronic_modbus_snapshot_t
                                        (snapshot->dischargeEnabled ? 0x40u : 0u));
     }
 
-    if (snapshot->tempCount > 0u) {
+    out->tempMosC = 0.0f;
+    out->tempT1C = 0.0f;
+    out->tempT2C = 0.0f;
+    out->tempT4C = 0.0f;
+    out->tempT5C = 0.0f;
+    out->tempCount = snapshot->tempCount;
+    if (snapshot->tempCount == 3u) {
+        out->tempMosC = (float)snapshot->tempDeciC[0] / 10.0f;
+        out->tempT1C = (float)snapshot->tempDeciC[1] / 10.0f;
+        out->tempT2C = (float)snapshot->tempDeciC[2] / 10.0f;
+    } else {
         if (snapshot->tempCount > 5u) {
             out->tempMosC = (float)snapshot->tempDeciC[5] / 10.0f;
-        } else {
-            out->tempMosC = (float)snapshot->tempDeciC[0] / 10.0f;
         }
-        out->tempT1C = (float)snapshot->tempDeciC[0] / 10.0f;
-    }
-    if (snapshot->tempCount > 1u) {
-        out->tempT2C = (float)snapshot->tempDeciC[1] / 10.0f;
-    }
-    if (snapshot->tempCount > 3u) {
-        out->tempT4C = (float)snapshot->tempDeciC[3] / 10.0f;
-    }
-    if (snapshot->tempCount > 4u) {
-        out->tempT5C = (float)snapshot->tempDeciC[4] / 10.0f;
+        if (snapshot->tempCount > 0u) {
+            out->tempT1C = (float)snapshot->tempDeciC[0] / 10.0f;
+        }
+        if (snapshot->tempCount > 1u) {
+            out->tempT2C = (float)snapshot->tempDeciC[1] / 10.0f;
+        }
+        if (snapshot->tempCount > 3u) {
+            out->tempT4C = (float)snapshot->tempDeciC[3] / 10.0f;
+        }
+        if (snapshot->tempCount > 4u) {
+            out->tempT5C = (float)snapshot->tempDeciC[4] / 10.0f;
+        }
     }
 
     out->cellCount = snapshot->cellCount;

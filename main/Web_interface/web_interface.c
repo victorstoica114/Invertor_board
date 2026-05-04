@@ -463,6 +463,12 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "const growatt=t.protocol==='RS485_GROWATT';"
         "const voltronic=t.protocol==='VOLTRONIC_MODBUS';"
         "if(growatt){return card('Temperatures',[row('Pack',hasData?fmt(t.temp_mos_c,1,' C'):'-')]);}"
+        "if(voltronic){"
+        "const n=isNum(t.temp_count)?t.temp_count:0;"
+        "const v=(field,ok)=>hasData&&ok?fmt(t[field],1,' C'):'-';"
+        "if(n===3){return card('Temperatures',[row('MOS',v('temp_mos_c',true)),row('Battery T1',v('temp_t1_c',true)),row('Battery T2',v('temp_t2_c',true)),row('Battery T4','-'),row('Battery T5','-')]);}"
+        "return card('Temperatures',[row('MOS',v('temp_mos_c',n>5)),row('Battery T1',v('temp_t1_c',n>0)),row('Battery T2',v('temp_t2_c',n>1)),row('Battery T4',v('temp_t4_c',n>3)),row('Battery T5',v('temp_t5_c',n>4))]);"
+        "}"
         "const labels=(pace||voltronic)?['MOS','Battery T1','Battery T2','Battery T4','Battery T5']:(nativeJk?['Tube/MOS','Battery','Box','T4','T5']:['MOS','T1','T2','T4','T5']);"
         "return card('Temperatures',[row(labels[0],hasData?fmt(t.temp_mos_c,1,' C'):'-'),row(labels[1],hasData?fmt(t.temp_t1_c,1,' C'):'-'),row(labels[2],hasData?fmt(t.temp_t2_c,1,' C'):'-'),row(labels[3],hasData?fmt(t.temp_t4_c,1,' C'):'-'),row(labels[4],hasData?fmt(t.temp_t5_c,1,' C'):'-')]);"
         "}"
@@ -723,6 +729,7 @@ static esp_err_t telemetryHandler(httpd_req_t *req)
                     "\"temp_t2_c\":%.1f,"
                     "\"temp_t4_c\":%.1f,"
                     "\"temp_t5_c\":%.1f,"
+                    "\"temp_count\":%u,"
                     "\"status_63\":%u,"
                     "\"deye_status_35c\":%u,"
                     "\"deye_temp_max_sensor\":%u,"
@@ -763,6 +770,7 @@ static esp_err_t telemetryHandler(httpd_req_t *req)
                     (double)snap.tempT2C,
                     (double)snap.tempT4C,
                     (double)snap.tempT5C,
+                    (unsigned)snap.tempCount,
                     (unsigned)snap.pylonStatus63,
                     (unsigned)snap.deyeStatus35C,
                     (unsigned)snap.deyeTempMaxSensor,
