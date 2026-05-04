@@ -101,9 +101,29 @@ static bool getI16Reg(const modbusDecoder_t *decoder, uint16_t addr, int16_t *ou
     return true;
 }
 
+static bool getTempCReg(const modbusDecoder_t *decoder, uint16_t addr, int16_t *outC)
+{
+    int16_t raw = 0;
+
+    if (outC == NULL || !getI16Reg(decoder, addr, &raw)) {
+        return false;
+    }
+    if (raw < -40 || raw > 125) {
+        return false;
+    }
+
+    *outC = raw;
+    return true;
+}
+
 static void chinaTowerFormatRuntimeRegs(const modbusDecoder_t *decoder, char *out, size_t outSize)
 {
     size_t pos = 0u;
+    static const uint16_t extraRegs[] = {
+        CHINA_TOWER_MB_REG_WARNING_FLAGS,
+        CHINA_TOWER_MB_REG_PROTECTION_FLAGS,
+        CHINA_TOWER_MB_REG_STATUS_FLAGS,
+    };
 
     if (out == NULL || outSize == 0u) {
         return;
@@ -138,6 +158,33 @@ static void chinaTowerFormatRuntimeRegs(const modbusDecoder_t *decoder, char *ou
         }
         pos += (size_t)written;
     }
+
+    for (uint8_t i = 0u; i < (uint8_t)(sizeof(extraRegs) / sizeof(extraRegs[0])); i++) {
+        uint16_t raw = 0u;
+        int written = 0;
+        const uint16_t addr = extraRegs[i];
+
+        if (pos + 1u >= outSize) {
+            break;
+        }
+        if (modbusDecoderGetCachedReg(decoder, addr, &raw)) {
+            written = snprintf(&out[pos],
+                               outSize - pos,
+                               " r%02X=%u/0x%04X",
+                               (unsigned)addr,
+                               (unsigned)raw,
+                               (unsigned)raw);
+        } else {
+            written = snprintf(&out[pos],
+                               outSize - pos,
+                               " r%02X=missing",
+                               (unsigned)addr);
+        }
+        if (written <= 0) {
+            break;
+        }
+        pos += (size_t)written;
+    }
 }
 
 static void chinaTowerLogDecodedPacket(const modbusDecoder_t *decoder,
@@ -145,7 +192,7 @@ static void chinaTowerLogDecodedPacket(const modbusDecoder_t *decoder,
                                        int64_t nowUs,
                                        bool accepted)
 {
-    char runtimeRegs[280];
+    char runtimeRegs[360];
 
     if (packet == NULL) {
         return;
@@ -174,6 +221,7 @@ static void chinaTowerPublishBatteryModel(const modbusDecoder_t *decoder,
                                           const bms_decoded_packet_t *packet)
 {
     battery_model_t model = {0};
+    uint16_t regVal = 0;
     int16_t i16 = 0;
 
     if (decoder == NULL || packet == NULL) {
@@ -190,24 +238,27 @@ static void chinaTowerPublishBatteryModel(const modbusDecoder_t *decoder,
     if (packet->hasPackVoltageCv) {
         model.packVoltageV = (float)packet->packVoltageCv / 100.0f;
     }
+    if (modbusDecoderGetCachedReg(decoder, CHINA_TOWER_MB_REG_WARNING_FLAGS, &regVal)) {
+        model.warningsMask = regVal;
+    }
+    if (modbusDecoderGetCachedReg(decoder, CHINA_TOWER_MB_REG_PROTECTION_FLAGS, &regVal)) {
+        model.alarmsMask = regVal;
+    }
+    if (modbusDecoderGetCachedReg(decoder, CHINA_TOWER_MB_REG_STATUS_FLAGS, &regVal)) {
+        model.protocolState = regVal;
+    }
 
     for (uint8_t i = 0u; i < UNIVERSAL_BATTERY_TEMP_SENSORS; i++) {
         model.temperaturesC[i] = -100.0f;
     }
-    if (getI16Reg(decoder, CHINA_TOWER_MB_REG_MOS_TEMP_DECIC, &i16)) {
-        model.temperaturesC[0] = (float)i16 / 10.0f;
+    if (getTempCReg(decoder, CHINA_TOWER_MB_REG_MOS_TEMP_C, &i16)) {
+        model.temperaturesC[0] = (float)i16;
     }
-    if (getI16Reg(decoder, CHINA_TOWER_MB_REG_TEMP1_DECIC, &i16)) {
-        model.temperaturesC[1] = (float)i16 / 10.0f;
+    if (getTempCReg(decoder, CHINA_TOWER_MB_REG_TEMP1_C, &i16)) {
+        model.temperaturesC[1] = (float)i16;
     }
-    if (getI16Reg(decoder, CHINA_TOWER_MB_REG_TEMP2_DECIC, &i16)) {
-        model.temperaturesC[2] = (float)i16 / 10.0f;
-    }
-    if (getI16Reg(decoder, CHINA_TOWER_MB_REG_TEMP3_DECIC, &i16)) {
-        model.temperaturesC[3] = (float)i16 / 10.0f;
-    }
-    if (getI16Reg(decoder, CHINA_TOWER_MB_REG_TEMP4_DECIC, &i16)) {
-        model.temperaturesC[4] = (float)i16 / 10.0f;
+    if (getTempCReg(decoder, CHINA_TOWER_MB_REG_TEMP2_C, &i16)) {
+        model.temperaturesC[2] = (float)i16;
     }
 
     if (packet->hasCellExtremes) {
@@ -244,13 +295,30 @@ bool chinaTowerModbusBuildDecodedPacket(const modbusDecoder_t *decoder,
         outPacket->hasPackVoltageCv = true;
         outPacket->packVoltageCv = regVal;
     }
+    if (modbusDecoderGetCachedReg(decoder, CHINA_TOWER_MB_REG_WARNING_FLAGS, &regVal)) {
+        outPacket->hasWarningFlags = true;
+        outPacket->warningFlags = regVal;
+    }
+    if (modbusDecoderGetCachedReg(decoder, CHINA_TOWER_MB_REG_PROTECTION_FLAGS, &regVal)) {
+        outPacket->hasProtectionFlags = true;
+        outPacket->protectionFlags = regVal;
+    }
+    if (modbusDecoderGetCachedReg(decoder, CHINA_TOWER_MB_REG_STATUS_FLAGS, &regVal)) {
+        outPacket->hasStatusFlags = true;
+        outPacket->statusFlags = regVal;
+    }
 
+    static const uint16_t tempRegs[CHINA_TOWER_MB_TEMP_REG_COUNT] = {
+        CHINA_TOWER_MB_REG_TEMP1_C,
+        CHINA_TOWER_MB_REG_TEMP2_C,
+        CHINA_TOWER_MB_REG_MOS_TEMP_C,
+    };
     int32_t tempSumDeciC = 0;
     uint8_t tempSamples = 0;
     for (uint8_t i = 0u; i < CHINA_TOWER_MB_TEMP_REG_COUNT; i++) {
-        int16_t tempDeciC = 0;
-        uint16_t addr = (uint16_t)(CHINA_TOWER_MB_REG_TEMP1_DECIC + i);
-        if (getI16Reg(decoder, addr, &tempDeciC)) {
+        int16_t tempC = 0;
+        if (getTempCReg(decoder, tempRegs[i], &tempC)) {
+            const int16_t tempDeciC = (int16_t)(tempC * 10);
             tempSumDeciC += tempDeciC;
             tempSamples++;
             if (i < BMS_DECODED_PACKET_MAX_TEMPS) {

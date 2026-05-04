@@ -54,6 +54,8 @@ The goal is practical maintenance:
 - `VOLTRONIC_MODBUS` web telemetry follows the PACE/Growatt integration standard: expose real cells and temperatures, keep raw alert/status diagnostics visible, and feed the existing Pylon responder with the decoded battery model.
 - `VOLTRONIC_MODBUS` poll frames use the Voltronic-published function-first byte order with BMS address/slave ID `1`, while the shared Modbus decoder now accepts both classic and Voltronic `0x03` response ordering.
 - `CHINA_TOWER_MODBUS` uses the bench-observed JK profile `008` register layout, with cell millivolts starting at `0x0009` and temperature registers kept at the live-tested offsets.
+- `CHINA_TOWER_MODBUS` web telemetry now treats the compact summary temperatures as the only confirmed live sensors and hides non-live `Battery T4`/`Battery T5` values instead of displaying Pylon-template leftovers.
+- `CHINA_TOWER_MODBUS` now captures the live-tested raw candidate warning/protection/status registers (`0x0019..0x001B`) without assigning unconfirmed names; non-zero unknown bits are preserved for future correlation with the JK app.
 
 ### Fixed
 

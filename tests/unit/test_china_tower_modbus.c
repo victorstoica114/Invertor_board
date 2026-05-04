@@ -93,21 +93,12 @@ void test_china_tower_modbus_decodes_runtime_cells_and_temps(void)
         4591u, 4574u, 4578u, 4476u,
         4519u, 4519u, 4519u, 4584u,
     };
-    uint16_t tailAndTemps[22] = {
-        4557u, 4531u, 4591u, 4574u,
-        4578u, 4476u, 4519u, 4519u,
-        4519u, 4584u,
-        0u, 0u, 0u, 0u, 0u, 0u,
-        280u, 281u, 285u, 275u, 291u, 277u,
-    };
+    uint16_t flags[3] = {0x0001u, 0x0002u, 0x0004u};
 
     modbusDecoderInit(&decoder, "CHINA_TOWER_TEST", 5000);
     feedChinaTowerResponse(&decoder, CHINA_TOWER_MB_REG_PACK_VOLTAGE_10MV, summary, 13u);
     feedChinaTowerResponse(&decoder, CHINA_TOWER_MB_REG_CELL01_MV, cells, 16u);
-    feedChinaTowerResponse(&decoder,
-                           (uint16_t)(CHINA_TOWER_MB_REG_CELL01_MV + 6u),
-                           tailAndTemps,
-                           22u);
+    feedChinaTowerResponse(&decoder, CHINA_TOWER_MB_REG_WARNING_FLAGS, flags, 3u);
 
     TEST_ASSERT_TRUE(chinaTowerModbusBuildDecodedPacket(&decoder, 8u, &packet));
     TEST_ASSERT_EQUAL_UINT8(PROTOCOL_ID_CHINA_TOWER, packet.sourceProtocol);
@@ -126,14 +117,16 @@ void test_china_tower_modbus_decodes_runtime_cells_and_temps(void)
     TEST_ASSERT_EQUAL_UINT16(4476u, packet.cellMv[11]);
     TEST_ASSERT_EQUAL_UINT16(4584u, packet.cellMv[15]);
     TEST_ASSERT_TRUE(packet.hasTemperatureC);
-    TEST_ASSERT_EQUAL_UINT8(6u, packet.tempCount);
-    TEST_ASSERT_EQUAL_INT16(280, packet.tempDeciC[0]);
-    TEST_ASSERT_EQUAL_INT16(281, packet.tempDeciC[1]);
-    TEST_ASSERT_EQUAL_INT16(291, packet.tempDeciC[4]);
-    TEST_ASSERT_EQUAL_INT16(277, packet.tempDeciC[5]);
-    TEST_ASSERT_FALSE(packet.hasWarningFlags);
-    TEST_ASSERT_FALSE(packet.hasProtectionFlags);
-    TEST_ASSERT_FALSE(packet.hasStatusFlags);
+    TEST_ASSERT_EQUAL_UINT8(3u, packet.tempCount);
+    TEST_ASSERT_EQUAL_INT16(260, packet.tempDeciC[0]);
+    TEST_ASSERT_EQUAL_INT16(270, packet.tempDeciC[1]);
+    TEST_ASSERT_EQUAL_INT16(290, packet.tempDeciC[2]);
+    TEST_ASSERT_TRUE(packet.hasWarningFlags);
+    TEST_ASSERT_EQUAL_UINT16(0x0001u, packet.warningFlags);
+    TEST_ASSERT_TRUE(packet.hasProtectionFlags);
+    TEST_ASSERT_EQUAL_UINT16(0x0002u, packet.protectionFlags);
+    TEST_ASSERT_TRUE(packet.hasStatusFlags);
+    TEST_ASSERT_EQUAL_UINT16(0x0004u, packet.statusFlags);
     TEST_ASSERT_FALSE(packet.hasBalanceFlags);
 }
 
@@ -152,18 +145,25 @@ void test_china_tower_modbus_register_map_matches_initial_poll_plan(void)
     TEST_ASSERT_EQUAL_UINT16(CHINA_TOWER_MB_REG_CELL01_MV,
                              g_chinaTowerModbusPollBlocks[1].start);
     TEST_ASSERT_EQUAL_UINT16(16u, g_chinaTowerModbusPollBlocks[1].count);
+    TEST_ASSERT_EQUAL_UINT16(CHINA_TOWER_MB_REG_WARNING_FLAGS,
+                             g_chinaTowerModbusPollBlocks[2].start);
+    TEST_ASSERT_EQUAL_UINT16(3u, g_chinaTowerModbusPollBlocks[2].count);
     TEST_ASSERT_EQUAL_UINT16(CHINA_TOWER_MB_REG_CELL01_MV + 15u,
                              CHINA_TOWER_MB_REG_CELL16_MV);
     TEST_ASSERT_EQUAL_UINT16(CHINA_TOWER_MB_REG_CELL01_MV + 22u,
-                             CHINA_TOWER_MB_REG_TEMP1_DECIC);
-
-    TEST_ASSERT_EQUAL_UINT16(CHINA_TOWER_MB_REG_CELL01_MV + 6u,
-                             g_chinaTowerModbusPollBlocks[2].start);
-    TEST_ASSERT_EQUAL_UINT16(22u, g_chinaTowerModbusPollBlocks[2].count);
-    TEST_ASSERT_EQUAL_UINT16(CHINA_TOWER_MB_REG_TEMP1_DECIC + 4u,
-                             CHINA_TOWER_MB_REG_MOS_TEMP_DECIC);
-    TEST_ASSERT_EQUAL_UINT16(CHINA_TOWER_MB_REG_TEMP1_DECIC + 5u,
-                             CHINA_TOWER_MB_REG_ENV_TEMP_DECIC);
+                             0x001Fu);
+    TEST_ASSERT_EQUAL_UINT16(CHINA_TOWER_MB_REG_TEMP1_C,
+                             CHINA_TOWER_MB_REG_PACK_VOLTAGE_10MV + 6u);
+    TEST_ASSERT_EQUAL_UINT16(CHINA_TOWER_MB_REG_TEMP2_C,
+                             CHINA_TOWER_MB_REG_PACK_VOLTAGE_10MV + 7u);
+    TEST_ASSERT_EQUAL_UINT16(CHINA_TOWER_MB_REG_MOS_TEMP_C,
+                             CHINA_TOWER_MB_REG_PACK_VOLTAGE_10MV + 8u);
+    TEST_ASSERT_EQUAL_UINT16(CHINA_TOWER_MB_REG_CELL16_MV + 1u,
+                             CHINA_TOWER_MB_REG_WARNING_FLAGS);
+    TEST_ASSERT_EQUAL_UINT16(CHINA_TOWER_MB_REG_WARNING_FLAGS + 1u,
+                             CHINA_TOWER_MB_REG_PROTECTION_FLAGS);
+    TEST_ASSERT_EQUAL_UINT16(CHINA_TOWER_MB_REG_WARNING_FLAGS + 2u,
+                             CHINA_TOWER_MB_REG_STATUS_FLAGS);
 }
 
 void test_china_tower_modbus_poller_cycles_runtime_and_cell_blocks(void)
@@ -187,8 +187,8 @@ void test_china_tower_modbus_poller_cycles_runtime_and_cell_blocks(void)
     TEST_ASSERT_EQUAL_UINT16(16u, poller.lastReqCount);
 
     TEST_ASSERT_EQUAL(ESP_OK, chinaTowerModbusPollerTick(&poller, 1600000LL, 250u));
-    TEST_ASSERT_EQUAL_UINT16(CHINA_TOWER_MB_REG_CELL01_MV + 6u, poller.lastReqStart);
-    TEST_ASSERT_EQUAL_UINT16(22u, poller.lastReqCount);
+    TEST_ASSERT_EQUAL_UINT16(CHINA_TOWER_MB_REG_WARNING_FLAGS, poller.lastReqStart);
+    TEST_ASSERT_EQUAL_UINT16(3u, poller.lastReqCount);
 
     TEST_ASSERT_EQUAL(ESP_OK, chinaTowerModbusPollerTick(&poller, 1900000LL, 250u));
     TEST_ASSERT_EQUAL_UINT16(CHINA_TOWER_MB_REG_PACK_VOLTAGE_10MV, poller.lastReqStart);

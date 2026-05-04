@@ -33,17 +33,20 @@ typedef struct {
 #define CHINA_TOWER_MB_STATUS_MOSFET_CHG          0x0400u
 #define CHINA_TOWER_MB_STATUS_MOSFET_DCHG         0x0800u
 
+#define CHINA_TOWER_MB_REG_TEMP1_C                0x0006u
+#define CHINA_TOWER_MB_REG_TEMP2_C                0x0007u
+#define CHINA_TOWER_MB_REG_MOS_TEMP_C             0x0008u
+#define CHINA_TOWER_MB_TEMP_REG_COUNT             3u
+
 #define CHINA_TOWER_MB_REG_CELL01_MV              0x0009u
 #define CHINA_TOWER_MB_REG_CELL16_MV              0x0018u
 #define CHINA_TOWER_MB_CELL_COUNT                 16u
 
-#define CHINA_TOWER_MB_REG_TEMP1_DECIC            0x001Fu
-#define CHINA_TOWER_MB_REG_TEMP2_DECIC            0x0020u
-#define CHINA_TOWER_MB_REG_TEMP3_DECIC            0x0021u
-#define CHINA_TOWER_MB_REG_TEMP4_DECIC            0x0022u
-#define CHINA_TOWER_MB_REG_MOS_TEMP_DECIC         0x0023u
-#define CHINA_TOWER_MB_REG_ENV_TEMP_DECIC         0x0024u
-#define CHINA_TOWER_MB_TEMP_REG_COUNT             6u
+#define CHINA_TOWER_MB_REG_WARNING_FLAGS          0x0019u
+#define CHINA_TOWER_MB_REG_PROTECTION_FLAGS       0x001Au
+#define CHINA_TOWER_MB_REG_STATUS_FLAGS           0x001Bu
+#define CHINA_TOWER_MB_REG_TEMP_DUP1_C            0x001Cu
+#define CHINA_TOWER_MB_REG_TEMP_DUP2_C            0x001Du
 
 extern const china_tower_modbus_poll_block_t g_chinaTowerModbusPollBlocks[];
 extern const size_t g_chinaTowerModbusPollBlocksCount;

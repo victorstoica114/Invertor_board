@@ -244,9 +244,10 @@ These are useful for reference/history, but are not the primary active implement
 `main/protocols/china_tower_modbus/`
 
 - active China Tower shared battery cabinet RS485 Modbus poller + decoder for JK UART profile `008`
-- polls the observed live map around `0x0000` for pack voltage, cell count, `SOC`, and runtime fields, with per-cell millivolts starting at `0x0009`
+- polls the observed live map around `0x0000` for pack voltage, cell count, `SOC`, and runtime fields, with per-cell millivolts starting at `0x0009`; raw candidate warning/protection/status fields are captured at `0x0019..0x001B`
 - supports `RS485_CHINA_TOWER -> RS485_PYLON` bridge-mode translation through the shared synthetic Pylon responder path
-- web/API telemetry includes pack voltage, `SOC`, all cell voltages, cell min/max/delta, and individual temperature registers; alarm/protection/warning cards stay empty unless this profile exposes real flag registers on future hardware
+- web/API telemetry includes pack voltage, `SOC`, all cell voltages, cell min/max/delta, and the three live temperature registers observed in the compact summary block; only `MOS`, `Temp 1`, and `Temp 2` are labeled for this profile because the exact battery-sensor assignment is not yet confirmed
+- named alert bits for China Tower profile `008` are not confirmed yet; non-zero raw candidate warning/protection bits are surfaced as unknown bits until they can be correlated with the JK app
 
 `main/protocols/pylon/`
 

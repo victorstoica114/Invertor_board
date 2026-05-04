@@ -321,9 +321,7 @@ static void fillPaceAlertFields(const bms_decoded_packet_t *packet, bridgeTeleme
     uint16_t balanceFlags = 0u;
     char statusText[48] = {0};
 
-    if (packet == NULL || out == NULL ||
-        (packet->sourceProtocol != PROTOCOL_ID_PACE &&
-         packet->sourceProtocol != PROTOCOL_ID_CHINA_TOWER)) {
+    if (packet == NULL || out == NULL || packet->sourceProtocol != PROTOCOL_ID_PACE) {
         return;
     }
 
@@ -370,6 +368,43 @@ static void fillPaceAlertFields(const bms_decoded_packet_t *packet, bridgeTeleme
              (unsigned)((statusFlags & 0xFF00u) >> 8),
              (statusText[0] != '\0') ? " " : "",
              statusText,
+             (unsigned)balanceFlags);
+}
+
+static void fillChinaTowerAlertFields(const bms_decoded_packet_t *packet,
+                                      bridgeTelemetrySnapshot_t *out)
+{
+    uint16_t warningFlags = 0u;
+    uint16_t protectionFlags = 0u;
+    uint16_t statusFlags = 0u;
+    uint16_t balanceFlags = 0u;
+
+    if (packet == NULL || out == NULL || packet->sourceProtocol != PROTOCOL_ID_CHINA_TOWER) {
+        return;
+    }
+
+    if (packet->hasWarningFlags) {
+        warningFlags = packet->warningFlags;
+        formatNamedFlagList(warningFlags, NULL, 0u, out->warnings, sizeof(out->warnings));
+    }
+    if (packet->hasProtectionFlags) {
+        protectionFlags = packet->protectionFlags;
+        formatNamedFlagList(protectionFlags, NULL, 0u, out->protections, sizeof(out->protections));
+    }
+    if (packet->hasStatusFlags) {
+        statusFlags = packet->statusFlags;
+    }
+    if (packet->hasBalanceFlags) {
+        balanceFlags = packet->balanceFlags;
+    }
+
+    out->alarmRaw = ((uint32_t)warningFlags << 16) | (uint32_t)protectionFlags;
+    snprintf(out->stateFlags,
+             sizeof(out->stateFlags),
+             "Warn=0x%04X, Prot=0x%04X, Status=0x%04X, Balance=0x%04X",
+             (unsigned)warningFlags,
+             (unsigned)protectionFlags,
+             (unsigned)statusFlags,
              (unsigned)balanceFlags);
 }
 
@@ -705,6 +740,24 @@ static void fillPaceTemperatureFields(const bms_decoded_packet_t *packet, bridge
         return;
     }
 
+    if (packet->sourceProtocol == PROTOCOL_ID_CHINA_TOWER) {
+        if (packet->tempCount > 0u) {
+            out->tempCount = packet->tempCount;
+        }
+        if (pacePacketTempC(packet, 0u, &tempC)) {
+            out->tempT1C = tempC;
+        }
+        if (pacePacketTempC(packet, 1u, &tempC)) {
+            out->tempT2C = tempC;
+        }
+        if (pacePacketTempC(packet, 2u, &tempC)) {
+            out->tempMosC = tempC;
+        }
+        out->tempT4C = 0.0f;
+        out->tempT5C = 0.0f;
+        return;
+    }
+
     if (packet->tempCount > 0u) {
         out->tempCount = packet->tempCount;
     }
@@ -729,8 +782,7 @@ static void inferFixedTemperatureCount(const bms_decoded_packet_t *packet,
                                        bridgeTelemetrySnapshot_t *out)
 {
     if (packet == NULL || out == NULL || out->tempCount != 0u ||
-        (packet->sourceProtocol != PROTOCOL_ID_PACE &&
-         packet->sourceProtocol != PROTOCOL_ID_CHINA_TOWER)) {
+        packet->sourceProtocol != PROTOCOL_ID_PACE) {
         return;
     }
 
@@ -1199,6 +1251,7 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
         out->currentA = 0.0f;
     }
     fillPaceAlertFields(&packet, out);
+    fillChinaTowerAlertFields(&packet, out);
     fillGrowattAlertFields(&packet, out);
 
     if (srcUpdatedMs != 0u) {

@@ -3,8 +3,7 @@
 const china_tower_modbus_poll_block_t g_chinaTowerModbusPollBlocks[] = {
     { .start = CHINA_TOWER_MB_REG_PACK_VOLTAGE_10MV, .count = 0x000Du },
     { .start = CHINA_TOWER_MB_REG_CELL01_MV, .count = CHINA_TOWER_MB_CELL_COUNT },
-    { .start = (CHINA_TOWER_MB_REG_CELL01_MV + 6u),
-      .count = (CHINA_TOWER_MB_REG_ENV_TEMP_DECIC - (CHINA_TOWER_MB_REG_CELL01_MV + 6u) + 1u) },
+    { .start = CHINA_TOWER_MB_REG_WARNING_FLAGS, .count = 3u },
 };
 
 const size_t g_chinaTowerModbusPollBlocksCount =
