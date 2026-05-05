@@ -232,6 +232,8 @@ def _compile_target(cc: str, target: HostCTestTarget) -> Path:
 @pytest.fixture(scope="session")
 def host_c_test_results() -> dict[str, Path]:
     cc = _require_gcc()
+    if BUILD_ROOT.exists():
+        shutil.rmtree(BUILD_ROOT)
     BUILD_ROOT.mkdir(parents=True, exist_ok=True)
     COVERAGE_ROOT.mkdir(parents=True, exist_ok=True)
 
