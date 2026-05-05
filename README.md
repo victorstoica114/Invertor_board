@@ -30,7 +30,7 @@ Main goals:
 Implemented and actively used:
 
 - `RS485_GROWATT` BMS polling/decoding (`Modbus`) + queue publish, including JK UART profile `006` cell voltages and Growatt warning/error bits
-- `JKBMS_MODBUS` BMS polling/decoding (`Modbus`) + rich snapshot
+- `JKBMS_MODBUS` BMS polling/decoding (`Modbus`) + rich snapshot, with `9600` and `115200` RS485 variants
 - `JKBMS_RS485_NATIVE` experimental BMS polling/decoding (`4E 57` native RS485 read-all frames) + rich snapshot
 - `PACE_RS485_MODBUS_V1.3` BMS polling/decoding (`Modbus`) + rich snapshot
 - `VOLTRONIC_MODBUS` BMS polling/decoding for JK UART profile `007 - Voltronic_Inverter_and_BMS_485` + rich snapshot
@@ -38,15 +38,15 @@ Implemented and actively used:
 - `WOW_MODBUS` BMS polling/decoding for JK UART profile `009 - WOW_RS485_Modbus_V1.3` + PACE-compatible pack/cell/temperature snapshot
 - `GROWATT` inverter CAN sender (publishes frame `0x322`)
 - `CAN_GROWATT | CAN_PYLON | CAN_GOODWE | CAN_SOFAR | CAN_SMA | CAN_VICTRON -> RS485_GROWATT` translator (`main/protocols/rs485_growatt/rs485_growatt_bridge.c`)
-- `RS485_JKBMS -> RS485_GROWATT` translator (`JKBMS_MODBUS` and `JKBMS_RS485_NATIVE`)
-- `RS485_JKBMS -> RS485_PYLON` translator/responder (`JKBMS_MODBUS` and `JKBMS_RS485_NATIVE`)
+- `RS485_JKBMS -> RS485_GROWATT` translator (`JKBMS_MODBUS`, `JKBMS_MODBUS_115200`, and `JKBMS_RS485_NATIVE`)
+- `RS485_JKBMS -> RS485_PYLON` translator/responder (`JKBMS_MODBUS`, `JKBMS_MODBUS_115200`, and `JKBMS_RS485_NATIVE`)
 - `RS485_GROWATT -> RS485_PYLON` translator/responder, intended for JK UART profile `006 - Growatt_BMS_RS485_Protocol_1xSxxP_ESS_Rev2.01`
 - `RS485_PACE -> RS485_PYLON` translator/responder
 - `RS485_VOLTRONIC -> RS485_PYLON` translator/responder, intended for JK UART profile `007 - Voltronic_Inverter_and_BMS_485`
 - `RS485_CHINA_TOWER -> RS485_PYLON` translator/responder, intended for JK UART profile `008 - China tower shared battery cabinet V2.0`
 - `RS485_WOW -> RS485_PYLON` translator/responder, intended for JK UART profile `009 - WOW_RS485_Modbus_V1.3`
-- `RS485_PYLON <-> RS485_PYLON` bridge/responder
-- `CAN_PYLON -> RS485_PYLON` synthetic responder/bridge
+- `RS485_PYLON <-> RS485_PYLON` bridge/responder, including the `RS485_PYLON_115200` variant
+- `CAN_PYLON -> RS485_PYLON` synthetic responder/bridge, including the `RS485_PYLON_115200` variant
 - CAN snapshot decoders for Growatt-like, Pylon, and Deye frame sets
 - web UI + API for runtime config and telemetry
 
@@ -61,14 +61,14 @@ Current bridge-mode route matrix:
 | Route | Condition | Status |
 | --- | --- | --- |
 | CAN -> RS485_GROWATT translator | `bms_line=CAN`, `inv_line=RS485`, `inv_protocol=RS485_GROWATT`, `bms_protocol in {CAN_GROWATT,CAN_PYLON,CAN_GOODWE,CAN_SOFAR,CAN_SMA,CAN_VICTRON}` | Active |
-| RS485_JKBMS -> RS485_GROWATT translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol in {JKBMS_MODBUS,JKBMS_RS485_NATIVE}`, `inv_protocol=RS485_GROWATT` | Active for Modbus; native is experimental |
-| RS485_JKBMS -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol in {JKBMS_MODBUS,JKBMS_RS485_NATIVE}`, `inv_protocol=RS485_PYLON` | Active for Modbus; native is experimental |
+| RS485_JKBMS -> RS485_GROWATT translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol in {JKBMS_MODBUS,JKBMS_MODBUS_115200,JKBMS_RS485_NATIVE}`, `inv_protocol=RS485_GROWATT` | Active for Modbus; native is experimental |
+| RS485_JKBMS -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol in {JKBMS_MODBUS,JKBMS_MODBUS_115200,JKBMS_RS485_NATIVE}`, `inv_protocol in {RS485_PYLON,RS485_PYLON_115200}` | Active for Modbus; native is experimental |
 | RS485_GROWATT -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=RS485_GROWATT`, `inv_protocol=RS485_PYLON` | Active; covers JK UART profile `006` |
 | RS485_PACE -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=PACE_RS485_MODBUS`, `inv_protocol=RS485_PYLON` | Active |
 | RS485_VOLTRONIC -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=VOLTRONIC_MODBUS`, `inv_protocol=RS485_PYLON` | Active; covers JK UART profile `007` |
 | RS485_CHINA_TOWER -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=CHINA_TOWER_MODBUS`, `inv_protocol=RS485_PYLON` | Active; covers JK UART profile `008` |
 | RS485_WOW -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=WOW_MODBUS`, `inv_protocol=RS485_PYLON` | Active initial implementation; covers JK UART profile `009` with PACE-compatible map |
-| Pylon RS485 bridge | `RS485_PYLON<->RS485_PYLON` or `CAN_PYLON->RS485_PYLON` | Active |
+| Pylon RS485 bridge | `RS485_PYLON<->RS485_PYLON` or `CAN_PYLON->RS485_PYLON`, with `RS485_PYLON_115200` accepted on RS485 sides | Active |
 | Generic orchestrator route | any other valid combination | Active, depends on protocol task maturity |
 
 ## Runtime Modes
@@ -156,6 +156,14 @@ Defined in `main/config.h`:
 - `PROTOCOL_RS485_VOLTRONIC = 13`
 - `PROTOCOL_RS485_CHINA_TOWER = 14`
 - `PROTOCOL_RS485_WOW = 15`
+- `PROTOCOL_RS485_JKBMS_115200 = 16`
+- `PROTOCOL_RS485_PYLON_115200 = 17`
+
+Baud-rate detail:
+
+- `PROTOCOL_RS485_JKBMS` and `PROTOCOL_RS485_PYLON` use `9600`
+- `PROTOCOL_RS485_JKBMS_115200` and `PROTOCOL_RS485_PYLON_115200` use `115200`
+- the `115200` variants reuse the same protocol decoders/responders; only the selected RS485 port baud changes
 
 ## Folder Structure (AI-Oriented)
 

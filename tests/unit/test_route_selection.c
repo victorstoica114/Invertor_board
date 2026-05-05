@@ -13,6 +13,7 @@
 #include <string.h>
 
 extern int g_routeStubGrowattBmsStartCount;
+extern int g_routeStubJkbmsModbusBmsStartCount;
 extern int g_routeStubVoltronicBmsStartCount;
 extern int g_routeStubChinaTowerBmsStartCount;
 extern int g_routeStubWowBmsStartCount;
@@ -328,6 +329,46 @@ void test_route_jkbms_native_to_rs485_pylon_valid(void)
 }
 
 /**
+ * Test: JKBMS Modbus 115200 uses the normal JKBMS Modbus task and Pylon responder.
+ */
+void test_route_jkbms_115200_to_rs485_pylon_starts_responder(void)
+{
+    bridge_runtime_settings_t settings = {0};
+
+    settings.mode = MODE_BRIDGE;
+    settings.bms_line = LINE_RS485;
+    settings.bms_protocol = PROTOCOL_RS485_JKBMS_115200;
+    settings.bms_port = 1;
+    settings.inverter_line = LINE_RS485;
+    settings.inverter_protocol = PROTOCOL_RS485_PYLON_115200;
+    settings.inverter_port = 2;
+
+    TEST_ASSERT_EQUAL(ESP_OK, orchestratorStartFromRuntime(&settings));
+    TEST_ASSERT_EQUAL(1, g_routeStubJkbmsModbusBmsStartCount);
+    TEST_ASSERT_EQUAL(1, g_routeStubPylonBridgeEnableCount);
+}
+
+/**
+ * Test: Pylon 115200 variants are accepted as Pylon bridge protocols.
+ */
+void test_route_pylon_115200_bridge_starts_responder(void)
+{
+    bridge_runtime_settings_t settings = {0};
+
+    settings.mode = MODE_BRIDGE;
+    settings.bms_line = LINE_RS485;
+    settings.bms_protocol = PROTOCOL_RS485_PYLON_115200;
+    settings.bms_port = 1;
+    settings.inverter_line = LINE_RS485;
+    settings.inverter_protocol = PROTOCOL_RS485_PYLON_115200;
+    settings.inverter_port = 2;
+
+    TEST_ASSERT_EQUAL(ESP_OK, orchestratorStartFromRuntime(&settings));
+    TEST_ASSERT_EQUAL(1, g_routeStubPylonBridgeEnableCount);
+    TEST_ASSERT_EQUAL(0, g_routeStubPylonInverterStartCount);
+}
+
+/**
  * Test: Invalid configuration - mismatched lines
  */
 void test_route_invalid_same_line_both_sides(void)
@@ -367,6 +408,14 @@ void test_protocol_constants_defined(void)
     TEST_ASSERT_EQUAL_UINT8(13, PROTOCOL_RS485_VOLTRONIC);
     TEST_ASSERT_EQUAL_UINT8(14, PROTOCOL_RS485_CHINA_TOWER);
     TEST_ASSERT_EQUAL_UINT8(15, PROTOCOL_RS485_WOW);
+    TEST_ASSERT_EQUAL_UINT8(16, PROTOCOL_RS485_JKBMS_115200);
+    TEST_ASSERT_EQUAL_UINT8(17, PROTOCOL_RS485_PYLON_115200);
+    TEST_ASSERT_EQUAL_UINT32(9600u, bridgeProtocolRs485Baudrate(PROTOCOL_RS485_JKBMS));
+    TEST_ASSERT_EQUAL_UINT32(115200u, bridgeProtocolRs485Baudrate(PROTOCOL_RS485_JKBMS_115200));
+    TEST_ASSERT_EQUAL_UINT32(9600u, bridgeProtocolRs485Baudrate(PROTOCOL_RS485_PYLON));
+    TEST_ASSERT_EQUAL_UINT32(115200u, bridgeProtocolRs485Baudrate(PROTOCOL_RS485_PYLON_115200));
+    TEST_ASSERT_TRUE(bridgeProtocolIsRs485JkbmsModbus(PROTOCOL_RS485_JKBMS_115200));
+    TEST_ASSERT_TRUE(bridgeProtocolIsRs485Pylon(PROTOCOL_RS485_PYLON_115200));
 }
 
 /**
@@ -424,6 +473,8 @@ int main(void)
     RUN_TEST(test_route_china_tower_rs485_to_rs485_pylon_starts_responder);
     RUN_TEST(test_route_wow_rs485_to_rs485_pylon_starts_responder);
     RUN_TEST(test_route_jkbms_native_to_rs485_pylon_valid);
+    RUN_TEST(test_route_jkbms_115200_to_rs485_pylon_starts_responder);
+    RUN_TEST(test_route_pylon_115200_bridge_starts_responder);
     RUN_TEST(test_route_invalid_same_line_both_sides);
     RUN_TEST(test_protocol_constants_defined);
     RUN_TEST(test_line_constants_defined);

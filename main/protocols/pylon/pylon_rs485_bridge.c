@@ -3,7 +3,7 @@
 #include "../../Web_interface/web_bridge_api.h"
 #include "../../config.h"
 #include "../../runtime_settings.h"
-#include "../../Drivers/RS485/rs485_driver.h"
+#include "../../Drivers/rs485_driver.h"
 #include "../common/battery_model.h"
 #include "pylon_rs485_protocol.h"
 
@@ -82,9 +82,11 @@ static const char *protocolToStrLocal(uint8_t protocol)
         case PROTOCOL_CAN_GROWATT: return "CAN_GROWATT";
         case PROTOCOL_RS485_GROWATT: return "RS485_GROWATT";
         case PROTOCOL_RS485_PYLON: return "RS485_PYLON";
+        case PROTOCOL_RS485_PYLON_115200: return "RS485_PYLON_115200";
         case PROTOCOL_CAN_PYLON: return "CAN_PYLON";
         case PROTOCOL_CAN_DEYE: return "CAN_DEYE";
         case PROTOCOL_RS485_JKBMS: return "JKBMS_MODBUS";
+        case PROTOCOL_RS485_JKBMS_115200: return "JKBMS_MODBUS_115200";
         case PROTOCOL_CAN_GOODWE: return "CAN_GOODWE";
         case PROTOCOL_CAN_SOFAR: return "CAN_SOFAR";
         case PROTOCOL_CAN_SMA: return "CAN_SMA";
@@ -117,7 +119,7 @@ static bool pylonCanToRs485ModeEnabled(const bridge_runtime_settings_t *settings
            (settings->bms_line == LINE_CAN) &&
            (settings->inverter_line == LINE_RS485) &&
            (settings->bms_protocol == PROTOCOL_CAN_PYLON) &&
-           (settings->inverter_protocol == PROTOCOL_RS485_PYLON);
+           bridgeProtocolIsRs485Pylon(settings->inverter_protocol);
 }
 
 static bool pylonRs485PassthroughModeEnabled(const bridge_runtime_settings_t *settings)
@@ -125,8 +127,8 @@ static bool pylonRs485PassthroughModeEnabled(const bridge_runtime_settings_t *se
     return (settings != NULL) &&
            (settings->bms_line == LINE_RS485) &&
            (settings->inverter_line == LINE_RS485) &&
-           (settings->bms_protocol == PROTOCOL_RS485_PYLON) &&
-           (settings->inverter_protocol == PROTOCOL_RS485_PYLON);
+           bridgeProtocolIsRs485Pylon(settings->bms_protocol) &&
+           bridgeProtocolIsRs485Pylon(settings->inverter_protocol);
 }
 
 static bool pylonSyntheticSourceModeEnabled(const bridge_runtime_settings_t *settings)
@@ -134,7 +136,7 @@ static bool pylonSyntheticSourceModeEnabled(const bridge_runtime_settings_t *set
     return (settings != NULL) &&
            (settings->mode == MODE_BRIDGE) &&
            (settings->inverter_line == LINE_RS485) &&
-           (settings->inverter_protocol == PROTOCOL_RS485_PYLON) &&
+           bridgeProtocolIsRs485Pylon(settings->inverter_protocol) &&
            !pylonRs485PassthroughModeEnabled(settings);
 }
 
@@ -142,7 +144,7 @@ static bool pylonSourceUsesNativePayloadEncoding(const bridge_runtime_settings_t
 {
     return (settings != NULL) &&
            ((settings->bms_protocol == PROTOCOL_CAN_PYLON) ||
-            (settings->bms_protocol == PROTOCOL_RS485_PYLON) ||
+            bridgeProtocolIsRs485Pylon(settings->bms_protocol) ||
             (settings->bms_protocol == PROTOCOL_CAN_DEYE));
 }
 
@@ -212,7 +214,7 @@ static TickType_t rs485PortPostDelayTicks(uart_port_t uart)
     return 0;
 }
 
-static TickType_t rs485TxTimeoutTicksForFrameLen(int len)
+static TickType_t rs485TxTimeoutTicksForFrameLen(uart_port_t uart, int len)
 {
     if (len <= 0) {
         return pdMS_TO_TICKS(100);
@@ -220,7 +222,11 @@ static TickType_t rs485TxTimeoutTicksForFrameLen(int len)
 
     /* 8N1 framing + margin for scheduling jitter / turnaround. */
     uint32_t bits = (uint32_t)len * 12u;
-    uint32_t txMs = (bits * 1000u + (uint32_t)RS485_BAUDRATE - 1u) / (uint32_t)RS485_BAUDRATE;
+    uint32_t baudRate = rs485GetBaudRate(uart);
+    if (baudRate == 0u) {
+        baudRate = RS485_DEFAULT_BAUDRATE;
+    }
+    uint32_t txMs = (bits * 1000u + baudRate - 1u) / baudRate;
     uint32_t timeoutMs = txMs + 50u;
     if (timeoutMs < 100u) {
         timeoutMs = 100u;
@@ -566,6 +572,30 @@ bool pylonRs485BridgeBuildSyntheticInfo63ForTest(char *out, size_t outSize)
 }
 #endif
 
+static bool pylonProbeShouldWaitForQuiet(uint8_t mode,
+                                         int64_t nowUs,
+                                         int64_t lastBmsTrafficUs,
+                                         int64_t lastInverterTrafficUs)
+{
+    int64_t latestTrafficUs = lastBmsTrafficUs;
+
+    if (mode == MODE_FORWARD && lastInverterTrafficUs > latestTrafficUs) {
+        latestTrafficUs = lastInverterTrafficUs;
+    }
+
+    return latestTrafficUs != 0 && (nowUs - latestTrafficUs) < 1500000LL;
+}
+
+#ifdef HOST_TEST
+bool pylonRs485BridgeProbeShouldWaitForQuietForTest(uint8_t mode,
+                                                    int64_t nowUs,
+                                                    int64_t lastBmsTrafficUs,
+                                                    int64_t lastInverterTrafficUs)
+{
+    return pylonProbeShouldWaitForQuiet(mode, nowUs, lastBmsTrafficUs, lastInverterTrafficUs);
+}
+#endif
+
 static void maybeRefreshSyntheticCacheFromUniversal(void)
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
@@ -817,7 +847,7 @@ static void forwardFrame(const char *rxName,
                  written,
                  len);
     }
-    esp_err_t waitErr = uart_wait_tx_done(txUart, rs485TxTimeoutTicksForFrameLen(len));
+    esp_err_t waitErr = uart_wait_tx_done(txUart, rs485TxTimeoutTicksForFrameLen(txUart, len));
     if (waitErr != ESP_OK) {
         ESP_LOGW(EXAMPLE_TAG,
                  "RS485 TX wait timeout/error on %s: err=%d len=%d",
@@ -1246,13 +1276,12 @@ static void pylonProbeTask(void *pv)
         uint8_t adr = addresses[addrIdx];
         uint8_t cid2 = cid2Seq[cidIdx];
         int64_t nowUs = esp_timer_get_time();
-        int64_t latestTrafficUs = s_lastPylonBmsTrafficUs;
+        bridge_runtime_settings_t settings = runtimeSettingsGet();
 
-        if (s_lastPylonInverterTrafficUs > latestTrafficUs) {
-            latestTrafficUs = s_lastPylonInverterTrafficUs;
-        }
-
-        if (latestTrafficUs != 0 && (nowUs - latestTrafficUs) < 1500000LL) {
+        if (pylonProbeShouldWaitForQuiet(settings.mode,
+                                         nowUs,
+                                         s_lastPylonBmsTrafficUs,
+                                         s_lastPylonInverterTrafficUs)) {
             vTaskDelay(pdMS_TO_TICKS(400));
             continue;
         }
@@ -1289,8 +1318,8 @@ bool pylonRs485BridgeSupportsRoute(const bridge_runtime_settings_t *settings)
 
     return ((settings->bms_line == LINE_RS485) &&
             (settings->inverter_line == LINE_RS485) &&
-            (settings->bms_protocol == PROTOCOL_RS485_PYLON) &&
-            (settings->inverter_protocol == PROTOCOL_RS485_PYLON)) ||
+            bridgeProtocolIsRs485Pylon(settings->bms_protocol) &&
+            bridgeProtocolIsRs485Pylon(settings->inverter_protocol)) ||
            pylonCanToRs485ModeEnabled(settings);
 }
 

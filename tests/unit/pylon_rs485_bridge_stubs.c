@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "config.h"
 #include "Drivers/RS485/rs485_driver.h"
 #include "Web_interface/web_bridge_api.h"
 #include "protocols/common/battery_model.h"
@@ -85,6 +86,12 @@ uart_port_t rs485GetUart1(void)
 uart_port_t rs485GetUart2(void)
 {
     return 1;
+}
+
+uint32_t rs485GetBaudRate(uart_port_t uart)
+{
+    (void)uart;
+    return RS485_DEFAULT_BAUDRATE;
 }
 
 gpio_num_t rs485GetDir1(void)

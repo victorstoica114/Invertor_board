@@ -58,6 +58,8 @@ static const char *protocolToStr(uint8_t protocol)
             return "RS485_GROWATT";
         case PROTOCOL_RS485_PYLON:
             return "RS485_PYLON";
+        case PROTOCOL_RS485_PYLON_115200:
+            return "RS485_PYLON_115200";
         case PROTOCOL_CAN_PYLON:
             return "CAN_PYLON";
         case PROTOCOL_CAN_DEYE:
@@ -72,6 +74,8 @@ static const char *protocolToStr(uint8_t protocol)
             return "CAN_VICTRON";
         case PROTOCOL_RS485_JKBMS:
             return "JKBMS_MODBUS";
+        case PROTOCOL_RS485_JKBMS_115200:
+            return "JKBMS_MODBUS_115200";
         case PROTOCOL_RS485_PACE:
             return "PACE_RS485_MODBUS";
         case PROTOCOL_RS485_JKBMS_NATIVE:
@@ -1005,6 +1009,7 @@ static const char *bridgeBmsTaskDebugName(uint8_t protocol)
 {
     switch (protocol) {
         case PROTOCOL_RS485_JKBMS:
+        case PROTOCOL_RS485_JKBMS_115200:
             return "JKBMS";
         case PROTOCOL_RS485_JKBMS_NATIVE:
             return "JKBMS_NATIVE";
@@ -1025,6 +1030,7 @@ static const char *bridgeBmsTaskSourceName(uint8_t protocol)
 {
     switch (protocol) {
         case PROTOCOL_RS485_JKBMS:
+        case PROTOCOL_RS485_JKBMS_115200:
             return "JKBMS_BMS_TASK";
         case PROTOCOL_RS485_JKBMS_NATIVE:
             return "JKBMS_NATIVE_TASK";
@@ -1062,11 +1068,11 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
     const bool pylonRs485Route =
         (settings.inverter_line == LINE_RS485) &&
         (((settings.bms_line == LINE_RS485) &&
-          (settings.bms_protocol == PROTOCOL_RS485_PYLON) &&
-          (settings.inverter_protocol == PROTOCOL_RS485_PYLON)) ||
+          bridgeProtocolIsRs485Pylon(settings.bms_protocol) &&
+          bridgeProtocolIsRs485Pylon(settings.inverter_protocol)) ||
          ((settings.bms_line == LINE_CAN) &&
           (settings.bms_protocol == PROTOCOL_CAN_PYLON) &&
-          (settings.inverter_protocol == PROTOCOL_RS485_PYLON)));
+          bridgeProtocolIsRs485Pylon(settings.inverter_protocol)));
 
     if (pylonRs485Route) {
         ESP_LOGD(BRIDGE_TAG, "[FILL] Pylon RS485 route - skipping fill");
@@ -1120,7 +1126,7 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
         return;
     }
 
-    if (settings.bms_protocol == PROTOCOL_RS485_JKBMS) {
+    if (bridgeProtocolIsRs485JkbmsModbus(settings.bms_protocol)) {
         jkbms_modbus_snapshot_t snapshot = {0};
         bool haveSnapshot = jkbmsModbusBmsTaskGetLatestSnapshot(&snapshot);
         hasPacket = jkbmsModbusBmsTaskGetLatestPacket(&packet);
@@ -1285,7 +1291,7 @@ static void buildFallbackLog(char *out, uint32_t outSize)
     jkbms_modbus_snapshot_t jkbms = {0};
     bool haveJkbmsSnapshot = false;
 
-    if (settings.bms_protocol == PROTOCOL_RS485_JKBMS) {
+    if (bridgeProtocolIsRs485JkbmsModbus(settings.bms_protocol)) {
         haveJkbmsSnapshot = jkbmsModbusBmsTaskGetLatestSnapshot(&jkbms);
     }
 

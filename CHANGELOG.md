@@ -28,6 +28,7 @@ The goal is practical maintenance:
 - `RS485_CHINA_TOWER -> RS485_PYLON` bridge-mode route for Pylon-compatible inverter responders.
 - `WOW_MODBUS` BMS poller/decoder for JK UART protocol `009 - WOW_RS485_Modbus_V1.3`, using a PACE-compatible V1.3 register map as the initial live-test implementation.
 - `RS485_WOW -> RS485_PYLON` bridge-mode route for Pylon-compatible inverter responders.
+- Selectable `115200` RS485 variants for `JKBMS_MODBUS` and `RS485_PYLON`, reusing the same decoders/responders as the existing `9600` variants.
 - GitLab CI pipeline for automatic ESP32-C6 builds and host-side test execution on push/merge request.
 - Separate CI suites for sanity, unit, integration, and firmware-build validation, with JUnit artifacts and coverage reports.
 - Host-side regression tests for `JKBMS_MODBUS` source freshness and Modbus decoder cache timestamps.
@@ -61,6 +62,7 @@ The goal is practical maintenance:
 - `WOW_MODBUS` is integrated as its own runtime/source protocol so JK profile `009` can be validated without reusing or mutating another protocol's cache interpretation.
 - Web/API telemetry and route-selection tests now cover the `WOW_MODBUS -> RS485_PYLON` path.
 - `WOW_MODBUS` has been live-validated with the BMS set to JK UART profile `009`, with the inverter accepting the translated Pylon responder data.
+- RS485 UART initialization now derives baud rate per physical RS485 port from the selected runtime protocol, allowing mixed routes such as `JKBMS_MODBUS_115200 -> RS485_PYLON`.
 
 ### Fixed
 

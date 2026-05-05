@@ -39,8 +39,10 @@
 #define RS485_2_UART  UART_NUM_0
 
 /* --- UART settings --- */
-#define RS485_BAUDRATE     9600
-#define RS485_BUF_SIZE     512
+#define RS485_DEFAULT_BAUDRATE 9600u
+#define RS485_FAST_BAUDRATE    115200u
+#define RS485_BAUDRATE         RS485_DEFAULT_BAUDRATE
+#define RS485_BUF_SIZE         512
 
 /* --- RS485 line-control compatibility (used by Pylon RS485 bridge) --- */
 #define RS485_USE_HALF_DUPLEX     1
@@ -116,6 +118,42 @@
 #define PROTOCOL_RS485_VOLTRONIC 13
 #define PROTOCOL_RS485_CHINA_TOWER 14
 #define PROTOCOL_RS485_WOW 15
+#define PROTOCOL_RS485_JKBMS_115200 16
+#define PROTOCOL_RS485_PYLON_115200 17
+#define PROTOCOL_ID_MAX PROTOCOL_RS485_PYLON_115200
+
+static inline uint8_t bridgeProtocolCanonical(uint8_t protocol)
+{
+    switch (protocol) {
+        case PROTOCOL_RS485_JKBMS_115200:
+            return PROTOCOL_RS485_JKBMS;
+        case PROTOCOL_RS485_PYLON_115200:
+            return PROTOCOL_RS485_PYLON;
+        default:
+            return protocol;
+    }
+}
+
+static inline bool bridgeProtocolIsRs485JkbmsModbus(uint8_t protocol)
+{
+    return bridgeProtocolCanonical(protocol) == PROTOCOL_RS485_JKBMS;
+}
+
+static inline bool bridgeProtocolIsRs485Pylon(uint8_t protocol)
+{
+    return bridgeProtocolCanonical(protocol) == PROTOCOL_RS485_PYLON;
+}
+
+static inline uint32_t bridgeProtocolRs485Baudrate(uint8_t protocol)
+{
+    switch (protocol) {
+        case PROTOCOL_RS485_JKBMS_115200:
+        case PROTOCOL_RS485_PYLON_115200:
+            return RS485_FAST_BAUDRATE;
+        default:
+            return RS485_DEFAULT_BAUDRATE;
+    }
+}
 
 #define BMS_line LINE_RS485
 #define Inverter_line LINE_CAN

@@ -4,6 +4,7 @@
 #include "decoders/CAN_Decoder.h"
 #include "Drivers/can_driver.h"
 #include "Drivers/RS485/rs485_driver.h"
+#include "config.h"
 #include "esp_err.h"
 #include "modes/can_forward_sniffer.h"
 #include "protocols/china_tower_modbus/china_tower_modbus_bms_task.h"
@@ -22,6 +23,7 @@
 #include "runtime_settings.h"
 
 int g_routeStubGrowattBmsStartCount;
+int g_routeStubJkbmsModbusBmsStartCount;
 int g_routeStubVoltronicBmsStartCount;
 int g_routeStubChinaTowerBmsStartCount;
 int g_routeStubWowBmsStartCount;
@@ -31,6 +33,7 @@ int g_routeStubPylonBridgeEnableCount;
 void routeSelectionStubReset(void)
 {
     g_routeStubGrowattBmsStartCount = 0;
+    g_routeStubJkbmsModbusBmsStartCount = 0;
     g_routeStubVoltronicBmsStartCount = 0;
     g_routeStubChinaTowerBmsStartCount = 0;
     g_routeStubWowBmsStartCount = 0;
@@ -82,6 +85,7 @@ esp_err_t pylonBmsTaskStop(void)
 esp_err_t jkbmsModbusBmsTaskStart(QueueHandle_t outQueue)
 {
     (void)outQueue;
+    g_routeStubJkbmsModbusBmsStartCount++;
     return ESP_OK;
 }
 
@@ -203,8 +207,18 @@ gpio_num_t rs485GetDir2(void)
 
 bool pylonRs485BridgeSupportsRoute(const bridge_runtime_settings_t *settings)
 {
-    (void)settings;
-    return false;
+    if (settings == NULL) {
+        return false;
+    }
+
+    return ((settings->bms_line == LINE_RS485) &&
+            (settings->inverter_line == LINE_RS485) &&
+            bridgeProtocolIsRs485Pylon(settings->bms_protocol) &&
+            bridgeProtocolIsRs485Pylon(settings->inverter_protocol)) ||
+           ((settings->bms_line == LINE_CAN) &&
+            (settings->inverter_line == LINE_RS485) &&
+            (settings->bms_protocol == PROTOCOL_CAN_PYLON) &&
+            bridgeProtocolIsRs485Pylon(settings->inverter_protocol));
 }
 
 void pylonRs485BridgeEnable(void)

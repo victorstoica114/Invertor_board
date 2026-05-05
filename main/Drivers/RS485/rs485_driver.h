@@ -12,6 +12,7 @@ extern "C" {
 
 void rs485Init(void);
 void rs485Reinit(void);
+uint32_t rs485GetBaudRate(uart_port_t uart);
 uart_port_t rs485GetUart1(void);
 uart_port_t rs485GetUart2(void);
 gpio_num_t rs485GetDir1(void);

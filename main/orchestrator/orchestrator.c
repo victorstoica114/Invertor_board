@@ -181,8 +181,10 @@ static protocol_id_t protocolIdFromUiProtocol(uint8_t protocol)
             return PROTOCOL_ID_GROWATT;
         case PROTOCOL_CAN_PYLON:
         case PROTOCOL_RS485_PYLON:
+        case PROTOCOL_RS485_PYLON_115200:
             return PROTOCOL_ID_PYLON;
         case PROTOCOL_RS485_JKBMS:
+        case PROTOCOL_RS485_JKBMS_115200:
             return PROTOCOL_ID_JKBMS;
         case PROTOCOL_RS485_PACE:
             return PROTOCOL_ID_PACE;
@@ -201,7 +203,7 @@ static protocol_id_t protocolIdFromUiProtocol(uint8_t protocol)
 
 static bool isJkbmsRs485Protocol(uint8_t protocol)
 {
-    return (protocol == PROTOCOL_RS485_JKBMS) ||
+    return bridgeProtocolIsRs485JkbmsModbus(protocol) ||
            (protocol == PROTOCOL_RS485_JKBMS_NATIVE);
 }
 
@@ -329,7 +331,7 @@ static bool isRsJkbmsToRsPylonRoute(const bridge_runtime_settings_t *settings)
     return (settings->bms_line == LINE_RS485) &&
            (settings->inverter_line == LINE_RS485) &&
            isJkbmsRs485Protocol(settings->bms_protocol) &&
-           (settings->inverter_protocol == PROTOCOL_RS485_PYLON);
+           bridgeProtocolIsRs485Pylon(settings->inverter_protocol);
 }
 
 static bool isRsGrowattToRsPylonRoute(const bridge_runtime_settings_t *settings)
@@ -341,7 +343,7 @@ static bool isRsGrowattToRsPylonRoute(const bridge_runtime_settings_t *settings)
     return (settings->bms_line == LINE_RS485) &&
            (settings->inverter_line == LINE_RS485) &&
            (settings->bms_protocol == PROTOCOL_RS485_GROWATT) &&
-           (settings->inverter_protocol == PROTOCOL_RS485_PYLON);
+           bridgeProtocolIsRs485Pylon(settings->inverter_protocol);
 }
 
 static bool isRsPaceToRsPylonRoute(const bridge_runtime_settings_t *settings)
@@ -353,7 +355,7 @@ static bool isRsPaceToRsPylonRoute(const bridge_runtime_settings_t *settings)
     return (settings->bms_line == LINE_RS485) &&
            (settings->inverter_line == LINE_RS485) &&
            (settings->bms_protocol == PROTOCOL_RS485_PACE) &&
-           (settings->inverter_protocol == PROTOCOL_RS485_PYLON);
+           bridgeProtocolIsRs485Pylon(settings->inverter_protocol);
 }
 
 static bool isRsVoltronicToRsPylonRoute(const bridge_runtime_settings_t *settings)
@@ -365,7 +367,7 @@ static bool isRsVoltronicToRsPylonRoute(const bridge_runtime_settings_t *setting
     return (settings->bms_line == LINE_RS485) &&
            (settings->inverter_line == LINE_RS485) &&
            (settings->bms_protocol == PROTOCOL_RS485_VOLTRONIC) &&
-           (settings->inverter_protocol == PROTOCOL_RS485_PYLON);
+           bridgeProtocolIsRs485Pylon(settings->inverter_protocol);
 }
 
 static bool isRsChinaTowerToRsPylonRoute(const bridge_runtime_settings_t *settings)
@@ -377,7 +379,7 @@ static bool isRsChinaTowerToRsPylonRoute(const bridge_runtime_settings_t *settin
     return (settings->bms_line == LINE_RS485) &&
            (settings->inverter_line == LINE_RS485) &&
            (settings->bms_protocol == PROTOCOL_RS485_CHINA_TOWER) &&
-           (settings->inverter_protocol == PROTOCOL_RS485_PYLON);
+           bridgeProtocolIsRs485Pylon(settings->inverter_protocol);
 }
 
 static bool isRsWowToRsPylonRoute(const bridge_runtime_settings_t *settings)
@@ -389,7 +391,7 @@ static bool isRsWowToRsPylonRoute(const bridge_runtime_settings_t *settings)
     return (settings->bms_line == LINE_RS485) &&
            (settings->inverter_line == LINE_RS485) &&
            (settings->bms_protocol == PROTOCOL_RS485_WOW) &&
-           (settings->inverter_protocol == PROTOCOL_RS485_PYLON);
+           bridgeProtocolIsRs485Pylon(settings->inverter_protocol);
 }
 
 static void clearTransportBuffers(void)

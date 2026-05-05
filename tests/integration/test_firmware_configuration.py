@@ -105,6 +105,8 @@ def test_protocol_constants_in_config_h():
         'PROTOCOL_RS485_VOLTRONIC',
         'PROTOCOL_RS485_CHINA_TOWER',
         'PROTOCOL_RS485_WOW',
+        'PROTOCOL_RS485_JKBMS_115200',
+        'PROTOCOL_RS485_PYLON_115200',
     ]
 
     for protocol in expected_protocols:

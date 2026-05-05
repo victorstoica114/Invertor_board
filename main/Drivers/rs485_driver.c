@@ -1,8 +1,41 @@
 #include "Drivers/rs485_driver.h"
 
 #include "config.h"
+#include "runtime_settings.h"
 
 #include "esp_log.h"
+
+static uint32_t s_rs485Baud1 = RS485_DEFAULT_BAUDRATE;
+static uint32_t s_rs485Baud2 = RS485_DEFAULT_BAUDRATE;
+
+static uint32_t rs485BaudForPort(uint8_t port, const bridge_runtime_settings_t *settings)
+{
+    uint32_t baud = RS485_DEFAULT_BAUDRATE;
+    bool haveBaud = false;
+
+    if (settings == NULL) {
+        return baud;
+    }
+
+    if ((settings->bms_line == LINE_RS485) && (settings->bms_port == port)) {
+        baud = bridgeProtocolRs485Baudrate(settings->bms_protocol);
+        haveBaud = true;
+    }
+
+    if ((settings->inverter_line == LINE_RS485) && (settings->inverter_port == port)) {
+        uint32_t inverterBaud = bridgeProtocolRs485Baudrate(settings->inverter_protocol);
+        if (haveBaud && inverterBaud != baud) {
+            ESP_LOGW(EXAMPLE_TAG,
+                     "RS485_%u requested with mixed baud rates (%u and %u); using inverter side",
+                     (unsigned)port,
+                     (unsigned)baud,
+                     (unsigned)inverterBaud);
+        }
+        baud = inverterBaud;
+    }
+
+    return baud;
+}
 
 static bool rs485PortUsesHalfDuplex(uart_port_t uart)
 {
@@ -30,6 +63,17 @@ uart_port_t rs485GetUart2(void) { return RS485_2_UART; }
 
 gpio_num_t rs485GetDir1(void) { return (gpio_num_t)RS485_1_DIR; }
 gpio_num_t rs485GetDir2(void) { return (gpio_num_t)RS485_2_DIR; }
+
+uint32_t rs485GetBaudRate(uart_port_t uart)
+{
+    if (uart == RS485_1_UART) {
+        return s_rs485Baud1;
+    }
+    if (uart == RS485_2_UART) {
+        return s_rs485Baud2;
+    }
+    return RS485_DEFAULT_BAUDRATE;
+}
 
 void rs485SetDirection(gpio_num_t dirPin, bool txEnable)
 {
@@ -66,12 +110,12 @@ esp_err_t rs485WriteBytes(uart_port_t uart,
     return waitErr;
 }
 
-static void rs485SetupOne(uart_port_t uart, int txPin, int rxPin, int dirPin)
+static void rs485SetupOne(uart_port_t uart, int txPin, int rxPin, int dirPin, uint32_t baudRate)
 {
     bool useHalfDuplex = rs485PortUsesHalfDuplex(uart);
 
     uart_config_t uartConfig = {
-        .baud_rate = RS485_BAUDRATE,
+        .baud_rate = (int)baudRate,
         .data_bits = UART_DATA_8_BITS,
         .parity    = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
@@ -100,6 +144,8 @@ static void rs485SetupOne(uart_port_t uart, int txPin, int rxPin, int dirPin)
 
 void rs485Reinit(void)
 {
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+
     if (uart_is_driver_installed(RS485_1_UART)) {
         (void)uart_driver_delete(RS485_1_UART);
     }
@@ -107,12 +153,16 @@ void rs485Reinit(void)
         (void)uart_driver_delete(RS485_2_UART);
     }
 
-    rs485SetupOne(RS485_1_UART, RS485_1_TX, RS485_1_RX, RS485_1_DIR);
-    rs485SetupOne(RS485_2_UART, RS485_2_TX, RS485_2_RX, RS485_2_DIR);
+    s_rs485Baud1 = rs485BaudForPort(1u, &settings);
+    s_rs485Baud2 = rs485BaudForPort(2u, &settings);
+
+    rs485SetupOne(RS485_1_UART, RS485_1_TX, RS485_1_RX, RS485_1_DIR, s_rs485Baud1);
+    rs485SetupOne(RS485_2_UART, RS485_2_TX, RS485_2_RX, RS485_2_DIR, s_rs485Baud2);
 
     ESP_LOGI(EXAMPLE_TAG,
-             "RS485 interfaces reinitialized (%d 8N1, hd1=%s hd2=%s)",
-             RS485_BAUDRATE,
+             "RS485 interfaces reinitialized (RS485_1=%u 8N1, RS485_2=%u 8N1, hd1=%s hd2=%s)",
+             (unsigned)s_rs485Baud1,
+             (unsigned)s_rs485Baud2,
              RS485_1_USE_HALF_DUPLEX ? "ON" : "OFF",
              RS485_2_USE_HALF_DUPLEX ? "ON" : "OFF");
 }
