@@ -133,6 +133,14 @@ HOST_C_TESTS = (
         ),
     ),
     HostCTestTarget(
+        name="pylon_rs485_bridge",
+        sources=(
+            "tests/unit/test_pylon_rs485_bridge.c",
+            "tests/unit/pylon_rs485_bridge_stubs.c",
+            "main/protocols/pylon/pylon_rs485_bridge.c",
+        ),
+    ),
+    HostCTestTarget(
         name="battery_can_protocols",
         sources=(
             "tests/unit/test_battery_and_can_protocols.c",
@@ -150,6 +158,7 @@ COMMON_CFLAGS = (
     "-Wall",
     "-Wextra",
     "-D_POSIX_C_SOURCE=200809L",
+    "-DHOST_TEST",
     "-ffunction-sections",
     "-fdata-sections",
     "--coverage",

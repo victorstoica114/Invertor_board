@@ -554,6 +554,18 @@ static bool buildCanDerivedInfo63(char *out, size_t outSize)
     return out[0] != '\0';
 }
 
+#ifdef HOST_TEST
+bool pylonRs485BridgeBuildSyntheticInfo61ForTest(char *out, size_t outSize)
+{
+    return buildCanDerivedInfo61(out, outSize);
+}
+
+bool pylonRs485BridgeBuildSyntheticInfo63ForTest(char *out, size_t outSize)
+{
+    return buildCanDerivedInfo63(out, outSize);
+}
+#endif
+
 static void maybeRefreshSyntheticCacheFromUniversal(void)
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
