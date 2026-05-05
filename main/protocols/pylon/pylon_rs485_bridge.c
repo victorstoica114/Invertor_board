@@ -91,6 +91,7 @@ static const char *protocolToStrLocal(uint8_t protocol)
         case PROTOCOL_CAN_SOFAR: return "CAN_SOFAR";
         case PROTOCOL_CAN_SMA: return "CAN_SMA";
         case PROTOCOL_CAN_VICTRON: return "CAN_VICTRON";
+        case PROTOCOL_CAN_JKBMS_250K: return "JKBMS_CAN_250K";
         case PROTOCOL_RS485_PACE: return "PACE_RS485_MODBUS";
         case PROTOCOL_RS485_JKBMS_NATIVE: return "JKBMS_RS485_NATIVE";
         case PROTOCOL_RS485_VOLTRONIC: return "VOLTRONIC_MODBUS";
@@ -119,6 +120,15 @@ static bool pylonCanToRs485ModeEnabled(const bridge_runtime_settings_t *settings
            (settings->bms_line == LINE_CAN) &&
            (settings->inverter_line == LINE_RS485) &&
            (settings->bms_protocol == PROTOCOL_CAN_PYLON) &&
+           bridgeProtocolIsRs485Pylon(settings->inverter_protocol);
+}
+
+static bool pylonCanSyntheticSourceModeEnabled(const bridge_runtime_settings_t *settings)
+{
+    return (settings != NULL) &&
+           (settings->bms_line == LINE_CAN) &&
+           (settings->inverter_line == LINE_RS485) &&
+           (settings->bms_protocol == PROTOCOL_CAN_JKBMS_250K) &&
            bridgeProtocolIsRs485Pylon(settings->inverter_protocol);
 }
 
@@ -1320,7 +1330,8 @@ bool pylonRs485BridgeSupportsRoute(const bridge_runtime_settings_t *settings)
             (settings->inverter_line == LINE_RS485) &&
             bridgeProtocolIsRs485Pylon(settings->bms_protocol) &&
             bridgeProtocolIsRs485Pylon(settings->inverter_protocol)) ||
-           pylonCanToRs485ModeEnabled(settings);
+           pylonCanToRs485ModeEnabled(settings) ||
+           pylonCanSyntheticSourceModeEnabled(settings);
 }
 
 bool pylonRs485BridgeHandlesCurrentConfig(void)

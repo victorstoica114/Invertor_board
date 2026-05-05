@@ -19,6 +19,7 @@ extern int g_routeStubChinaTowerBmsStartCount;
 extern int g_routeStubWowBmsStartCount;
 extern int g_routeStubPylonInverterStartCount;
 extern int g_routeStubPylonBridgeEnableCount;
+extern int g_routeStubCanForwardStartCount;
 void routeSelectionStubReset(void);
 
 /* Test fixture setup/teardown */
@@ -202,6 +203,24 @@ void test_route_can_pylon_to_rs485_pylon_valid(void)
     TEST_ASSERT_EQUAL_UINT8(PROTOCOL_CAN_PYLON, settings.bms_protocol);
     TEST_ASSERT_EQUAL_UINT8(LINE_RS485, settings.inverter_line);
     TEST_ASSERT_EQUAL_UINT8(PROTOCOL_RS485_PYLON, settings.inverter_protocol);
+}
+
+void test_route_can_jkbms_250k_to_rs485_pylon_valid(void)
+{
+    bridge_runtime_settings_t settings = {0};
+
+    settings.mode = MODE_BRIDGE;
+    settings.bms_line = LINE_CAN;
+    settings.bms_protocol = PROTOCOL_CAN_JKBMS_250K;
+    settings.bms_port = 1;
+    settings.inverter_line = LINE_RS485;
+    settings.inverter_protocol = PROTOCOL_RS485_PYLON;
+    settings.inverter_port = 2;
+
+    TEST_ASSERT_EQUAL(ESP_OK, orchestratorStartFromRuntime(&settings));
+    TEST_ASSERT_EQUAL(1, g_routeStubPylonBridgeEnableCount);
+    TEST_ASSERT_EQUAL(1, g_routeStubCanForwardStartCount);
+    TEST_ASSERT_EQUAL(0, g_routeStubPylonInverterStartCount);
 }
 
 /**
@@ -410,12 +429,16 @@ void test_protocol_constants_defined(void)
     TEST_ASSERT_EQUAL_UINT8(15, PROTOCOL_RS485_WOW);
     TEST_ASSERT_EQUAL_UINT8(16, PROTOCOL_RS485_JKBMS_115200);
     TEST_ASSERT_EQUAL_UINT8(17, PROTOCOL_RS485_PYLON_115200);
+    TEST_ASSERT_EQUAL_UINT8(18, PROTOCOL_CAN_JKBMS_250K);
     TEST_ASSERT_EQUAL_UINT32(9600u, bridgeProtocolRs485Baudrate(PROTOCOL_RS485_JKBMS));
     TEST_ASSERT_EQUAL_UINT32(115200u, bridgeProtocolRs485Baudrate(PROTOCOL_RS485_JKBMS_115200));
     TEST_ASSERT_EQUAL_UINT32(9600u, bridgeProtocolRs485Baudrate(PROTOCOL_RS485_PYLON));
     TEST_ASSERT_EQUAL_UINT32(115200u, bridgeProtocolRs485Baudrate(PROTOCOL_RS485_PYLON_115200));
+    TEST_ASSERT_EQUAL_UINT32(250000u, bridgeProtocolCanBitrate(PROTOCOL_CAN_JKBMS_250K));
+    TEST_ASSERT_EQUAL_UINT32(500000u, bridgeProtocolCanBitrate(PROTOCOL_CAN_PYLON));
     TEST_ASSERT_TRUE(bridgeProtocolIsRs485JkbmsModbus(PROTOCOL_RS485_JKBMS_115200));
     TEST_ASSERT_TRUE(bridgeProtocolIsRs485Pylon(PROTOCOL_RS485_PYLON_115200));
+    TEST_ASSERT_TRUE(bridgeProtocolIsCanJkbms250k(PROTOCOL_CAN_JKBMS_250K));
 }
 
 /**
@@ -467,6 +490,7 @@ int main(void)
     RUN_TEST(test_route_jkbms_to_growatt_valid);
     RUN_TEST(test_route_pylon_rs485_bridge_valid);
     RUN_TEST(test_route_can_pylon_to_rs485_pylon_valid);
+    RUN_TEST(test_route_can_jkbms_250k_to_rs485_pylon_valid);
     RUN_TEST(test_route_pace_rs485_to_rs485_pylon_valid);
     RUN_TEST(test_route_growatt_rs485_to_rs485_pylon_starts_responder);
     RUN_TEST(test_route_voltronic_rs485_to_rs485_pylon_starts_responder);

@@ -10,6 +10,7 @@
 #include "esp_timer.h"
 #include "protocols/common/battery_model.h"
 #include "protocols/deye/deye_can_protocol.h"
+#include "protocols/jkbms_can/jkbms_can_protocol.h"
 #include "protocols/pylon/pylon_can_protocol.h"
 
 #define TEST_LOG_BUFFER_SIZE 2048u
@@ -59,6 +60,24 @@ static void set_cache_frame(pylon_can_frame_t *cache,
 {
     const size_t idx = (size_t)(id - PYLON_CAN_ID_MIN);
     TEST_ASSERT_TRUE(idx < count);
+    cache[idx].valid = true;
+    cache[idx].id = id;
+    cache[idx].dlc = dlc;
+    memset(cache[idx].data, 0, sizeof(cache[idx].data));
+    if (data != NULL && dlc > 0u) {
+        memcpy(cache[idx].data, data, dlc);
+    }
+}
+
+static void set_jkbms_cache_frame(jkbms_can_frame_t *cache,
+                                  size_t count,
+                                  uint32_t id,
+                                  const uint8_t *data,
+                                  uint8_t dlc)
+{
+    const int idx = jkbmsCanCacheIndex(id);
+    TEST_ASSERT_TRUE(idx >= 0);
+    TEST_ASSERT_TRUE((size_t)idx < count);
     cache[idx].valid = true;
     cache[idx].id = id;
     cache[idx].dlc = dlc;
@@ -251,6 +270,77 @@ void test_deye_can_decode_snapshot_populates_snapshot_and_model(void)
     TEST_ASSERT_TRUE(model.balanceEnabled);
 }
 
+void test_jkbms_can_250k_decode_snapshot_populates_snapshot_and_model(void)
+{
+    jkbms_can_frame_t cache[JKBMS_CAN_CACHE_COUNT] = {0};
+    uint8_t f02F4[8] = {0};
+    uint8_t f04F4[8] = {0};
+    uint8_t f05F4[8] = {0};
+    uint8_t f07F4[8] = {0};
+    const uint32_t alarmRaw = (1u << 0) | (2u << 10) | (3u << 20);
+
+    write_le16(&f02F4[0], 727u);
+    write_le16(&f02F4[2], 4000u);
+    f02F4[4] = 80u;
+    write_le16(&f02F4[6], 100u);
+
+    write_le16(&f04F4[0], 4618u);
+    f04F4[2] = 3u;
+    write_le16(&f04F4[3], 4476u);
+    f04F4[5] = 12u;
+
+    f05F4[0] = 79u;
+    f05F4[1] = 1u;
+    f05F4[2] = 77u;
+    f05F4[3] = 2u;
+    f05F4[4] = 78u;
+
+    f07F4[0] = (uint8_t)(alarmRaw & 0xFFu);
+    f07F4[1] = (uint8_t)((alarmRaw >> 8) & 0xFFu);
+    f07F4[2] = (uint8_t)((alarmRaw >> 16) & 0xFFu);
+    f07F4[3] = (uint8_t)((alarmRaw >> 24) & 0xFFu);
+
+    set_jkbms_cache_frame(cache, JKBMS_CAN_CACHE_COUNT, JKBMS_CAN_ID_BATT_ST, f02F4, sizeof(f02F4));
+    set_jkbms_cache_frame(cache, JKBMS_CAN_CACHE_COUNT, JKBMS_CAN_ID_CELL_VOLT, f04F4, sizeof(f04F4));
+    set_jkbms_cache_frame(cache, JKBMS_CAN_CACHE_COUNT, JKBMS_CAN_ID_CELL_TEMP, f05F4, sizeof(f05F4));
+    set_jkbms_cache_frame(cache, JKBMS_CAN_CACHE_COUNT, JKBMS_CAN_ID_ALM_INFO, f07F4, sizeof(f07F4));
+
+    jkbmsCanDecodeSnapshot("CAN1", cache, JKBMS_CAN_CACHE_COUNT);
+
+    TEST_ASSERT_TRUE(g_snapshotSet);
+    TEST_ASSERT_TRUE(g_logSet);
+    TEST_ASSERT_TRUE(g_lastSnapshot.valid);
+    TEST_ASSERT_EQUAL_STRING("CAN1", g_lastSnapshot.source);
+    TEST_ASSERT_EQUAL_STRING("JKBMS_CAN_250K", g_lastSnapshot.protocol);
+    TEST_ASSERT_EQUAL_UINT8(80u, g_lastSnapshot.socPct);
+    TEST_ASSERT_EQUAL_UINT8(100u, g_lastSnapshot.sohPct);
+    TEST_ASSERT_EQUAL_UINT8(3u, g_lastSnapshot.cellMaxIdx);
+    TEST_ASSERT_EQUAL_UINT8(12u, g_lastSnapshot.cellMinIdx);
+    TEST_ASSERT_EQUAL_UINT32(alarmRaw, g_lastSnapshot.alarmRaw);
+    assert_float_within(0.01f, 72.7f, g_lastSnapshot.packVoltageV);
+    assert_float_within(0.01f, 0.0f, g_lastSnapshot.currentA);
+    assert_float_within(0.001f, 4.618f, g_lastSnapshot.cellMaxV);
+    assert_float_within(0.001f, 4.476f, g_lastSnapshot.cellMinV);
+    assert_float_within(0.001f, 0.142f, g_lastSnapshot.deltaV);
+    assert_float_within(0.01f, 28.0f, g_lastSnapshot.tempMosC);
+    assert_float_within(0.01f, 29.0f, g_lastSnapshot.tempT1C);
+    assert_float_within(0.01f, 27.0f, g_lastSnapshot.tempT2C);
+    TEST_ASSERT_TRUE(strstr(g_lastSnapshot.protections, "Cell overvoltage") != NULL);
+    TEST_ASSERT_TRUE(strstr(g_lastSnapshot.alarms, "Discharge overcurrent") != NULL);
+    TEST_ASSERT_TRUE(strstr(g_lastSnapshot.warnings, "SOC low") != NULL);
+    TEST_ASSERT_TRUE(strstr(g_lastLog, "JK BMS CAN 250K") != NULL);
+
+    battery_model_t model = {0};
+    batteryModelGetReal(&model);
+    TEST_ASSERT_TRUE(model.valid);
+    TEST_ASSERT_EQUAL_UINT8(80u, model.socPct);
+    TEST_ASSERT_EQUAL_UINT8(100u, model.sohPct);
+    TEST_ASSERT_EQUAL_UINT32(alarmRaw, model.alarmsMask);
+    assert_float_within(0.01f, 72.7f, model.packVoltageV);
+    assert_float_within(0.001f, 4.618f, model.cellMaxV);
+    assert_float_within(0.001f, 4.476f, model.cellMinV);
+}
+
 void test_battery_model_debug_override_controls_output(void)
 {
     battery_model_t model = {0};
@@ -297,6 +387,7 @@ int main(void)
     RUN_TEST(test_pylon_can_any_valid_handles_empty_cache);
     RUN_TEST(test_pylon_can_decode_snapshot_populates_snapshot_and_model);
     RUN_TEST(test_deye_can_decode_snapshot_populates_snapshot_and_model);
+    RUN_TEST(test_jkbms_can_250k_decode_snapshot_populates_snapshot_and_model);
     RUN_TEST(test_battery_model_debug_override_controls_output);
     RUN_TEST(test_battery_model_stale_data_is_cleared);
 

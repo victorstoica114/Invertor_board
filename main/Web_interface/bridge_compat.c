@@ -72,6 +72,8 @@ static const char *protocolToStr(uint8_t protocol)
             return "CAN_SMA";
         case PROTOCOL_CAN_VICTRON:
             return "CAN_VICTRON";
+        case PROTOCOL_CAN_JKBMS_250K:
+            return "JKBMS_CAN_250K";
         case PROTOCOL_RS485_JKBMS:
             return "JKBMS_MODBUS";
         case PROTOCOL_RS485_JKBMS_115200:
@@ -1071,7 +1073,8 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
           bridgeProtocolIsRs485Pylon(settings.bms_protocol) &&
           bridgeProtocolIsRs485Pylon(settings.inverter_protocol)) ||
          ((settings.bms_line == LINE_CAN) &&
-          (settings.bms_protocol == PROTOCOL_CAN_PYLON) &&
+          ((settings.bms_protocol == PROTOCOL_CAN_PYLON) ||
+           (settings.bms_protocol == PROTOCOL_CAN_JKBMS_250K)) &&
           bridgeProtocolIsRs485Pylon(settings.inverter_protocol)));
 
     if (pylonRs485Route) {

@@ -107,6 +107,7 @@ def test_protocol_constants_in_config_h():
         'PROTOCOL_RS485_WOW',
         'PROTOCOL_RS485_JKBMS_115200',
         'PROTOCOL_RS485_PYLON_115200',
+        'PROTOCOL_CAN_JKBMS_250K',
     ]
 
     for protocol in expected_protocols:
@@ -178,6 +179,7 @@ def test_protocol_directories_exist():
         'china_tower_modbus',
         'wow_modbus',
         'deye',
+        'jkbms_can',
     ]
 
     for protocol_dir in expected_protocol_dirs:

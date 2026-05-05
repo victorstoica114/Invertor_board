@@ -44,6 +44,10 @@
 #define RS485_BAUDRATE         RS485_DEFAULT_BAUDRATE
 #define RS485_BUF_SIZE         512
 
+/* --- CAN settings --- */
+#define CAN_DEFAULT_BITRATE    500000u
+#define CAN_JKBMS_250K_BITRATE 250000u
+
 /* --- RS485 line-control compatibility (used by Pylon RS485 bridge) --- */
 #define RS485_USE_HALF_DUPLEX     1
 #define RS485_1_USE_HALF_DUPLEX   1
@@ -120,7 +124,8 @@
 #define PROTOCOL_RS485_WOW 15
 #define PROTOCOL_RS485_JKBMS_115200 16
 #define PROTOCOL_RS485_PYLON_115200 17
-#define PROTOCOL_ID_MAX PROTOCOL_RS485_PYLON_115200
+#define PROTOCOL_CAN_JKBMS_250K 18
+#define PROTOCOL_ID_MAX PROTOCOL_CAN_JKBMS_250K
 
 static inline uint8_t bridgeProtocolCanonical(uint8_t protocol)
 {
@@ -153,6 +158,16 @@ static inline uint32_t bridgeProtocolRs485Baudrate(uint8_t protocol)
         default:
             return RS485_DEFAULT_BAUDRATE;
     }
+}
+
+static inline bool bridgeProtocolIsCanJkbms250k(uint8_t protocol)
+{
+    return protocol == PROTOCOL_CAN_JKBMS_250K;
+}
+
+static inline uint32_t bridgeProtocolCanBitrate(uint8_t protocol)
+{
+    return bridgeProtocolIsCanJkbms250k(protocol) ? CAN_JKBMS_250K_BITRATE : CAN_DEFAULT_BITRATE;
 }
 
 #define BMS_line LINE_RS485

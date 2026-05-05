@@ -91,6 +91,7 @@ static esp_err_t applyBridgeRuntimeSettings(void)
 
     (void)orchestratorStop();
     rs485Reinit();
+    canReinit();
     esp_err_t err = orchestratorStartFromRuntime(&settings);
     if (err != ESP_OK) {
         ESP_LOGW(EXAMPLE_TAG, "Bridge runtime apply failed (err=0x%x)", (unsigned)err);

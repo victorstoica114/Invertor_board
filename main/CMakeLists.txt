@@ -16,6 +16,7 @@ idf_component_register(
         "protocols/pylon/pylon_rs485_bridge.c"
         "protocols/pylon/pylon_can_protocol.c"
         "protocols/deye/deye_can_protocol.c"
+        "protocols/jkbms_can/jkbms_can_protocol.c"
         "protocols/growatt/growatt_registers_map.c"
         "protocols/growatt/growatt_bms_task.c"
         "protocols/growatt/growatt_inverter_task.c"

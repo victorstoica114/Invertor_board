@@ -29,6 +29,7 @@ int g_routeStubChinaTowerBmsStartCount;
 int g_routeStubWowBmsStartCount;
 int g_routeStubPylonInverterStartCount;
 int g_routeStubPylonBridgeEnableCount;
+int g_routeStubCanForwardStartCount;
 
 void routeSelectionStubReset(void)
 {
@@ -39,6 +40,7 @@ void routeSelectionStubReset(void)
     g_routeStubWowBmsStartCount = 0;
     g_routeStubPylonInverterStartCount = 0;
     g_routeStubPylonBridgeEnableCount = 0;
+    g_routeStubCanForwardStartCount = 0;
 }
 
 bridge_runtime_settings_t runtimeSettingsGet(void)
@@ -217,7 +219,8 @@ bool pylonRs485BridgeSupportsRoute(const bridge_runtime_settings_t *settings)
             bridgeProtocolIsRs485Pylon(settings->inverter_protocol)) ||
            ((settings->bms_line == LINE_CAN) &&
             (settings->inverter_line == LINE_RS485) &&
-            (settings->bms_protocol == PROTOCOL_CAN_PYLON) &&
+            ((settings->bms_protocol == PROTOCOL_CAN_PYLON) ||
+             (settings->bms_protocol == PROTOCOL_CAN_JKBMS_250K)) &&
             bridgeProtocolIsRs485Pylon(settings->inverter_protocol));
 }
 
@@ -265,6 +268,7 @@ void canDecoderResetCaches(void)
 void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
 {
     (void)settings;
+    g_routeStubCanForwardStartCount++;
 }
 
 void canForwardSnifferStop(void)

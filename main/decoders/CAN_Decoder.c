@@ -5,6 +5,7 @@
 #include "protocols/common/battery_model.h"
 #include "protocols/growatt/growatt_registers_map.h"
 #include "protocols/deye/deye_can_protocol.h"
+#include "protocols/jkbms_can/jkbms_can_protocol.h"
 #include "protocols/pylon/pylon_can_protocol.h"
 #include "runtime_settings.h"
 
@@ -33,6 +34,8 @@ static canBmsCachedFrame_t g_can1BmsCache[CAN_BMS_CACHE_COUNT];
 static canBmsCachedFrame_t g_can2BmsCache[CAN_BMS_CACHE_COUNT];
 static pylon_can_frame_t g_can1PylonCache[PYLON_CAN_CACHE_COUNT];
 static pylon_can_frame_t g_can2PylonCache[PYLON_CAN_CACHE_COUNT];
+static jkbms_can_frame_t g_can1JkbmsCache[JKBMS_CAN_CACHE_COUNT];
+static jkbms_can_frame_t g_can2JkbmsCache[JKBMS_CAN_CACHE_COUNT];
 
 static inline uint16_t can_le16(const uint8_t *p);
 static inline int16_t can_le16s(const uint8_t *p);
@@ -61,6 +64,20 @@ static pylon_can_frame_t *canPylonCacheForIf(const char *ifname)
     }
     if (strcmp(ifname, "CAN2") == 0) {
         return g_can2PylonCache;
+    }
+    return NULL;
+}
+
+static jkbms_can_frame_t *canJkbmsCacheForIf(const char *ifname)
+{
+    if (ifname == NULL) {
+        return g_can1JkbmsCache;
+    }
+    if (strcmp(ifname, "CAN1") == 0) {
+        return g_can1JkbmsCache;
+    }
+    if (strcmp(ifname, "CAN2") == 0) {
+        return g_can2JkbmsCache;
     }
     return NULL;
 }
@@ -233,6 +250,52 @@ static void canPylonCacheUpdate(const char *ifname, const twai_message_t *m)
     portENTER_CRITICAL(&g_canBmsCacheMux);
     cache[idx] = f;
     portEXIT_CRITICAL(&g_canBmsCacheMux);
+}
+
+static void canJkbmsCacheUpdate(const char *ifname, const twai_message_t *m)
+{
+    if (ifname == NULL || m == NULL) return;
+
+    jkbms_can_frame_t *cache = canJkbmsCacheForIf(ifname);
+    if (cache == NULL) return;
+
+    int idx = jkbmsCanCacheIndex((uint32_t)m->identifier);
+    if (idx < 0 || (size_t)idx >= JKBMS_CAN_CACHE_COUNT) return;
+
+    jkbms_can_frame_t f = {0};
+    f.valid = true;
+    f.id = (uint32_t)m->identifier;
+    f.updatedMs = (uint32_t)(esp_timer_get_time() / 1000LL);
+    f.dlc = (uint8_t)m->data_length_code;
+    if (f.dlc > 8u) f.dlc = 8u;
+    memcpy(f.data, m->data, f.dlc);
+
+    portENTER_CRITICAL(&g_canBmsCacheMux);
+    cache[idx] = f;
+    portEXIT_CRITICAL(&g_canBmsCacheMux);
+}
+
+static void canUpdateUniversalModelFromJkbmsCache(const char *ifname)
+{
+    const char *name = (ifname != NULL) ? ifname : "CAN1";
+    int protocol = canProtocolForIf(name);
+    jkbms_can_frame_t local[JKBMS_CAN_CACHE_COUNT];
+    jkbms_can_frame_t *src = NULL;
+
+    if (protocol != PROTOCOL_CAN_JKBMS_250K) {
+        return;
+    }
+
+    src = canJkbmsCacheForIf(name);
+    if (src == NULL) {
+        return;
+    }
+
+    portENTER_CRITICAL(&g_canBmsCacheMux);
+    memcpy(local, src, sizeof(local));
+    portEXIT_CRITICAL(&g_canBmsCacheMux);
+
+    jkbmsCanUpdateBatteryModel(name, local, JKBMS_CAN_CACHE_COUNT);
 }
 
 static inline uint16_t can_be16(const uint8_t *p)
@@ -718,11 +781,14 @@ void canDecoderPrintCachedSnapshot(const char *ifname)
     const char *name = (ifname != NULL) ? ifname : "CAN1";
     canBmsCachedFrame_t local[CAN_BMS_CACHE_COUNT];
     pylon_can_frame_t pylonLocal[PYLON_CAN_CACHE_COUNT];
+    jkbms_can_frame_t jkbmsLocal[JKBMS_CAN_CACHE_COUNT];
     bool any = false;
     bool anyPylon = false;
+    bool anyJkbms = false;
 
     canBmsCachedFrame_t *src = canBmsCacheForIf(name);
     pylon_can_frame_t *pylonSrc = canPylonCacheForIf(name);
+    jkbms_can_frame_t *jkbmsSrc = canJkbmsCacheForIf(name);
     if (src == NULL) {
         ESP_LOGI(EXAMPLE_TAG, "CAN-%s SNAPSHOT: unsupported BMS cache interface", name);
         return;
@@ -735,6 +801,11 @@ void canDecoderPrintCachedSnapshot(const char *ifname)
     } else {
         memset(pylonLocal, 0, sizeof(pylonLocal));
     }
+    if (jkbmsSrc != NULL) {
+        memcpy(jkbmsLocal, jkbmsSrc, sizeof(jkbmsLocal));
+    } else {
+        memset(jkbmsLocal, 0, sizeof(jkbmsLocal));
+    }
     portEXIT_CRITICAL(&g_canBmsCacheMux);
 
     anyPylon = pylonCanAnyValid(pylonLocal, PYLON_CAN_CACHE_COUNT);
@@ -746,6 +817,12 @@ void canDecoderPrintCachedSnapshot(const char *ifname)
         } else {
             pylonCanDecodeSnapshot(name, pylonLocal, PYLON_CAN_CACHE_COUNT);
         }
+        return;
+    }
+
+    anyJkbms = jkbmsCanAnyValid(jkbmsLocal, JKBMS_CAN_CACHE_COUNT);
+    if (anyJkbms && canProtocolForIf(name) == PROTOCOL_CAN_JKBMS_250K) {
+        jkbmsCanDecodeSnapshot(name, jkbmsLocal, JKBMS_CAN_CACHE_COUNT);
         return;
     }
 
@@ -786,8 +863,10 @@ bool canDecoderTryGetSocPct(const char *ifname, uint8_t *socOut)
     const char *name = (ifname != NULL) ? ifname : "CAN1";
     canBmsCachedFrame_t local[CAN_BMS_CACHE_COUNT];
     pylon_can_frame_t pylonLocal[PYLON_CAN_CACHE_COUNT];
+    jkbms_can_frame_t jkbmsLocal[JKBMS_CAN_CACHE_COUNT];
     canBmsCachedFrame_t *src = canBmsCacheForIf(name);
     pylon_can_frame_t *pylonSrc = canPylonCacheForIf(name);
+    jkbms_can_frame_t *jkbmsSrc = canJkbmsCacheForIf(name);
     if (src == NULL) {
         return false;
     }
@@ -799,7 +878,17 @@ bool canDecoderTryGetSocPct(const char *ifname, uint8_t *socOut)
     } else {
         memset(pylonLocal, 0, sizeof(pylonLocal));
     }
+    if (jkbmsSrc != NULL) {
+        memcpy(jkbmsLocal, jkbmsSrc, sizeof(jkbmsLocal));
+    } else {
+        memset(jkbmsLocal, 0, sizeof(jkbmsLocal));
+    }
     portEXIT_CRITICAL(&g_canBmsCacheMux);
+
+    if (canProtocolForIf(name) == PROTOCOL_CAN_JKBMS_250K &&
+        jkbmsCanTryGetSocPct(jkbmsLocal, JKBMS_CAN_CACHE_COUNT, socOut)) {
+        return true;
+    }
 
     {
         int idx355 = (int)(0x355u - PYLON_CAN_ID_MIN);
@@ -841,8 +930,10 @@ bool canDecoderHasFreshData(const char *ifname, uint32_t maxAgeMs)
     const char *name = (ifname != NULL) ? ifname : "CAN1";
     canBmsCachedFrame_t local[CAN_BMS_CACHE_COUNT];
     pylon_can_frame_t pylonLocal[PYLON_CAN_CACHE_COUNT];
+    jkbms_can_frame_t jkbmsLocal[JKBMS_CAN_CACHE_COUNT];
     canBmsCachedFrame_t *src = canBmsCacheForIf(name);
     pylon_can_frame_t *pylonSrc = canPylonCacheForIf(name);
+    jkbms_can_frame_t *jkbmsSrc = canJkbmsCacheForIf(name);
     uint32_t nowMs = (uint32_t)(esp_timer_get_time() / 1000LL);
 
     if (src == NULL) {
@@ -856,7 +947,18 @@ bool canDecoderHasFreshData(const char *ifname, uint32_t maxAgeMs)
     } else {
         memset(pylonLocal, 0, sizeof(pylonLocal));
     }
+    if (jkbmsSrc != NULL) {
+        memcpy(jkbmsLocal, jkbmsSrc, sizeof(jkbmsLocal));
+    } else {
+        memset(jkbmsLocal, 0, sizeof(jkbmsLocal));
+    }
     portEXIT_CRITICAL(&g_canBmsCacheMux);
+
+    for (size_t i = 0; i < JKBMS_CAN_CACHE_COUNT; i++) {
+        if (jkbmsLocal[i].valid && (nowMs - jkbmsLocal[i].updatedMs) <= maxAgeMs) {
+            return true;
+        }
+    }
 
     for (size_t i = 0; i < PYLON_CAN_CACHE_COUNT; i++) {
         if (pylonLocal[i].valid && (nowMs - pylonLocal[i].updatedMs) <= maxAgeMs) {
@@ -957,7 +1059,9 @@ void canDecoderOnFrame(const char *ifname, const twai_message_t *m)
 
     canBmsCacheUpdate(ifname, m);
     canPylonCacheUpdate(ifname, m);
+    canJkbmsCacheUpdate(ifname, m);
     canUpdateUniversalModelFromPylonCache(ifname);
+    canUpdateUniversalModelFromJkbmsCache(ifname);
 
     if (CAN_DECODER_SHOW_RAW_FRAMES) {
         logRawCanMsg(ifname, m);
@@ -975,6 +1079,8 @@ void canDecoderResetCaches(void)
     memset(g_can2BmsCache, 0, sizeof(g_can2BmsCache));
     memset(g_can1PylonCache, 0, sizeof(g_can1PylonCache));
     memset(g_can2PylonCache, 0, sizeof(g_can2PylonCache));
+    memset(g_can1JkbmsCache, 0, sizeof(g_can1JkbmsCache));
+    memset(g_can2JkbmsCache, 0, sizeof(g_can2JkbmsCache));
     portEXIT_CRITICAL(&g_canBmsCacheMux);
 }
 

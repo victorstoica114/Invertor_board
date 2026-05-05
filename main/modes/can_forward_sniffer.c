@@ -81,6 +81,7 @@ static const char *canProtocolLabel(int protocol)
         case PROTOCOL_CAN_SOFAR: return "SOFAR";
         case PROTOCOL_CAN_SMA: return "SMA";
         case PROTOCOL_CAN_VICTRON: return "VICTRON";
+        case PROTOCOL_CAN_JKBMS_250K: return "JKBMS_CAN_250K";
         case PROTOCOL_CAN_GROWATT: return "GROWATT";
         default: return "CAN";
     }
@@ -201,6 +202,9 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
     const bool bmsCanVictron = (settings != NULL) &&
                                (settings->bms_line == LINE_CAN) &&
                                (settings->bms_protocol == PROTOCOL_CAN_VICTRON);
+    const bool bmsCanJkbms250k = (settings != NULL) &&
+                                 (settings->bms_line == LINE_CAN) &&
+                                 (settings->bms_protocol == PROTOCOL_CAN_JKBMS_250K);
     const bool invCanDeye = (settings != NULL) &&
                             (settings->inverter_line == LINE_CAN) &&
                             (settings->inverter_protocol == PROTOCOL_CAN_DEYE);
@@ -245,7 +249,7 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
         bmsToInv.applyExcludeList = CAN_EXCLUDE_LIST_ENABLE;
         bmsToInv.forwardEnabled = canForwardEnabled;
         bmsToInv.rawLogEnabled = CAN_DECODER_SHOW_RAW_FRAMES &&
-                                 (bmsCanPylon || bmsCanDeye || bmsCanGoodwe || bmsCanSofar || bmsCanSma || bmsCanVictron);
+                                 (bmsCanPylon || bmsCanDeye || bmsCanGoodwe || bmsCanSofar || bmsCanSma || bmsCanVictron || bmsCanJkbms250k);
         bmsToInv.rawLogLabel = canProtocolLabel(settings->bms_protocol);
 
         invToBms.rxName = canNameByPort(settings->inverter_port);
@@ -272,12 +276,7 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
         if ((settings->mode == MODE_BRIDGE) && sameCanProtocol) {
             ESP_LOGI(EXAMPLE_TAG,
                      "CAN bridge mode uses direct pass-through because both sides are %s",
-                     (settings->bms_protocol == PROTOCOL_CAN_PYLON) ? "CAN_PYLON" :
-                     ((settings->bms_protocol == PROTOCOL_CAN_DEYE) ? "CAN_DEYE" :
-                      ((settings->bms_protocol == PROTOCOL_CAN_GOODWE) ? "CAN_GOODWE" :
-                       ((settings->bms_protocol == PROTOCOL_CAN_SOFAR) ? "CAN_SOFAR" :
-                        ((settings->bms_protocol == PROTOCOL_CAN_SMA) ? "CAN_SMA" :
-                         ((settings->bms_protocol == PROTOCOL_CAN_VICTRON) ? "CAN_VICTRON" : "CAN_GROWATT"))))));
+                     canProtocolLabel(settings->bms_protocol));
         }
         return;
     }
@@ -290,7 +289,7 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
         bmsSniff.applyExcludeList = false;
         bmsSniff.forwardEnabled = false;
         bmsSniff.rawLogEnabled = CAN_DECODER_SHOW_RAW_FRAMES &&
-                                 (bmsCanPylon || bmsCanDeye || bmsCanGoodwe || bmsCanSofar || bmsCanSma || bmsCanVictron);
+                                 (bmsCanPylon || bmsCanDeye || bmsCanGoodwe || bmsCanSofar || bmsCanSma || bmsCanVictron || bmsCanJkbms250k);
         bmsSniff.rawLogLabel = canProtocolLabel(settings->bms_protocol);
         if (createCanTask(canBridgeTask, "can_bms_sniff", 4096, &bmsSniff, 10, &s_canTaskA)) {
             ESP_LOGI(EXAMPLE_TAG, "CAN sniffer enabled on BMS side (%s[P%d])", bmsSniff.rxName, settings->bms_port);
@@ -317,6 +316,10 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
                      settings->bms_port);
         } else if (bmsCanVictron) {
             ESP_LOGI(EXAMPLE_TAG, "CAN Victron diagnostic logging enabled on BMS side (%s[P%d])",
+                     bmsSniff.rxName,
+                     settings->bms_port);
+        } else if (bmsCanJkbms250k) {
+            ESP_LOGI(EXAMPLE_TAG, "JK BMS CAN 250K diagnostic logging enabled on BMS side (%s[P%d])",
                      bmsSniff.rxName,
                      settings->bms_port);
         }

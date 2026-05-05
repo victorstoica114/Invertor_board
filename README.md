@@ -6,6 +6,8 @@ The project is used as a practical protocol bridge between BMS and inverter, wit
 
 See also: [CHANGELOG.md](CHANGELOG.md)
 
+CAN protocol implementation backlog: [docs/can_protocols.md](docs/can_protocols.md)
+
 ## Target Hardware
 
 - MCU family: Espressif ESP32
@@ -47,7 +49,8 @@ Implemented and actively used:
 - `RS485_WOW -> RS485_PYLON` translator/responder, intended for JK UART profile `009 - WOW_RS485_Modbus_V1.3`
 - `RS485_PYLON <-> RS485_PYLON` bridge/responder, including the `RS485_PYLON_115200` variant
 - `CAN_PYLON -> RS485_PYLON` synthetic responder/bridge, including the `RS485_PYLON_115200` variant
-- CAN snapshot decoders for Growatt-like, Pylon, and Deye frame sets
+- `JKBMS_CAN_250K -> RS485_PYLON` synthetic responder/bridge for JK app profile `000 - JK BMS CAN Protocol (250K) V2.0`
+- CAN snapshot decoders for Growatt-like, Pylon, Deye, and JK BMS CAN frame sets
 - web UI + API for runtime config and telemetry
 
 Partially implemented / scaffold:
@@ -68,7 +71,7 @@ Current bridge-mode route matrix:
 | RS485_VOLTRONIC -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=VOLTRONIC_MODBUS`, `inv_protocol=RS485_PYLON` | Active; covers JK UART profile `007` |
 | RS485_CHINA_TOWER -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=CHINA_TOWER_MODBUS`, `inv_protocol=RS485_PYLON` | Active; covers JK UART profile `008` |
 | RS485_WOW -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=WOW_MODBUS`, `inv_protocol=RS485_PYLON` | Active initial implementation; covers JK UART profile `009` with PACE-compatible map |
-| Pylon RS485 bridge | `RS485_PYLON<->RS485_PYLON` or `CAN_PYLON->RS485_PYLON`, with `RS485_PYLON_115200` accepted on RS485 sides | Active |
+| Pylon RS485 bridge | `RS485_PYLON<->RS485_PYLON`, `CAN_PYLON->RS485_PYLON`, or `JKBMS_CAN_250K->RS485_PYLON`, with `RS485_PYLON_115200` accepted on RS485 sides | Active |
 | Generic orchestrator route | any other valid combination | Active, depends on protocol task maturity |
 
 ## Runtime Modes
@@ -158,12 +161,14 @@ Defined in `main/config.h`:
 - `PROTOCOL_RS485_WOW = 15`
 - `PROTOCOL_RS485_JKBMS_115200 = 16`
 - `PROTOCOL_RS485_PYLON_115200 = 17`
+- `PROTOCOL_CAN_JKBMS_250K = 18`
 
-Baud-rate detail:
+Baud-rate / bitrate detail:
 
 - `PROTOCOL_RS485_JKBMS` and `PROTOCOL_RS485_PYLON` use `9600`
 - `PROTOCOL_RS485_JKBMS_115200` and `PROTOCOL_RS485_PYLON_115200` use `115200`
 - the `115200` variants reuse the same protocol decoders/responders; only the selected RS485 port baud changes
+- `PROTOCOL_CAN_JKBMS_250K` reinitializes the selected CAN port at `250 kbit/s`; other CAN profiles currently default to `500 kbit/s`
 
 ## Folder Structure (AI-Oriented)
 

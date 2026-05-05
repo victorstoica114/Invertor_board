@@ -37,6 +37,7 @@ HOST_C_TESTS = (
             "main/decoders/CAN_Decoder.c",
             "main/protocols/pylon/pylon_can_protocol.c",
             "main/protocols/deye/deye_can_protocol.c",
+            "main/protocols/jkbms_can/jkbms_can_protocol.c",
         ),
     ),
     HostCTestTarget(
@@ -147,6 +148,7 @@ HOST_C_TESTS = (
             "main/protocols/common/battery_model.c",
             "main/protocols/pylon/pylon_can_protocol.c",
             "main/protocols/deye/deye_can_protocol.c",
+            "main/protocols/jkbms_can/jkbms_can_protocol.c",
         ),
     ),
 )
