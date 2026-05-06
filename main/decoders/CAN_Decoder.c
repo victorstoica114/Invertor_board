@@ -37,9 +37,13 @@ static pylon_can_frame_t g_can1PylonCache[PYLON_CAN_CACHE_COUNT];
 static pylon_can_frame_t g_can2PylonCache[PYLON_CAN_CACHE_COUNT];
 static jkbms_can_frame_t g_can1JkbmsCache[JKBMS_CAN_CACHE_COUNT];
 static jkbms_can_frame_t g_can2JkbmsCache[JKBMS_CAN_CACHE_COUNT];
+static char g_canGrowattDecodedLog[2048];
 
+static inline uint16_t can_be16(const uint8_t *p);
+static inline int16_t can_be16s(const uint8_t *p);
 static inline uint16_t can_le16(const uint8_t *p);
 static inline int16_t can_le16s(const uint8_t *p);
+static void canUpdateUniversalModelFromGrowattCache(const char *ifname);
 
 static canBmsCachedFrame_t *canBmsCacheForIf(const char *ifname)
 {
@@ -321,6 +325,248 @@ static void canUpdateUniversalModelFromJkbmsCache(const char *ifname)
     portEXIT_CRITICAL(&g_canBmsCacheMux);
 
     jkbmsCanUpdateBatteryModel(name, local, JKBMS_CAN_CACHE_COUNT);
+}
+
+static const canBmsCachedFrame_t *canGrowattFrameById(const canBmsCachedFrame_t *cache, uint32_t id)
+{
+    int idx = canBmsCacheIndex(id);
+    if (cache == NULL || idx < 0 || (size_t)idx >= CAN_BMS_CACHE_COUNT) {
+        return NULL;
+    }
+    return cache[idx].valid ? &cache[idx] : NULL;
+}
+
+static bool canGrowattValidPackVoltageRaw(uint16_t raw, float *voltageOut)
+{
+    if (raw >= 3000u && raw <= 9000u) {
+        if (voltageOut != NULL) {
+            *voltageOut = (float)raw / 100.0f;
+        }
+        return true;
+    }
+
+    if (raw >= 300u && raw <= 900u) {
+        if (voltageOut != NULL) {
+            *voltageOut = (float)raw / 10.0f;
+        }
+        return true;
+    }
+
+    return false;
+}
+
+static bool canGrowattDecodePackVoltage(const uint8_t *p, bool *littleEndianOut, float *voltageOut)
+{
+    float beVoltage = 0.0f;
+    float leVoltage = 0.0f;
+    bool beOk = false;
+    bool leOk = false;
+
+    if (p == NULL) {
+        return false;
+    }
+
+    beOk = canGrowattValidPackVoltageRaw(can_be16(p), &beVoltage);
+    leOk = canGrowattValidPackVoltageRaw(can_le16(p), &leVoltage);
+
+    if (beOk && (!leOk || beVoltage >= leVoltage)) {
+        if (littleEndianOut != NULL) {
+            *littleEndianOut = false;
+        }
+        if (voltageOut != NULL) {
+            *voltageOut = beVoltage;
+        }
+        return true;
+    }
+
+    if (leOk) {
+        if (littleEndianOut != NULL) {
+            *littleEndianOut = true;
+        }
+        if (voltageOut != NULL) {
+            *voltageOut = leVoltage;
+        }
+        return true;
+    }
+
+    return false;
+}
+
+static uint16_t canGrowattU16(const uint8_t *p, bool littleEndian)
+{
+    return littleEndian ? can_le16(p) : can_be16(p);
+}
+
+static int16_t canGrowattI16(const uint8_t *p, bool littleEndian)
+{
+    return littleEndian ? can_le16s(p) : can_be16s(p);
+}
+
+static bool canGrowattCellCandidateValid(uint16_t maxMv, uint16_t minMv)
+{
+    return minMv >= 1500u &&
+           minMv <= 5000u &&
+           maxMv >= 1500u &&
+           maxMv <= 5000u &&
+           maxMv >= minMv;
+}
+
+static uint32_t canGrowattCellCandidateScore(uint16_t maxMv,
+                                             uint16_t minMv,
+                                             float packVoltageV)
+{
+    uint32_t score = (uint32_t)(maxMv - minMv);
+
+    if (packVoltageV > 10.0f) {
+        uint16_t avgMv = (uint16_t)((packVoltageV * 1000.0f / 16.0f) + 0.5f);
+        uint16_t midMv = (uint16_t)(((uint32_t)maxMv + (uint32_t)minMv) / 2u);
+        uint16_t diff = (midMv > avgMv) ? (uint16_t)(midMv - avgMv) : (uint16_t)(avgMv - midMv);
+        score += (uint32_t)diff * 4u;
+    }
+
+    return score;
+}
+
+static bool canGrowattTryCellCandidate(uint16_t maxMv,
+                                       uint16_t minMv,
+                                       uint8_t maxIdx,
+                                       uint8_t minIdx,
+                                       float packVoltageV,
+                                       uint32_t *scoreInOut,
+                                       uint16_t *maxOut,
+                                       uint16_t *minOut,
+                                       uint8_t *maxIdxOut,
+                                       uint8_t *minIdxOut)
+{
+    uint32_t score = 0u;
+
+    if (!canGrowattCellCandidateValid(maxMv, minMv) || scoreInOut == NULL) {
+        return false;
+    }
+
+    score = canGrowattCellCandidateScore(maxMv, minMv, packVoltageV);
+    if (score >= *scoreInOut) {
+        return false;
+    }
+
+    *scoreInOut = score;
+    if (maxOut != NULL) {
+        *maxOut = maxMv;
+    }
+    if (minOut != NULL) {
+        *minOut = minMv;
+    }
+    if (maxIdxOut != NULL) {
+        *maxIdxOut = (maxIdx >= 1u && maxIdx <= 32u) ? maxIdx : 0u;
+    }
+    if (minIdxOut != NULL) {
+        *minIdxOut = (minIdx >= 1u && minIdx <= 32u) ? minIdx : 0u;
+    }
+    return true;
+}
+
+static bool canGrowattDecodeCellExtremes(const uint8_t *d,
+                                         float packVoltageV,
+                                         uint16_t *maxMvOut,
+                                         uint16_t *minMvOut,
+                                         uint8_t *maxIdxOut,
+                                         uint8_t *minIdxOut)
+{
+    uint32_t bestScore = UINT32_MAX;
+    uint16_t bestMax = 0u;
+    uint16_t bestMin = 0u;
+    uint8_t bestMaxIdx = 0u;
+    uint8_t bestMinIdx = 0u;
+
+    if (d == NULL) {
+        return false;
+    }
+
+    (void)canGrowattTryCellCandidate(can_be16(&d[0]), can_be16(&d[2]), d[5], d[6],
+                                     packVoltageV, &bestScore, &bestMax, &bestMin,
+                                     &bestMaxIdx, &bestMinIdx);
+    (void)canGrowattTryCellCandidate(can_le16(&d[0]), can_le16(&d[2]), d[5], d[6],
+                                     packVoltageV, &bestScore, &bestMax, &bestMin,
+                                     &bestMaxIdx, &bestMinIdx);
+    (void)canGrowattTryCellCandidate(can_be16(&d[1]), can_be16(&d[3]), d[5], d[6],
+                                     packVoltageV, &bestScore, &bestMax, &bestMin,
+                                     &bestMaxIdx, &bestMinIdx);
+    (void)canGrowattTryCellCandidate(can_le16(&d[1]), can_le16(&d[3]), d[5], d[6],
+                                     packVoltageV, &bestScore, &bestMax, &bestMin,
+                                     &bestMaxIdx, &bestMinIdx);
+
+    if (bestScore == UINT32_MAX) {
+        return false;
+    }
+
+    if (maxMvOut != NULL) {
+        *maxMvOut = bestMax;
+    }
+    if (minMvOut != NULL) {
+        *minMvOut = bestMin;
+    }
+    if (maxIdxOut != NULL) {
+        *maxIdxOut = bestMaxIdx;
+    }
+    if (minIdxOut != NULL) {
+        *minIdxOut = bestMinIdx;
+    }
+    return true;
+}
+
+static bool canGrowattDecodeCellWord(const uint8_t *p, float packVoltageV, uint16_t *mvOut)
+{
+    uint16_t be = 0u;
+    uint16_t le = 0u;
+    bool beOk = false;
+    bool leOk = false;
+
+    if (p == NULL || mvOut == NULL) {
+        return false;
+    }
+
+    be = can_be16(p);
+    le = can_le16(p);
+    beOk = be >= 1500u && be <= 5000u;
+    leOk = le >= 1500u && le <= 5000u;
+    if (!beOk && !leOk) {
+        return false;
+    }
+
+    if (beOk && leOk && packVoltageV > 10.0f) {
+        uint16_t avgMv = (uint16_t)((packVoltageV * 1000.0f / 16.0f) + 0.5f);
+        uint16_t beDiff = (be > avgMv) ? (uint16_t)(be - avgMv) : (uint16_t)(avgMv - be);
+        uint16_t leDiff = (le > avgMv) ? (uint16_t)(le - avgMv) : (uint16_t)(avgMv - le);
+        *mvOut = (leDiff < beDiff) ? le : be;
+        return true;
+    }
+
+    *mvOut = beOk ? be : le;
+    return true;
+}
+
+static void canGrowattFormatCanData(const uint8_t *data, uint8_t dlc, char *out, size_t outSize)
+{
+    size_t pos = 0u;
+    uint8_t n = dlc;
+
+    if (out == NULL || outSize == 0u) {
+        return;
+    }
+    out[0] = '\0';
+    if (data == NULL) {
+        return;
+    }
+
+    if (n > 8u) {
+        n = 8u;
+    }
+    for (uint8_t i = 0u; i < n && pos + 4u < outSize; i++) {
+        pos += (size_t)snprintf(&out[pos], outSize - pos, "%02X ", data[i]);
+    }
+    if (pos > 0u) {
+        out[pos - 1u] = '\0';
+    }
 }
 
 static inline uint16_t can_be16(const uint8_t *p)
@@ -801,6 +1047,356 @@ static void decodeGrowattCanFrame(const char *ifname, const twai_message_t *m)
     }
 }
 
+static void canUpdateUniversalModelFromGrowattCache(const char *ifname)
+{
+    const char *name = (ifname != NULL) ? ifname : "CAN1";
+    int protocol = canProtocolForIf(name);
+    canBmsCachedFrame_t local[CAN_BMS_CACHE_COUNT];
+    canBmsCachedFrame_t *src = NULL;
+    const canBmsCachedFrame_t *f311 = NULL;
+    const canBmsCachedFrame_t *f312 = NULL;
+    const canBmsCachedFrame_t *f313 = NULL;
+    const canBmsCachedFrame_t *f314 = NULL;
+    const canBmsCachedFrame_t *f319 = NULL;
+    const canBmsCachedFrame_t *f322 = NULL;
+    const canBmsCachedFrame_t *f323 = NULL;
+    bridgeTelemetrySnapshot_t snap = {0};
+    universal_battery_model_t model = {0};
+    float packVoltageV = 0.0f;
+    float packCurrentA = 0.0f;
+    float avgTempC = 0.0f;
+    float tempMaxC = 0.0f;
+    float tempMinC = 0.0f;
+    float chargeVoltageLimitV = 0.0f;
+    float chargeCurrentLimitA = 0.0f;
+    float dischargeCurrentLimitA = 0.0f;
+    uint16_t cycles = 0u;
+    uint16_t remainingCapCah = 0u;
+    uint16_t fullCapCah = 0u;
+    uint16_t cellMaxMv = 0u;
+    uint16_t cellMinMv = 0u;
+    uint8_t cellMaxIdx = 0u;
+    uint8_t cellMinIdx = 0u;
+    uint8_t soc = 0u;
+    uint8_t soh = 0u;
+    uint16_t status = 0u;
+    bool havePack = false;
+    bool haveSoc = false;
+    bool haveSoh = false;
+    bool haveAvgTemp = false;
+    bool haveTempRange = false;
+    bool haveCellExtremes = false;
+    bool haveLimits = false;
+    bool haveCycles = false;
+    bool haveStatus = false;
+    bool littleEndian313 = false;
+    bool chargeEnabled = false;
+    bool dischargeEnabled = false;
+    bool balanceEnabled = false;
+    char raw311[32] = {0};
+    char raw312[32] = {0};
+    char raw313[32] = {0};
+    char raw314[32] = {0};
+    char raw319[32] = {0};
+    char raw322[32] = {0};
+    char raw323[32] = {0};
+
+    if (protocol != PROTOCOL_CAN_GROWATT) {
+        return;
+    }
+
+    src = canBmsCacheForIf(name);
+    if (src == NULL) {
+        return;
+    }
+
+    portENTER_CRITICAL(&g_canBmsCacheMux);
+    memcpy(local, src, sizeof(local));
+    portEXIT_CRITICAL(&g_canBmsCacheMux);
+
+    f311 = canGrowattFrameById(local, GROWATT_CAN_ID_311_STATUS_LIMITS);
+    f312 = canGrowattFrameById(local, GROWATT_CAN_ID_312_PROT_ALM);
+    f313 = canGrowattFrameById(local, GROWATT_CAN_ID_313_V_I_SOC_SOH);
+    f314 = canGrowattFrameById(local, GROWATT_CAN_ID_314_RM_FCC_DV_CYCLES);
+    f319 = canGrowattFrameById(local, GROWATT_CAN_ID_319_CELL_REF_FLAGS);
+    f322 = canGrowattFrameById(local, GROWATT_CAN_ID_322_TEMP_SOC_MIN_MAX);
+    f323 = canGrowattFrameById(local, GROWATT_CAN_ID_323_CELLCOUNT_PROT_WARN);
+
+    if (f313 != NULL) {
+        canGrowattFormatCanData(f313->data, f313->dlc, raw313, sizeof(raw313));
+    }
+    if (f313 != NULL && f313->dlc >= 8u) {
+        const uint8_t *d = f313->data;
+        havePack = canGrowattDecodePackVoltage(&d[0], &littleEndian313, &packVoltageV);
+        if (havePack) {
+            packCurrentA = (float)canGrowattI16(&d[2], littleEndian313) / 10.0f;
+            avgTempC = (float)canGrowattI16(&d[4], littleEndian313) / 10.0f;
+            haveAvgTemp = avgTempC >= -50.0f && avgTempC <= 120.0f;
+        }
+        if (d[6] <= 100u) {
+            soc = d[6];
+            haveSoc = true;
+        }
+        if ((d[7] & 0x7Fu) <= 100u) {
+            soh = (uint8_t)(d[7] & 0x7Fu);
+            haveSoh = true;
+        }
+    }
+
+    if (f311 != NULL) {
+        canGrowattFormatCanData(f311->data, f311->dlc, raw311, sizeof(raw311));
+    }
+    if (f311 != NULL && f311->dlc >= 8u) {
+        const uint8_t *d = f311->data;
+        bool limitsLittle = false;
+        float limitV = 0.0f;
+
+        if (canGrowattDecodePackVoltage(&d[0], &limitsLittle, &limitV)) {
+            chargeVoltageLimitV = limitV;
+            chargeCurrentLimitA = (float)canGrowattU16(&d[2], limitsLittle) / 10.0f;
+            dischargeCurrentLimitA = (float)canGrowattU16(&d[4], limitsLittle) / 10.0f;
+            status = canGrowattU16(&d[6], limitsLittle);
+            haveLimits = true;
+            haveStatus = true;
+        } else if (canGrowattDecodePackVoltage(&d[2], &limitsLittle, &limitV)) {
+            status = canGrowattU16(&d[0], limitsLittle);
+            chargeVoltageLimitV = limitV;
+            chargeCurrentLimitA = (float)canGrowattU16(&d[4], limitsLittle) / 10.0f;
+            dischargeCurrentLimitA = (float)canGrowattU16(&d[6], limitsLittle) / 10.0f;
+            haveLimits = true;
+            haveStatus = true;
+        }
+
+        if (haveStatus) {
+            balanceEnabled = false;
+            chargeEnabled = ((status & 0x0001u) != 0u) ||
+                            ((status & 0x0040u) != 0u) ||
+                            ((status & 0x0300u) == 0x0200u);
+            dischargeEnabled = ((status & 0x0020u) != 0u) ||
+                               ((status & 0x0300u) == 0x0300u);
+        }
+    }
+
+    if (f314 != NULL) {
+        canGrowattFormatCanData(f314->data, f314->dlc, raw314, sizeof(raw314));
+    }
+    if (f314 != NULL && f314->dlc >= 8u) {
+        uint16_t beCycles = can_be16(&f314->data[6]);
+        uint16_t leCycles = can_le16(&f314->data[6]);
+        remainingCapCah = can_be16(&f314->data[0]);
+        fullCapCah = can_be16(&f314->data[2]);
+        cycles = (beCycles <= 20000u) ? beCycles : leCycles;
+        haveCycles = true;
+    }
+
+    if (f319 != NULL) {
+        canGrowattFormatCanData(f319->data, f319->dlc, raw319, sizeof(raw319));
+    }
+    if (f319 != NULL && f319->dlc >= 7u) {
+        haveCellExtremes = canGrowattDecodeCellExtremes(f319->data,
+                                                        packVoltageV,
+                                                        &cellMaxMv,
+                                                        &cellMinMv,
+                                                        &cellMaxIdx,
+                                                        &cellMinIdx);
+        if (!haveStatus && f319->dlc >= 1u) {
+            uint8_t flags = f319->data[0];
+            chargeEnabled = (flags & 0x80u) != 0u;
+            dischargeEnabled = (flags & 0x40u) != 0u;
+            status = flags;
+            haveStatus = (flags & 0xC0u) != 0u;
+        }
+    }
+
+    if (f322 != NULL) {
+        canGrowattFormatCanData(f322->data, f322->dlc, raw322, sizeof(raw322));
+    }
+    if (f322 != NULL && f322->dlc >= 8u) {
+        int16_t tMaxDeci = canGrowattI16(&f322->data[0], littleEndian313);
+        int16_t tMinDeci = canGrowattI16(&f322->data[2], littleEndian313);
+        float maxC = (float)tMaxDeci / 10.0f;
+        float minC = (float)tMinDeci / 10.0f;
+
+        if (maxC < -50.0f || maxC > 120.0f || minC < -50.0f || minC > 120.0f) {
+            tMaxDeci = canGrowattI16(&f322->data[0], !littleEndian313);
+            tMinDeci = canGrowattI16(&f322->data[2], !littleEndian313);
+            maxC = (float)tMaxDeci / 10.0f;
+            minC = (float)tMinDeci / 10.0f;
+        }
+
+        if (maxC >= -50.0f && maxC <= 120.0f && minC >= -50.0f && minC <= 120.0f) {
+            if (maxC >= minC) {
+                tempMaxC = maxC;
+                tempMinC = minC;
+            } else {
+                tempMaxC = minC;
+                tempMinC = maxC;
+            }
+            haveTempRange = true;
+        }
+
+        if (!haveSoc && f322->data[6] <= 100u) {
+            soc = f322->data[6];
+            haveSoc = true;
+        }
+    }
+
+    for (uint32_t id = GROWATT_CAN_ID_315_CELL_GRP1; id <= GROWATT_CAN_ID_318_CELL_GRP4; id++) {
+        const canBmsCachedFrame_t *f = canGrowattFrameById(local, id);
+        uint8_t base = (uint8_t)(((id - GROWATT_CAN_ID_315_CELL_GRP1) * 4u) + 1u);
+
+        if (f == NULL || f->dlc < 8u) {
+            continue;
+        }
+
+        for (uint8_t i = 0u; i < 4u; i++) {
+            uint16_t mv = 0u;
+            if (!canGrowattDecodeCellWord(&f->data[i * 2u], packVoltageV, &mv)) {
+                continue;
+            }
+            if (snap.cellCount < (uint8_t)(base + i)) {
+                snap.cellCount = (uint8_t)(base + i);
+            }
+            if ((uint8_t)(base + i) <= 32u) {
+                snap.cellVoltagesV[base + i - 1u] = (float)mv / 1000.0f;
+            }
+            if (!haveCellExtremes || mv > cellMaxMv) {
+                cellMaxMv = mv;
+                cellMaxIdx = (uint8_t)(base + i);
+            }
+            if (!haveCellExtremes || cellMinMv == 0u || mv < cellMinMv) {
+                cellMinMv = mv;
+                cellMinIdx = (uint8_t)(base + i);
+            }
+            haveCellExtremes = true;
+        }
+    }
+
+    if (f312 != NULL) {
+        canGrowattFormatCanData(f312->data, f312->dlc, raw312, sizeof(raw312));
+    }
+    if (f323 != NULL) {
+        canGrowattFormatCanData(f323->data, f323->dlc, raw323, sizeof(raw323));
+    }
+
+    snap.valid = havePack && haveSoc;
+    if (!snap.valid) {
+        return;
+    }
+
+    snprintf(snap.source, sizeof(snap.source), "%s", name);
+    snprintf(snap.protocol, sizeof(snap.protocol), "CAN_GROWATT");
+    snap.currentA = packCurrentA;
+    snap.packVoltageV = packVoltageV;
+    snap.packPowerW = packVoltageV * packCurrentA;
+    snap.socPct = soc;
+    snap.sohPct = haveSoh ? soh : 100u;
+    snap.cycles = haveCycles ? cycles : 0u;
+    snap.remainingAh = (float)remainingCapCah / 100.0f;
+    snap.fullAh = (float)fullCapCah / 100.0f;
+    if (haveCellExtremes) {
+        snap.cellMaxV = (float)cellMaxMv / 1000.0f;
+        snap.cellMinV = (float)cellMinMv / 1000.0f;
+        snap.cellMaxIdx = cellMaxIdx;
+        snap.cellMinIdx = cellMinIdx;
+        snap.deltaV = snap.cellMaxV - snap.cellMinV;
+        if (snap.cellDiffV <= 0.0f) {
+            snap.cellDiffV = snap.deltaV;
+        }
+    }
+    snap.tempMosC = haveAvgTemp ? avgTempC : 0.0f;
+    snap.tempT1C = haveTempRange ? tempMaxC : (haveAvgTemp ? avgTempC : 0.0f);
+    snap.tempT2C = haveTempRange ? tempMinC : (haveAvgTemp ? avgTempC : 0.0f);
+    snap.tempCount = haveTempRange ? 3u : (haveAvgTemp ? 1u : 0u);
+    if (haveStatus) {
+        snap.pylonStatus63 = (uint8_t)(status & 0xFFu);
+        snprintf(snap.stateFlags,
+                 sizeof(snap.stateFlags),
+                 "charge=%s, discharge=%s, balance=%s",
+                 chargeEnabled ? "ON" : "OFF",
+                 dischargeEnabled ? "ON" : "OFF",
+                 balanceEnabled ? "ON" : "OFF");
+    }
+    (void)canDecoderGetGrowattAlertText(name,
+                                        snap.protections,
+                                        sizeof(snap.protections),
+                                        snap.alarms,
+                                        sizeof(snap.alarms),
+                                        snap.warnings,
+                                        sizeof(snap.warnings));
+
+    model.valid = true;
+    model.packVoltageV = packVoltageV;
+    model.packCurrentA = packCurrentA;
+    model.socPct = snap.socPct;
+    model.sohPct = snap.sohPct;
+    model.cycleCount = snap.cycles;
+    model.chargeVoltageLimitV = haveLimits ? chargeVoltageLimitV : packVoltageV;
+    model.chargeCurrentLimitA = haveLimits ? chargeCurrentLimitA : 0.0f;
+    model.dischargeCurrentLimitA = haveLimits ? dischargeCurrentLimitA : 0.0f;
+    if (haveCellExtremes) {
+        model.cellMaxV = snap.cellMaxV;
+        model.cellMinV = snap.cellMinV;
+        model.cellMaxIdx = snap.cellMaxIdx;
+        model.cellMinIdx = snap.cellMinIdx;
+        model.cellDeltaV = snap.deltaV;
+    }
+    model.temperaturesC[0] = snap.tempMosC;
+    model.temperaturesC[1] = snap.tempT1C;
+    model.temperaturesC[2] = snap.tempT2C;
+    model.chargeEnabled = chargeEnabled;
+    model.dischargeEnabled = dischargeEnabled;
+    model.balanceEnabled = balanceEnabled;
+    model.protocolState = haveStatus ? status : 0u;
+    batteryModelSet(&model);
+    bridgeSetTelemetrySnapshot(&snap);
+
+    {
+        char *logText = g_canGrowattDecodedLog;
+        logText[0] = '\0';
+        snprintf(logText,
+                 sizeof(g_canGrowattDecodedLog),
+                 "CAN Growatt\n"
+                 "  valid : YES\n"
+                 "  pack  : V=%.2fV  I=%.1fA  avgT=%.1fC  SOC=%u%%  SOH=%u%%\n"
+                 "  limits: chgV=%.1fV  chgI=%.1fA  disI=%.1fA\n"
+                 "  cells : max=%.3fV#%u  min=%.3fV#%u  dV=%.3fV  count=%u\n"
+                 "  temps : max=%.1fC  min=%.1fC  avg=%.1fC\n"
+                 "  state : raw=0x%04X charge=%s discharge=%s balance=%s\n"
+                 "  raw   : 0x311=[%s] 0x312=[%s] 0x313=[%s] 0x314=[%s] 0x319=[%s] 0x322=[%s] 0x323=[%s]\n"
+                 "  note  : Growatt low-voltage CAN source feeding the universal battery model",
+                 (double)packVoltageV,
+                 (double)packCurrentA,
+                 (double)(haveAvgTemp ? avgTempC : 0.0f),
+                 (unsigned)snap.socPct,
+                 (unsigned)snap.sohPct,
+                 (double)(haveLimits ? chargeVoltageLimitV : 0.0f),
+                 (double)(haveLimits ? chargeCurrentLimitA : 0.0f),
+                 (double)(haveLimits ? dischargeCurrentLimitA : 0.0f),
+                 (double)snap.cellMaxV,
+                 (unsigned)snap.cellMaxIdx,
+                 (double)snap.cellMinV,
+                 (unsigned)snap.cellMinIdx,
+                 (double)snap.deltaV,
+                 (unsigned)snap.cellCount,
+                 (double)(haveTempRange ? tempMaxC : 0.0f),
+                 (double)(haveTempRange ? tempMinC : 0.0f),
+                 (double)(haveAvgTemp ? avgTempC : 0.0f),
+                 (unsigned)status,
+                 chargeEnabled ? "ON" : "OFF",
+                 dischargeEnabled ? "ON" : "OFF",
+                 balanceEnabled ? "ON" : "OFF",
+                 raw311,
+                 raw312,
+                 raw313,
+                 raw314,
+                 raw319,
+                 raw322,
+                 raw323);
+        bridgeSetDecodedLogSnapshot(logText);
+    }
+}
+
 void canDecoderPrintCachedSnapshot(const char *ifname)
 {
     const char *name = (ifname != NULL) ? ifname : "CAN1";
@@ -1085,6 +1681,7 @@ void canDecoderOnFrame(const char *ifname, const twai_message_t *m)
     canBmsCacheUpdate(ifname, m);
     canPylonCacheUpdate(ifname, m);
     canJkbmsCacheUpdate(ifname, m);
+    canUpdateUniversalModelFromGrowattCache(ifname);
     canUpdateUniversalModelFromPylonCache(ifname);
     canUpdateUniversalModelFromJkbmsCache(ifname);
 

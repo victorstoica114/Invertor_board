@@ -1075,6 +1075,7 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
          ((settings.bms_line == LINE_CAN) &&
           ((settings.bms_protocol == PROTOCOL_CAN_PYLON) ||
            (settings.bms_protocol == PROTOCOL_CAN_DEYE) ||
+           (settings.bms_protocol == PROTOCOL_CAN_GROWATT) ||
            (settings.bms_protocol == PROTOCOL_CAN_JKBMS_250K)) &&
           bridgeProtocolIsRs485Pylon(settings.inverter_protocol)));
 

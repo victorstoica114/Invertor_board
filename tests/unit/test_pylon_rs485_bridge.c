@@ -258,6 +258,10 @@ void test_pylon_route_supports_115200_variants(void)
     settings.bms_protocol = PROTOCOL_CAN_DEYE;
 
     TEST_ASSERT_TRUE(pylonRs485BridgeSupportsRoute(&settings));
+
+    settings.bms_protocol = PROTOCOL_CAN_GROWATT;
+
+    TEST_ASSERT_TRUE(pylonRs485BridgeSupportsRoute(&settings));
 }
 
 void test_pylon_probe_in_bridge_mode_ignores_recent_inverter_traffic(void)

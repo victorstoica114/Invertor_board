@@ -241,6 +241,53 @@ void test_can_decoder_deye_updates_battery_model_immediately(void)
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 28.0f, model.temperaturesC[2]);
 }
 
+/**
+ * Test: Growatt CAN updates the universal battery model for CAN->Pylon routes.
+ */
+void test_can_decoder_growatt_updates_battery_model_immediately(void)
+{
+    uint8_t f313[8] = {0};
+    uint8_t f319[8] = {0};
+    battery_model_t model = {0};
+
+    g_hostRuntimeSettings.mode = MODE_BRIDGE;
+    g_hostRuntimeSettings.bms_line = LINE_CAN;
+    g_hostRuntimeSettings.bms_protocol = PROTOCOL_CAN_GROWATT;
+    g_hostRuntimeSettings.bms_port = 1u;
+    g_hostRuntimeSettings.inverter_line = LINE_RS485;
+    g_hostRuntimeSettings.inverter_protocol = PROTOCOL_RS485_PYLON;
+    g_hostRuntimeSettings.inverter_port = 2u;
+
+    write_le16(&f313[0], 7270u);
+    write_le16(&f313[2], 0u);
+    write_le16(&f313[4], 287u);
+    f313[6] = 92u;
+    f313[7] = 99u;
+
+    f319[0] = 0xC0u;
+    write_le16(&f319[1], 4618u);
+    write_le16(&f319[3], 4476u);
+    f319[5] = 3u;
+    f319[6] = 12u;
+
+    feed_can_frame(GROWATT_CAN_ID_313_V_I_SOC_SOH, f313);
+    feed_can_frame(GROWATT_CAN_ID_319_CELL_REF_FLAGS, f319);
+
+    batteryModelGetReal(&model);
+    TEST_ASSERT_TRUE(model.valid);
+    TEST_ASSERT_EQUAL_UINT8(92u, model.socPct);
+    TEST_ASSERT_EQUAL_UINT8(99u, model.sohPct);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 72.70f, model.packVoltageV);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 28.7f, model.temperaturesC[0]);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 4.618f, model.cellMaxV);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 4.476f, model.cellMinV);
+    TEST_ASSERT_EQUAL_UINT8(3u, model.cellMaxIdx);
+    TEST_ASSERT_EQUAL_UINT8(12u, model.cellMinIdx);
+    TEST_ASSERT_TRUE(model.chargeEnabled);
+    TEST_ASSERT_TRUE(model.dischargeEnabled);
+    TEST_ASSERT_FALSE(model.balanceEnabled);
+}
+
 /* Main test runner function */
 int main(void)
 {
@@ -254,6 +301,7 @@ int main(void)
     RUN_TEST(test_can_decoder_null_message);
     RUN_TEST(test_can_decoder_variable_dlc);
     RUN_TEST(test_can_decoder_deye_updates_battery_model_immediately);
+    RUN_TEST(test_can_decoder_growatt_updates_battery_model_immediately);
 
     return UNITY_END();
 }

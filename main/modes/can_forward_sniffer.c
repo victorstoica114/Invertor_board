@@ -205,6 +205,9 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
     const bool bmsCanJkbms250k = (settings != NULL) &&
                                  (settings->bms_line == LINE_CAN) &&
                                  (settings->bms_protocol == PROTOCOL_CAN_JKBMS_250K);
+    const bool bmsCanGrowatt = (settings != NULL) &&
+                               (settings->bms_line == LINE_CAN) &&
+                               (settings->bms_protocol == PROTOCOL_CAN_GROWATT);
     const bool invCanDeye = (settings != NULL) &&
                             (settings->inverter_line == LINE_CAN) &&
                             (settings->inverter_protocol == PROTOCOL_CAN_DEYE);
@@ -291,7 +294,8 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
         bmsSniff.rawLogEnabled = CAN_DECODER_SHOW_RAW_FRAMES &&
                                  (bmsCanPylon || bmsCanDeye || bmsCanGoodwe || bmsCanSofar || bmsCanSma || bmsCanVictron || bmsCanJkbms250k);
         bmsSniff.rawLogLabel = canProtocolLabel(settings->bms_protocol);
-        if (createCanTask(canBridgeTask, "can_bms_sniff", 4096, &bmsSniff, 10, &s_canTaskA)) {
+        const uint32_t bmsSniffStack = bmsCanGrowatt ? 8192u : 4096u;
+        if (createCanTask(canBridgeTask, "can_bms_sniff", bmsSniffStack, &bmsSniff, 10, &s_canTaskA)) {
             ESP_LOGI(EXAMPLE_TAG, "CAN sniffer enabled on BMS side (%s[P%d])", bmsSniff.rxName, settings->bms_port);
         }
         if (bmsCanPylon) {

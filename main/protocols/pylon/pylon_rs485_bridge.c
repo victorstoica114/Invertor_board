@@ -130,6 +130,7 @@ static bool pylonCanSyntheticSourceModeEnabled(const bridge_runtime_settings_t *
            (settings->bms_line == LINE_CAN) &&
            (settings->inverter_line == LINE_RS485) &&
            ((settings->bms_protocol == PROTOCOL_CAN_JKBMS_250K) ||
+            (settings->bms_protocol == PROTOCOL_CAN_GROWATT) ||
             (settings->bms_protocol == PROTOCOL_CAN_DEYE)) &&
            bridgeProtocolIsRs485Pylon(settings->inverter_protocol);
 }
@@ -185,13 +186,14 @@ static bool pylonShouldPublishTelemetrySnapshot(const bridge_runtime_settings_t 
     }
 
     /*
-     * The synthetic Pylon responder is an inverter-facing artifact. For JK CAN,
-     * publishing its partial 0x61/0x63 summary races with the real JK CAN
-     * decoder and makes the web UI alternate between source telemetry and
-     * responder telemetry.
+     * The synthetic Pylon responder is an inverter-facing artifact. When the
+     * CAN source has its own decoder, publishing the partial 0x61/0x63 summary
+     * races with the source telemetry and makes the web UI alternate between
+     * source telemetry and responder telemetry.
      */
     if (pylonCanSyntheticSourceModeEnabled(settings) &&
-        settings->bms_protocol == PROTOCOL_CAN_JKBMS_250K) {
+        ((settings->bms_protocol == PROTOCOL_CAN_JKBMS_250K) ||
+         (settings->bms_protocol == PROTOCOL_CAN_GROWATT))) {
         return false;
     }
 
