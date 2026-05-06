@@ -50,6 +50,7 @@ Implemented and actively used:
 - `RS485_PYLON <-> RS485_PYLON` bridge/responder, including the `RS485_PYLON_115200` variant
 - `CAN_PYLON -> RS485_PYLON` synthetic responder/bridge, including the `RS485_PYLON_115200` variant
 - `JKBMS_CAN_250K -> RS485_PYLON` synthetic responder/bridge for JK app profile `000 - JK BMS CAN Protocol (250K) V2.0`
+- `CAN_DEYE -> RS485_PYLON` synthetic responder/bridge for JK app profile `001 - Deye Low-voltage hybrid inverter CAN`
 - CAN snapshot decoders for Growatt-like, Pylon, Deye, and JK BMS CAN frame sets
 - web UI + API for runtime config and telemetry
 
@@ -71,7 +72,7 @@ Current bridge-mode route matrix:
 | RS485_VOLTRONIC -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=VOLTRONIC_MODBUS`, `inv_protocol=RS485_PYLON` | Active; covers JK UART profile `007` |
 | RS485_CHINA_TOWER -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=CHINA_TOWER_MODBUS`, `inv_protocol=RS485_PYLON` | Active; covers JK UART profile `008` |
 | RS485_WOW -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=WOW_MODBUS`, `inv_protocol=RS485_PYLON` | Active initial implementation; covers JK UART profile `009` with PACE-compatible map |
-| Pylon RS485 bridge | `RS485_PYLON<->RS485_PYLON`, `CAN_PYLON->RS485_PYLON`, or `JKBMS_CAN_250K->RS485_PYLON`, with `RS485_PYLON_115200` accepted on RS485 sides | Active |
+| Pylon RS485 bridge | `RS485_PYLON<->RS485_PYLON`, `CAN_PYLON->RS485_PYLON`, `CAN_DEYE->RS485_PYLON`, or `JKBMS_CAN_250K->RS485_PYLON`, with `RS485_PYLON_115200` accepted on RS485 sides | Active |
 | Generic orchestrator route | any other valid combination | Active, depends on protocol task maturity |
 
 ## Runtime Modes

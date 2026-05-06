@@ -2,9 +2,11 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "config.h"
+#include "Web_interface/web_bridge_api.h"
 #include "protocols/common/battery_model.h"
 #include "protocols/pylon/pylon_rs485_bridge.h"
 #include "runtime_settings.h"
@@ -12,6 +14,8 @@
 extern bridge_runtime_settings_t g_pylonBridgeTestSettings;
 extern battery_model_t g_pylonBridgeTestModel;
 extern bool g_pylonBridgeTestModelValid;
+extern bridgeTelemetrySnapshot_t g_pylonBridgeLastTelemetry;
+extern char g_pylonBridgeLastDecodedLog[2048];
 void pylonBridgeStubReset(void);
 
 void setUp(void)
@@ -136,6 +140,72 @@ void test_pylon_synthetic_63_native_sources_preserve_protocol_status_byte(void)
     TEST_ASSERT_EQUAL_UINT8(0xA5u, hexByteAt(info63, 8));
 }
 
+void test_pylon_synthetic_telemetry_preserves_deye_state_flags_from_model(void)
+{
+    configureNativeCanRoute(PROTOCOL_CAN_DEYE);
+    setValidModel();
+    g_pylonBridgeTestModel.protocolState = 0x40u;
+    g_pylonBridgeTestModel.chargeEnabled = false;
+    g_pylonBridgeTestModel.dischargeEnabled = true;
+    g_pylonBridgeTestModel.balanceEnabled = false;
+
+    pylonRs485BridgeRefreshSyntheticCacheForTest();
+
+    TEST_ASSERT_TRUE(g_pylonBridgeLastTelemetry.valid);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 72.7f, g_pylonBridgeLastTelemetry.packVoltageV);
+    TEST_ASSERT_EQUAL_UINT8(0x40u, g_pylonBridgeLastTelemetry.pylonStatus63);
+    TEST_ASSERT_EQUAL_UINT8(0x40u, g_pylonBridgeLastTelemetry.deyeStatus35C);
+    TEST_ASSERT_TRUE(strstr(g_pylonBridgeLastTelemetry.stateFlags, "charge=OFF") != NULL);
+    TEST_ASSERT_TRUE(strstr(g_pylonBridgeLastTelemetry.stateFlags, "discharge=ON") != NULL);
+    TEST_ASSERT_TRUE(strstr(g_pylonBridgeLastTelemetry.stateFlags, "balance=OFF") != NULL);
+}
+
+void test_pylon_synthetic_deye_route_does_not_overwrite_source_decoded_log(void)
+{
+    configureNativeCanRoute(PROTOCOL_CAN_DEYE);
+    setValidModel();
+    snprintf(g_pylonBridgeLastDecodedLog, sizeof(g_pylonBridgeLastDecodedLog), "%s", "CAN Deye\nexisting");
+
+    pylonRs485BridgeRefreshSyntheticCacheForTest();
+
+    TEST_ASSERT_EQUAL_STRING("CAN Deye\nexisting", g_pylonBridgeLastDecodedLog);
+}
+
+void test_pylon_synthetic_jkbms_can_route_does_not_overwrite_source_telemetry(void)
+{
+    configureNativeCanRoute(PROTOCOL_CAN_JKBMS_250K);
+    setValidModel();
+
+    g_pylonBridgeLastTelemetry.valid = true;
+    snprintf(g_pylonBridgeLastTelemetry.protocol,
+             sizeof(g_pylonBridgeLastTelemetry.protocol),
+             "%s",
+             "JKBMS_CAN_250K");
+    g_pylonBridgeLastTelemetry.alarmRaw = 0x0301u;
+    snprintf(g_pylonBridgeLastTelemetry.protections,
+             sizeof(g_pylonBridgeLastTelemetry.protections),
+             "%s",
+             "Cell overvoltage (L1)");
+
+    pylonRs485BridgeRefreshSyntheticCacheForTest();
+
+    TEST_ASSERT_TRUE(g_pylonBridgeLastTelemetry.valid);
+    TEST_ASSERT_EQUAL_STRING("JKBMS_CAN_250K", g_pylonBridgeLastTelemetry.protocol);
+    TEST_ASSERT_EQUAL_UINT32(0x0301u, g_pylonBridgeLastTelemetry.alarmRaw);
+    TEST_ASSERT_EQUAL_STRING("Cell overvoltage (L1)", g_pylonBridgeLastTelemetry.protections);
+}
+
+void test_pylon_native_source_still_publishes_pylon_decoded_log(void)
+{
+    configureNativeCanRoute(PROTOCOL_CAN_PYLON);
+    setValidModel();
+
+    pylonRs485BridgeRefreshSyntheticCacheForTest();
+
+    TEST_ASSERT_TRUE(strstr(g_pylonBridgeLastDecodedLog, "BMS Decoded Logs") != NULL);
+    TEST_ASSERT_TRUE(strstr(g_pylonBridgeLastDecodedLog, "Pylon 0x61") != NULL);
+}
+
 void test_pylon_synthetic_61_generic_sources_project_percentages_only(void)
 {
     char info61[128] = {0};
@@ -184,6 +254,10 @@ void test_pylon_route_supports_115200_variants(void)
     settings.bms_protocol = PROTOCOL_CAN_JKBMS_250K;
 
     TEST_ASSERT_TRUE(pylonRs485BridgeSupportsRoute(&settings));
+
+    settings.bms_protocol = PROTOCOL_CAN_DEYE;
+
+    TEST_ASSERT_TRUE(pylonRs485BridgeSupportsRoute(&settings));
 }
 
 void test_pylon_probe_in_bridge_mode_ignores_recent_inverter_traffic(void)
@@ -216,6 +290,10 @@ int main(void)
     RUN_TEST(test_pylon_synthetic_63_generic_sources_default_to_c0_and_ignore_balance);
     RUN_TEST(test_pylon_synthetic_63_uses_explicit_generic_charge_discharge_flags);
     RUN_TEST(test_pylon_synthetic_63_native_sources_preserve_protocol_status_byte);
+    RUN_TEST(test_pylon_synthetic_telemetry_preserves_deye_state_flags_from_model);
+    RUN_TEST(test_pylon_synthetic_deye_route_does_not_overwrite_source_decoded_log);
+    RUN_TEST(test_pylon_synthetic_jkbms_can_route_does_not_overwrite_source_telemetry);
+    RUN_TEST(test_pylon_native_source_still_publishes_pylon_decoded_log);
     RUN_TEST(test_pylon_synthetic_61_generic_sources_project_percentages_only);
     RUN_TEST(test_pylon_synthetic_payloads_reject_missing_model);
     RUN_TEST(test_pylon_route_supports_115200_variants);

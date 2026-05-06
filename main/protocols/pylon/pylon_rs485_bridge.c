@@ -73,6 +73,7 @@ static int64_t s_lastCanSourceDiagUs = 0;
 static int64_t s_lastCacheBuildDiagUs = 0;
 
 static void telemetryFromSummary(void);
+static void maybeRefreshSyntheticCacheFromUniversal(void);
 static void updateSummary61(void);
 static void updateSummary63(void);
 
@@ -128,7 +129,8 @@ static bool pylonCanSyntheticSourceModeEnabled(const bridge_runtime_settings_t *
     return (settings != NULL) &&
            (settings->bms_line == LINE_CAN) &&
            (settings->inverter_line == LINE_RS485) &&
-           (settings->bms_protocol == PROTOCOL_CAN_JKBMS_250K) &&
+           ((settings->bms_protocol == PROTOCOL_CAN_JKBMS_250K) ||
+            (settings->bms_protocol == PROTOCOL_CAN_DEYE)) &&
            bridgeProtocolIsRs485Pylon(settings->inverter_protocol);
 }
 
@@ -156,6 +158,44 @@ static bool pylonSourceUsesNativePayloadEncoding(const bridge_runtime_settings_t
            ((settings->bms_protocol == PROTOCOL_CAN_PYLON) ||
             bridgeProtocolIsRs485Pylon(settings->bms_protocol) ||
             (settings->bms_protocol == PROTOCOL_CAN_DEYE));
+}
+
+static bool pylonShouldPublishDecodedLogSnapshot(const bridge_runtime_settings_t *settings)
+{
+    if (settings == NULL) {
+        return false;
+    }
+
+    if (!pylonSyntheticSourceModeEnabled(settings)) {
+        return true;
+    }
+
+    /*
+     * In synthetic routes the Pylon cache is an inverter-facing responder
+     * artifact. Keep the Logs tab focused on the real BMS decoder instead.
+     */
+    return (settings->bms_protocol == PROTOCOL_CAN_PYLON) ||
+           bridgeProtocolIsRs485Pylon(settings->bms_protocol);
+}
+
+static bool pylonShouldPublishTelemetrySnapshot(const bridge_runtime_settings_t *settings)
+{
+    if (settings == NULL) {
+        return false;
+    }
+
+    /*
+     * The synthetic Pylon responder is an inverter-facing artifact. For JK CAN,
+     * publishing its partial 0x61/0x63 summary races with the real JK CAN
+     * decoder and makes the web UI alternate between source telemetry and
+     * responder telemetry.
+     */
+    if (pylonCanSyntheticSourceModeEnabled(settings) &&
+        settings->bms_protocol == PROTOCOL_CAN_JKBMS_250K) {
+        return false;
+    }
+
+    return true;
 }
 
 static bool pylonDiagLogsEnabled(void)
@@ -582,6 +622,39 @@ bool pylonRs485BridgeBuildSyntheticInfo63ForTest(char *out, size_t outSize)
 }
 #endif
 
+static bool fillTelemetryStateFromModel(const bridge_runtime_settings_t *settings,
+                                        const universal_battery_model_t *model,
+                                        bridgeTelemetrySnapshot_t *snap)
+{
+    uint8_t state = 0u;
+    bool haveState = false;
+
+    if (settings == NULL || model == NULL || snap == NULL || !model->valid) {
+        return false;
+    }
+
+    state = (uint8_t)(model->protocolState & 0xFFu);
+    haveState = (state != 0u) ||
+                model->chargeEnabled ||
+                model->dischargeEnabled ||
+                model->balanceEnabled;
+    if (!haveState) {
+        return false;
+    }
+
+    snap->pylonStatus63 = state;
+    if (settings->bms_protocol == PROTOCOL_CAN_DEYE) {
+        snap->deyeStatus35C = state;
+    }
+    snprintf(snap->stateFlags,
+             sizeof(snap->stateFlags),
+             "charge=%s, discharge=%s, balance=%s",
+             model->chargeEnabled ? "ON" : "OFF",
+             model->dischargeEnabled ? "ON" : "OFF",
+             model->balanceEnabled ? "ON" : "OFF");
+    return true;
+}
+
 static bool pylonProbeShouldWaitForQuiet(uint8_t mode,
                                          int64_t nowUs,
                                          int64_t lastBmsTrafficUs,
@@ -690,14 +763,25 @@ static void maybeRefreshSyntheticCacheFromUniversal(void)
     (void)model;
 }
 
+#ifdef HOST_TEST
+void pylonRs485BridgeRefreshSyntheticCacheForTest(void)
+{
+    maybeRefreshSyntheticCacheFromUniversal();
+}
+#endif
+
 static void telemetryFromSummary(void)
 {
     bridgeTelemetrySnapshot_t snap = {0};
     bridge_runtime_settings_t settings = runtimeSettingsGet();
     universal_battery_model_t model = {0};
     char iface[12] = {0};
-    bool preferModelTelemetry = pylonSyntheticSourceModeEnabled(&settings) &&
-                                !pylonSourceUsesNativePayloadEncoding(&settings);
+    bool preferModelTelemetry = pylonSyntheticSourceModeEnabled(&settings);
+    bool useModelTelemetry = false;
+
+    if (!pylonShouldPublishTelemetrySnapshot(&settings)) {
+        return;
+    }
 
     if (!s_pylonSummary.valid) {
         ESP_LOGD("PYLON_RS485", "[TELEM_FROM_SUMMARY] Summary invalid, clearing telemetry");
@@ -715,6 +799,7 @@ static void telemetryFromSummary(void)
 
     if (preferModelTelemetry) {
         batteryModelGet(&model);
+        useModelTelemetry = model.valid;
     }
 
     snap.valid = true;
@@ -724,24 +809,27 @@ static void telemetryFromSummary(void)
         snprintf(snap.source, sizeof(snap.source), "BMS");
     }
     snprintf(snap.protocol, sizeof(snap.protocol), "%s", protocolToStrLocal(settings.bms_protocol));
-    snap.currentA = (preferModelTelemetry && model.valid) ? model.packCurrentA : s_pylonSummary.current_a;
-    snap.packVoltageV = (preferModelTelemetry && model.valid)
+    snap.currentA = useModelTelemetry ? model.packCurrentA : s_pylonSummary.current_a;
+    snap.packVoltageV = useModelTelemetry
                         ? model.packVoltageV
                         : (float)s_pylonSummary.pack_voltage_cv / 100.0f;
-    snap.cycles = s_pylonSummary.cycles;
-    snap.socPct = s_pylonSummary.soc_pct;
-    snap.sohPct = s_pylonSummary.soh_pct;
-    snap.cellMaxV = (float)s_pylonSummary.max_cell_mv / 1000.0f;
-    snap.cellMinV = (float)s_pylonSummary.min_cell_mv / 1000.0f;
-    snap.cellMaxIdx = s_pylonSummary.max_cell_idx;
-    snap.cellMinIdx = s_pylonSummary.min_cell_idx;
-    snap.deltaV = snap.cellMaxV - snap.cellMinV;
-    snap.tempMosC = (float)s_pylonSummary.temp_mos_c10 / 10.0f;
-    snap.tempT1C = (float)s_pylonSummary.temp_t1_c10 / 10.0f;
-    snap.tempT2C = (float)s_pylonSummary.temp_t2_c10 / 10.0f;
-    snap.tempT4C = (float)s_pylonSummary.temp_t4_c10 / 10.0f;
-    snap.tempT5C = (float)s_pylonSummary.temp_t5_c10 / 10.0f;
+    snap.cycles = useModelTelemetry ? model.cycleCount : s_pylonSummary.cycles;
+    snap.socPct = useModelTelemetry ? model.socPct : s_pylonSummary.soc_pct;
+    snap.sohPct = useModelTelemetry ? model.sohPct : s_pylonSummary.soh_pct;
+    snap.cellMaxV = useModelTelemetry ? model.cellMaxV : ((float)s_pylonSummary.max_cell_mv / 1000.0f);
+    snap.cellMinV = useModelTelemetry ? model.cellMinV : ((float)s_pylonSummary.min_cell_mv / 1000.0f);
+    snap.cellMaxIdx = useModelTelemetry ? model.cellMaxIdx : s_pylonSummary.max_cell_idx;
+    snap.cellMinIdx = useModelTelemetry ? model.cellMinIdx : s_pylonSummary.min_cell_idx;
+    snap.deltaV = useModelTelemetry ? model.cellDeltaV : (snap.cellMaxV - snap.cellMinV);
+    snap.tempMosC = useModelTelemetry ? model.temperaturesC[0] : ((float)s_pylonSummary.temp_mos_c10 / 10.0f);
+    snap.tempT1C = useModelTelemetry ? model.temperaturesC[1] : ((float)s_pylonSummary.temp_t1_c10 / 10.0f);
+    snap.tempT2C = useModelTelemetry ? model.temperaturesC[2] : ((float)s_pylonSummary.temp_t2_c10 / 10.0f);
+    snap.tempT4C = useModelTelemetry ? model.temperaturesC[3] : ((float)s_pylonSummary.temp_t4_c10 / 10.0f);
+    snap.tempT5C = useModelTelemetry ? model.temperaturesC[4] : ((float)s_pylonSummary.temp_t5_c10 / 10.0f);
     snap.pylonStatus63 = s_pylonSummary.status_63;
+    if (useModelTelemetry) {
+        (void)fillTelemetryStateFromModel(&settings, &model, &snap);
+    }
 
     ESP_LOGI("PYLON_RS485", "[TELEM_FROM_SUMMARY] Setting telemetry from RS485 summary: "
              "valid=%s, soc=%u%%, v=%.2fV (cv=%u), i=%.1fA, status63=0x%02X",
@@ -754,6 +842,7 @@ static void telemetryFromSummary(void)
 
 static void updateDecodedLogSnapshot(void)
 {
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
     int64_t nowS = esp_timer_get_time() / 1000000LL;
 
     snprintf(s_pylonDecodedLog,
@@ -797,7 +886,9 @@ static void updateDecodedLogSnapshot(void)
              (unsigned)s_pylonSummary.status_63,
              s_pylonCache.valid63 ? s_pylonCache.info63 : "");
 
-    bridgeSetDecodedLogSnapshot(s_pylonDecodedLog);
+    if (pylonShouldPublishDecodedLogSnapshot(&settings)) {
+        bridgeSetDecodedLogSnapshot(s_pylonDecodedLog);
+    }
 }
 
 static void logPylonFrame(const char *prefix, const uint8_t *frame, int len)

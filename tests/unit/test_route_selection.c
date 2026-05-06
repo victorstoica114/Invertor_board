@@ -368,6 +368,26 @@ void test_route_jkbms_115200_to_rs485_pylon_starts_responder(void)
 }
 
 /**
+ * Test: Deye CAN BMS source can feed the Pylon RS485 responder.
+ */
+void test_route_deye_can_to_rs485_pylon_starts_responder(void)
+{
+    bridge_runtime_settings_t settings = {0};
+
+    settings.mode = MODE_BRIDGE;
+    settings.bms_line = LINE_CAN;
+    settings.bms_protocol = PROTOCOL_CAN_DEYE;
+    settings.bms_port = 1;
+    settings.inverter_line = LINE_RS485;
+    settings.inverter_protocol = PROTOCOL_RS485_PYLON;
+    settings.inverter_port = 2;
+
+    TEST_ASSERT_EQUAL(ESP_OK, orchestratorStartFromRuntime(&settings));
+    TEST_ASSERT_EQUAL(1, g_routeStubPylonBridgeEnableCount);
+    TEST_ASSERT_EQUAL(1, g_routeStubCanForwardStartCount);
+}
+
+/**
  * Test: Pylon 115200 variants are accepted as Pylon bridge protocols.
  */
 void test_route_pylon_115200_bridge_starts_responder(void)
@@ -498,6 +518,7 @@ int main(void)
     RUN_TEST(test_route_wow_rs485_to_rs485_pylon_starts_responder);
     RUN_TEST(test_route_jkbms_native_to_rs485_pylon_valid);
     RUN_TEST(test_route_jkbms_115200_to_rs485_pylon_starts_responder);
+    RUN_TEST(test_route_deye_can_to_rs485_pylon_starts_responder);
     RUN_TEST(test_route_pylon_115200_bridge_starts_responder);
     RUN_TEST(test_route_invalid_same_line_both_sides);
     RUN_TEST(test_protocol_constants_defined);

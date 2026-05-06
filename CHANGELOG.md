@@ -31,6 +31,7 @@ The goal is practical maintenance:
 - `JKBMS_CAN_250K` decoder for JK app protocol `000 - JK BMS CAN Protocol (250K) V2.0`, covering pack voltage/current/SOC, cell extremes, temperatures, and alarm severity fields.
 - `JKBMS_CAN_250K -> RS485_PYLON` synthetic responder route through the universal battery model.
 - CAN protocol backlog documentation under `docs/can_protocols.md`.
+- `CAN_DEYE -> RS485_PYLON` route support for JK app protocol `001 - Deye Low-voltage hybrid inverter CAN`.
 - Selectable `115200` RS485 variants for `JKBMS_MODBUS` and `RS485_PYLON`, reusing the same decoders/responders as the existing `9600` variants.
 - GitLab CI pipeline for automatic ESP32-C6 builds and host-side test execution on push/merge request.
 - Separate CI suites for sanity, unit, integration, and firmware-build validation, with JUnit artifacts and coverage reports.
@@ -67,10 +68,12 @@ The goal is practical maintenance:
 - `WOW_MODBUS` has been live-validated with the BMS set to JK UART profile `009`, with the inverter accepting the translated Pylon responder data.
 - RS485 UART initialization now derives baud rate per physical RS485 port from the selected runtime protocol, allowing mixed routes such as `JKBMS_MODBUS_115200 -> RS485_PYLON`.
 - CAN initialization now derives bitrate per physical CAN port from the selected runtime protocol, with `JKBMS_CAN_250K` using `250 kbit/s` and existing CAN profiles remaining at `500 kbit/s`.
+- `CAN_DEYE` now updates the universal battery model directly from live CAN frames instead of waiting for the periodic diagnostic snapshot.
 
 ### Fixed
 
 - Fixed inverter fault on `JKBMS_MODBUS -> RS485_PYLON`.
+- Fixed the inactive/stale source path for `CAN_DEYE -> RS485_PYLON`, where the Deye decoder existed but the Pylon responder route was not being armed as a supported synthetic source.
 
 Root cause:
 

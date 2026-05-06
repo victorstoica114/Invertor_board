@@ -251,6 +251,7 @@ void test_deye_can_decode_snapshot_populates_snapshot_and_model(void)
     TEST_ASSERT_EQUAL_UINT8(4u, g_lastSnapshot.deyeTempMinSensor);
     TEST_ASSERT_EQUAL_UINT8(5u, g_lastSnapshot.cellMaxIdx);
     TEST_ASSERT_EQUAL_UINT8(10u, g_lastSnapshot.cellMinIdx);
+    assert_float_within(0.01f, 480.0f, g_lastSnapshot.packVoltageV);
     assert_float_within(0.01f, -12.5f, g_lastSnapshot.currentA);
     assert_float_within(0.001f, 3.5f, g_lastSnapshot.cellMaxV);
     assert_float_within(0.001f, 3.0f, g_lastSnapshot.cellMinV);
@@ -341,6 +342,161 @@ void test_jkbms_can_250k_decode_snapshot_populates_snapshot_and_model(void)
     assert_float_within(0.001f, 4.476f, model.cellMinV);
 }
 
+void test_jkbms_can_250k_extended_temperatures_override_summary(void)
+{
+    jkbms_can_frame_t cache[JKBMS_CAN_CACHE_COUNT] = {0};
+    uint8_t f02F4[8] = {0};
+    uint8_t f05F4[8] = {0};
+    uint8_t f18F228F4[8] = {0};
+
+    write_le16(&f02F4[0], 727u);
+    write_le16(&f02F4[2], 4000u);
+    f02F4[4] = 80u;
+
+    f05F4[0] = 82u;
+    f05F4[1] = 1u;
+    f05F4[2] = 78u;
+    f05F4[3] = 2u;
+    f05F4[4] = 80u;
+
+    f18F228F4[0] = 0x1Fu;
+    f18F228F4[1] = 76u;
+    f18F228F4[2] = 77u;
+    f18F228F4[3] = 79u;
+    f18F228F4[4] = 75u;
+    f18F228F4[5] = 78u;
+
+    set_jkbms_cache_frame(cache, JKBMS_CAN_CACHE_COUNT, JKBMS_CAN_ID_BATT_ST, f02F4, sizeof(f02F4));
+    set_jkbms_cache_frame(cache, JKBMS_CAN_CACHE_COUNT, JKBMS_CAN_ID_CELL_TEMP, f05F4, sizeof(f05F4));
+    set_jkbms_cache_frame(cache,
+                          JKBMS_CAN_CACHE_COUNT,
+                          JKBMS_CAN_ID_CELL_TEMP_EXT,
+                          f18F228F4,
+                          sizeof(f18F228F4));
+
+    jkbmsCanDecodeSnapshot("CAN1", cache, JKBMS_CAN_CACHE_COUNT);
+
+    TEST_ASSERT_TRUE(g_snapshotSet);
+    TEST_ASSERT_TRUE(g_logSet);
+    TEST_ASSERT_TRUE(g_lastSnapshot.valid);
+    TEST_ASSERT_EQUAL_UINT8(5u, g_lastSnapshot.tempCount);
+    assert_float_within(0.01f, 26.0f, g_lastSnapshot.tempMosC);
+    assert_float_within(0.01f, 27.0f, g_lastSnapshot.tempT1C);
+    assert_float_within(0.01f, 29.0f, g_lastSnapshot.tempT2C);
+    assert_float_within(0.01f, 25.0f, g_lastSnapshot.tempT4C);
+    assert_float_within(0.01f, 28.0f, g_lastSnapshot.tempT5C);
+    TEST_ASSERT_TRUE(strstr(g_lastLog, "0x18F228F4=[1F 4C 4D 4F 4B 4E 00 00]") != NULL);
+    TEST_ASSERT_TRUE(strstr(g_lastLog, "ext=T1=26.0C") != NULL);
+
+    battery_model_t model = {0};
+    batteryModelGetReal(&model);
+    TEST_ASSERT_TRUE(model.valid);
+    assert_float_within(0.01f, 26.0f, model.temperaturesC[0]);
+    assert_float_within(0.01f, 27.0f, model.temperaturesC[1]);
+    assert_float_within(0.01f, 29.0f, model.temperaturesC[2]);
+    assert_float_within(0.01f, 25.0f, model.temperaturesC[3]);
+    assert_float_within(0.01f, 28.0f, model.temperaturesC[4]);
+}
+
+void test_jkbms_can_250k_extended_temperatures_accept_live_style_count_prefix(void)
+{
+    jkbms_can_frame_t cache[JKBMS_CAN_CACHE_COUNT] = {0};
+    uint8_t f02F4[8] = {0};
+    uint8_t f18F228F4[8] = {0x10u, 81u, 80u, 80u, 79u, 79u, 0u, 0u};
+
+    write_le16(&f02F4[0], 727u);
+    write_le16(&f02F4[2], 4000u);
+    f02F4[4] = 80u;
+
+    set_jkbms_cache_frame(cache, JKBMS_CAN_CACHE_COUNT, JKBMS_CAN_ID_BATT_ST, f02F4, sizeof(f02F4));
+    set_jkbms_cache_frame(cache,
+                          JKBMS_CAN_CACHE_COUNT,
+                          JKBMS_CAN_ID_CELL_TEMP_EXT,
+                          f18F228F4,
+                          sizeof(f18F228F4));
+
+    jkbmsCanDecodeSnapshot("CAN1", cache, JKBMS_CAN_CACHE_COUNT);
+
+    TEST_ASSERT_TRUE(g_snapshotSet);
+    TEST_ASSERT_TRUE(g_lastSnapshot.valid);
+    TEST_ASSERT_EQUAL_UINT8(5u, g_lastSnapshot.tempCount);
+    assert_float_within(0.01f, 31.0f, g_lastSnapshot.tempMosC);
+    assert_float_within(0.01f, 30.0f, g_lastSnapshot.tempT1C);
+    assert_float_within(0.01f, 30.0f, g_lastSnapshot.tempT2C);
+    assert_float_within(0.01f, 29.0f, g_lastSnapshot.tempT4C);
+    assert_float_within(0.01f, 29.0f, g_lastSnapshot.tempT5C);
+}
+
+void test_jkbms_can_250k_extended_cell_voltages_populate_cell_grid(void)
+{
+    jkbms_can_frame_t cache[JKBMS_CAN_CACHE_COUNT] = {0};
+    uint8_t f02F4[8] = {0};
+    uint8_t f04F4[8] = {0};
+    uint8_t f18E0[8] = {0};
+    uint8_t f18E1[8] = {0};
+    uint8_t f18E2[8] = {0};
+    uint8_t f18E3[8] = {0};
+    const uint16_t cellsMv[16] = {
+        4528u, 4559u, 4618u, 4509u,
+        4517u, 4526u, 4557u, 4532u,
+        4593u, 4576u, 4578u, 4476u,
+        4521u, 4520u, 4520u, 4584u,
+    };
+
+    write_le16(&f02F4[0], 727u);
+    write_le16(&f02F4[2], 4000u);
+    f02F4[4] = 80u;
+
+    write_le16(&f04F4[0], 4618u);
+    f04F4[2] = 3u;
+    write_le16(&f04F4[3], 4476u);
+    f04F4[5] = 12u;
+
+    for (uint8_t i = 0u; i < 4u; i++) {
+        write_le16(&f18E0[i * 2u], cellsMv[i]);
+        write_le16(&f18E1[i * 2u], cellsMv[i + 4u]);
+        write_le16(&f18E2[i * 2u], cellsMv[i + 8u]);
+        write_le16(&f18E3[i * 2u], cellsMv[i + 12u]);
+    }
+
+    set_jkbms_cache_frame(cache, JKBMS_CAN_CACHE_COUNT, JKBMS_CAN_ID_BATT_ST, f02F4, sizeof(f02F4));
+    set_jkbms_cache_frame(cache, JKBMS_CAN_CACHE_COUNT, JKBMS_CAN_ID_CELL_VOLT, f04F4, sizeof(f04F4));
+    set_jkbms_cache_frame(cache,
+                          JKBMS_CAN_CACHE_COUNT,
+                          JKBMS_CAN_ID_CELL_VOLT_EXT_BASE,
+                          f18E0,
+                          sizeof(f18E0));
+    set_jkbms_cache_frame(cache,
+                          JKBMS_CAN_CACHE_COUNT,
+                          JKBMS_CAN_ID_CELL_VOLT_EXT_BASE + 0x00010000u,
+                          f18E1,
+                          sizeof(f18E1));
+    set_jkbms_cache_frame(cache,
+                          JKBMS_CAN_CACHE_COUNT,
+                          JKBMS_CAN_ID_CELL_VOLT_EXT_BASE + 0x00020000u,
+                          f18E2,
+                          sizeof(f18E2));
+    set_jkbms_cache_frame(cache,
+                          JKBMS_CAN_CACHE_COUNT,
+                          JKBMS_CAN_ID_CELL_VOLT_EXT_BASE + 0x00030000u,
+                          f18E3,
+                          sizeof(f18E3));
+
+    jkbmsCanDecodeSnapshot("CAN1", cache, JKBMS_CAN_CACHE_COUNT);
+
+    TEST_ASSERT_TRUE(g_snapshotSet);
+    TEST_ASSERT_TRUE(g_lastSnapshot.valid);
+    TEST_ASSERT_EQUAL_UINT8(16u, g_lastSnapshot.cellCount);
+    TEST_ASSERT_EQUAL_UINT8(3u, g_lastSnapshot.cellMaxIdx);
+    TEST_ASSERT_EQUAL_UINT8(12u, g_lastSnapshot.cellMinIdx);
+    assert_float_within(0.001f, 4.528f, g_lastSnapshot.cellVoltagesV[0]);
+    assert_float_within(0.001f, 4.618f, g_lastSnapshot.cellVoltagesV[2]);
+    assert_float_within(0.001f, 4.476f, g_lastSnapshot.cellVoltagesV[11]);
+    assert_float_within(0.001f, 4.584f, g_lastSnapshot.cellVoltagesV[15]);
+    TEST_ASSERT_TRUE(strstr(g_lastLog, "cellv : count=16") != NULL);
+    TEST_ASSERT_TRUE(strstr(g_lastLog, "0x18E0=[B0 11 CF 11 0A 12 9D 11]") != NULL);
+}
+
 void test_battery_model_debug_override_controls_output(void)
 {
     battery_model_t model = {0};
@@ -388,6 +544,9 @@ int main(void)
     RUN_TEST(test_pylon_can_decode_snapshot_populates_snapshot_and_model);
     RUN_TEST(test_deye_can_decode_snapshot_populates_snapshot_and_model);
     RUN_TEST(test_jkbms_can_250k_decode_snapshot_populates_snapshot_and_model);
+    RUN_TEST(test_jkbms_can_250k_extended_temperatures_override_summary);
+    RUN_TEST(test_jkbms_can_250k_extended_temperatures_accept_live_style_count_prefix);
+    RUN_TEST(test_jkbms_can_250k_extended_cell_voltages_populate_cell_grid);
     RUN_TEST(test_battery_model_debug_override_controls_output);
     RUN_TEST(test_battery_model_stale_data_is_cleared);
 

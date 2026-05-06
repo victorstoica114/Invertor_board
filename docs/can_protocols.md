@@ -9,7 +9,7 @@ This file tracks the CAN-side protocol list before we start implementing and liv
 | App # | App label | Nominal bitrate | Existing repo mapping | Current status | First implementation note |
 | --- | --- | --- | --- | --- | --- |
 | `000` | `JK BMS CAN Protocol (250K) V2.0` | `250 kbit/s` | `PROTOCOL_CAN_JKBMS_250K` | In progress | Native JK CAN decoder for `0x02F4`, `0x04F4`, `0x05F4`, `0x07F4`; feeds the universal model and `RS485_PYLON` synthetic responder. |
-| `001` | `Deye Low-voltage hybrid inverter CAN commu...` | unknown | `PROTOCOL_CAN_DEYE` | Partial | Active Deye CAN snapshot decoder exists; verify exact JK app profile against live frames. |
+| `001` | `Deye Low-voltage hybrid inverter CAN commu...` | commonly `500 kbit/s` | `PROTOCOL_CAN_DEYE` | In progress | Deye/Pylon-like frame set is decoded and now feeds `RS485_PYLON`; verify exact JK app profile against live frames. |
 | `002` | `PYLON-Low-voltage-V1.2` | commonly `500 kbit/s` | `PROTOCOL_CAN_PYLON` | Active | Current reference CAN profile; already decodes Pylon frames and supports `CAN_PYLON -> RS485_PYLON`. |
 | `003` | `Growatt BMS CAN-Bus-protocol-low-voltage_R...` | unknown | `PROTOCOL_CAN_GROWATT` | Partial/active route | Growatt-like CAN cache and `CAN -> RS485_GROWATT` route exist; verify app profile fields. |
 | `004` | `Victron_CANbus_BMS_protocol_20170717` | commonly `500 kbit/s` | `PROTOCOL_CAN_VICTRON` | Scaffold | Protocol ID and folder exist; needs frame map and decoder/publisher. |
@@ -27,7 +27,7 @@ Implemented or partially usable today:
 
 - `CAN_PYLON`: active Pylon CAN cache, decoded telemetry, and `CAN_PYLON -> RS485_PYLON` synthetic responder path.
 - `JKBMS_CAN_250K`: native JK CAN V2.0 profile at 250 kbit/s, decoded into the universal model and usable as a synthetic `RS485_PYLON` source.
-- `CAN_DEYE`: active CAN decode path for Deye-like Pylon frame set; needs live validation against JK app protocol `001`.
+- `CAN_DEYE`: active CAN decode path for Deye-like Pylon frame set; supports `CAN_DEYE -> RS485_PYLON` via the universal model.
 - `CAN_GROWATT`: Growatt-like CAN cache and bridge route toward `RS485_GROWATT`; needs live validation against JK app protocol `003`.
 - `CAN_GOODWE`, `CAN_VICTRON`: protocol IDs/folders exist, but no full end-to-end pipeline yet.
 - `CAN_SOFAR`, `CAN_SMA`: supported by existing generic route IDs, but not visible in the current JK app screenshots.
@@ -37,7 +37,7 @@ Implemented or partially usable today:
 1. `000 - JK BMS CAN Protocol (250K) V2.0`: implement and live-test first because it is the currently selected JK app protocol.
 2. `002 - PYLON-Low-voltage-V1.2`: keep as the known-good CAN reference and regression target.
 3. `003 - Growatt BMS CAN-Bus`: verify whether the current `CAN_GROWATT` route matches the JK app profile.
-4. `001 - Deye Low-voltage`: verify the existing `CAN_DEYE` decoder with live frames.
+4. `001 - Deye Low-voltage`: live-test the corrected `CAN_DEYE -> RS485_PYLON` route with JK app protocol `001`.
 5. `008 - GoodWe LV`: fill the existing scaffold if documentation/captures are available.
 6. `004 - Victron CANbus`: fill the existing scaffold if documentation/captures are available.
 7. `006 - JK BMS CAN Protocol (500K) V2.0`: reuse the native JK CAN frame map if the payload is confirmed identical.

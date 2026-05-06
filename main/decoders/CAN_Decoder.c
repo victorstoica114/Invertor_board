@@ -5,6 +5,7 @@
 #include "protocols/common/battery_model.h"
 #include "protocols/growatt/growatt_registers_map.h"
 #include "protocols/deye/deye_can_protocol.h"
+#include "protocols/deye/deye_registers_map.h"
 #include "protocols/jkbms_can/jkbms_can_protocol.h"
 #include "protocols/pylon/pylon_can_protocol.h"
 #include "runtime_settings.h"
@@ -123,6 +124,7 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
 {
     const char *name = (ifname != NULL) ? ifname : "CAN1";
     int protocol = canProtocolForIf(name);
+    bool deyeProtocol = protocol == PROTOCOL_CAN_DEYE;
     pylon_can_frame_t local[PYLON_CAN_CACHE_COUNT];
     pylon_can_frame_t *src = NULL;
     const pylon_can_frame_t *f351 = NULL;
@@ -130,12 +132,14 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
     const pylon_can_frame_t *f356 = NULL;
     const pylon_can_frame_t *f35C = NULL;
     const pylon_can_frame_t *f373 = NULL;
+    const pylon_can_frame_t *f370 = NULL;
+    const pylon_can_frame_t *f371 = NULL;
     bool haveSoc = false;
     bool havePack = false;
     universal_battery_model_t model = {0};
     uint32_t nowMs = (uint32_t)(esp_timer_get_time() / 1000LL);
 
-    if (protocol != PROTOCOL_CAN_PYLON) {
+    if ((protocol != PROTOCOL_CAN_PYLON) && !deyeProtocol) {
         return;
     }
 
@@ -169,12 +173,33 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
         havePack = true;
     }
 
-    if (canPylonGetFrameById(local, 0x373u, &f373) && f373->dlc >= 8u) {
+    if (!deyeProtocol && canPylonGetFrameById(local, 0x373u, &f373) && f373->dlc >= 8u) {
         model.cellMinV = (float)can_le16(&f373->data[0]) / 1000.0f;
         model.cellMaxV = (float)can_le16(&f373->data[2]) / 1000.0f;
         model.cellDeltaV = model.cellMaxV - model.cellMinV;
         model.temperaturesC[1] = (float)can_le16(&f373->data[4]) / 10.0f;
         model.temperaturesC[2] = (float)can_le16(&f373->data[6]) / 10.0f;
+    }
+
+    if (deyeProtocol && canPylonGetFrameById(local, DEYE_CAN_ID_TEMP_CELL_370, &f370) && f370->dlc >= 8u) {
+        uint16_t tMaxRaw = can_le16(&f370->data[DEYE_CAN_370_OFF_TEMP_MAX_RAW]);
+        uint16_t tMinRaw = can_le16(&f370->data[DEYE_CAN_370_OFF_TEMP_MIN_RAW]);
+        model.temperaturesC[1] = (tMaxRaw <= 200u) ? (float)tMaxRaw : ((float)tMaxRaw / 10.0f);
+        model.temperaturesC[2] = (tMinRaw <= 200u) ? (float)tMinRaw : ((float)tMinRaw / 10.0f);
+        model.cellMaxV = (float)can_le16(&f370->data[DEYE_CAN_370_OFF_CELL_MAX_MV]) / 1000.0f;
+        model.cellMinV = (float)can_le16(&f370->data[DEYE_CAN_370_OFF_CELL_MIN_MV]) / 1000.0f;
+        model.cellDeltaV = model.cellMaxV - model.cellMinV;
+    }
+
+    if (deyeProtocol && canPylonGetFrameById(local, DEYE_CAN_ID_SENSOR_INDEX_371, &f371) && f371->dlc >= 8u) {
+        uint16_t cellMaxIdx = can_le16(&f371->data[DEYE_CAN_371_OFF_CELL_MAX_IDX]);
+        uint16_t cellMinIdx = can_le16(&f371->data[DEYE_CAN_371_OFF_CELL_MIN_IDX]);
+        if (cellMaxIdx <= 255u) {
+            model.cellMaxIdx = (uint8_t)cellMaxIdx;
+        }
+        if (cellMinIdx <= 255u) {
+            model.cellMinIdx = (uint8_t)cellMinIdx;
+        }
     }
 
     if (canPylonGetFrameById(local, 0x35Cu, &f35C) && f35C->dlc >= 1u) {
