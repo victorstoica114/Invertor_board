@@ -66,6 +66,13 @@ static inline void unity_fail_impl(const char *file, int line, const char *expr,
         if (e_ != a_) unity_fail_impl(__FILE__, __LINE__, "TEST_ASSERT_EQUAL_INT16", NULL); \
     } while (0)
 
+#define TEST_ASSERT_FLOAT_WITHIN(delta, expected, actual) \
+    do { \
+        float d_ = (float)(actual) - (float)(expected); \
+        if (d_ < 0.0f) d_ = -d_; \
+        if (d_ > (float)(delta)) unity_fail_impl(__FILE__, __LINE__, "TEST_ASSERT_FLOAT_WITHIN", NULL); \
+    } while (0)
+
 #define TEST_ASSERT_EQUAL_UINT32(expected, actual) \
     do { \
         uint32_t e_ = (uint32_t)(expected); \
