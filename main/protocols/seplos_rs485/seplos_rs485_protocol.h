@@ -15,9 +15,15 @@ extern "C" {
 
 #define SEPLOS_RS485_PROTOCOL_VERSION 0x20u
 #define SEPLOS_RS485_DEFAULT_ADDRESS 0x00u
+#define SEPLOS_RS485_DEFAULT_REQUEST_INFO 0x00u
 #define SEPLOS_RS485_CID1_BMS 0x46u
 #define SEPLOS_RS485_CID2_TELEMETRY 0x42u
 #define SEPLOS_RS485_CID2_ALARMS 0x44u
+
+typedef enum {
+    SEPLOS_RS485_REQUEST_STYLE_LEN_CHECK = 0,
+    SEPLOS_RS485_REQUEST_STYLE_SIMPLE_LEN_NIBBLE = 1,
+} seplos_rs485_request_style_t;
 
 typedef struct {
     uint8_t version;
@@ -93,6 +99,14 @@ size_t seplosRs485BuildRequest(uint8_t cid2,
                                uint8_t protocolVersion,
                                uint8_t *out,
                                size_t outSize);
+
+size_t seplosRs485BuildRequestWithStyle(uint8_t cid2,
+                                        uint8_t address,
+                                        uint8_t requestInfo,
+                                        uint8_t protocolVersion,
+                                        seplos_rs485_request_style_t style,
+                                        uint8_t *out,
+                                        size_t outSize);
 
 bool seplosRs485DecodeFrame(const uint8_t *frame,
                             size_t frameLen,

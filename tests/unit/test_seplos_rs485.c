@@ -12,7 +12,7 @@ void tearDown(void)
 {
 }
 
-void test_seplos_builds_pack_zero_telemetry_and_alarm_requests(void)
+void test_seplos_builds_default_telemetry_and_alarm_requests(void)
 {
     uint8_t frame[32] = {0};
     size_t len = seplosRs485BuildRequest(SEPLOS_RS485_CID2_TELEMETRY,
@@ -33,6 +33,59 @@ void test_seplos_builds_pack_zero_telemetry_and_alarm_requests(void)
 
     TEST_ASSERT_EQUAL_UINT32(strlen("~20004644E00200FD35\r"), len);
     TEST_ASSERT_EQUAL_STRING("~20004644E00200FD35\r", (const char *)frame);
+}
+
+void test_seplos_builds_pack_one_len_checked_request(void)
+{
+    uint8_t frame[32] = {0};
+    size_t len = seplosRs485BuildRequestWithStyle(SEPLOS_RS485_CID2_TELEMETRY,
+                                                  0x00u,
+                                                  0x01u,
+                                                  SEPLOS_RS485_PROTOCOL_VERSION,
+                                                  SEPLOS_RS485_REQUEST_STYLE_LEN_CHECK,
+                                                  frame,
+                                                  sizeof(frame));
+
+    TEST_ASSERT_EQUAL_UINT32(strlen("~20004642E00201FD36\r"), len);
+    TEST_ASSERT_EQUAL_STRING("~20004642E00201FD36\r", (const char *)frame);
+}
+
+void test_seplos_builds_vendor_style_simple_length_requests(void)
+{
+    uint8_t frame[32] = {0};
+    size_t len = seplosRs485BuildRequestWithStyle(SEPLOS_RS485_CID2_TELEMETRY,
+                                                  0x01u,
+                                                  0x01u,
+                                                  SEPLOS_RS485_PROTOCOL_VERSION,
+                                                  SEPLOS_RS485_REQUEST_STYLE_SIMPLE_LEN_NIBBLE,
+                                                  frame,
+                                                  sizeof(frame));
+
+    TEST_ASSERT_EQUAL_UINT32(strlen("~2001464200021FD7A\r"), len);
+    TEST_ASSERT_EQUAL_STRING("~2001464200021FD7A\r", (const char *)frame);
+
+    memset(frame, 0, sizeof(frame));
+    len = seplosRs485BuildRequestWithStyle(SEPLOS_RS485_CID2_ALARMS,
+                                           0x01u,
+                                           0x01u,
+                                           SEPLOS_RS485_PROTOCOL_VERSION,
+                                           SEPLOS_RS485_REQUEST_STYLE_SIMPLE_LEN_NIBBLE,
+                                           frame,
+                                           sizeof(frame));
+
+    TEST_ASSERT_EQUAL_UINT32(strlen("~2001464400021FD78\r"), len);
+    TEST_ASSERT_EQUAL_STRING("~2001464400021FD78\r", (const char *)frame);
+}
+
+void test_seplos_accepts_simple_length_response_field(void)
+{
+    static const uint8_t raw[] = "~20004600000200FD52\r";
+    seplos_rs485_frame_t frame = {0};
+
+    TEST_ASSERT_TRUE(seplosRs485DecodeFrame(raw, strlen((const char *)raw), &frame));
+    TEST_ASSERT_EQUAL_UINT16(0x0002u, frame.lengthField);
+    TEST_ASSERT_EQUAL_UINT32(1u, frame.infoLen);
+    TEST_ASSERT_EQUAL_UINT8(0x00u, frame.info[0]);
 }
 
 void test_seplos_decodes_telemetry_sample(void)
@@ -139,7 +192,10 @@ int main(void)
 {
     UNITY_BEGIN();
 
-    RUN_TEST(test_seplos_builds_pack_zero_telemetry_and_alarm_requests);
+    RUN_TEST(test_seplos_builds_default_telemetry_and_alarm_requests);
+    RUN_TEST(test_seplos_builds_pack_one_len_checked_request);
+    RUN_TEST(test_seplos_builds_vendor_style_simple_length_requests);
+    RUN_TEST(test_seplos_accepts_simple_length_response_field);
     RUN_TEST(test_seplos_decodes_telemetry_sample);
     RUN_TEST(test_seplos_decodes_alarm_sample_and_formats_raw_flags);
     RUN_TEST(test_seplos_rejects_bad_checksum);

@@ -138,19 +138,24 @@ static uint16_t seplosLengthField(size_t infoAsciiLen)
 
 static bool lengthFieldValid(uint16_t field, size_t infoAsciiLen)
 {
-    return (field & 0x0FFFu) == (uint16_t)(infoAsciiLen & 0x0FFFu) &&
-           field == seplosLengthField(infoAsciiLen);
+    if ((field & 0x0FFFu) != (uint16_t)(infoAsciiLen & 0x0FFFu)) {
+        return false;
+    }
+
+    return field == seplosLengthField(infoAsciiLen) ||
+           field == (uint16_t)infoAsciiLen;
 }
 
-size_t seplosRs485BuildRequest(uint8_t cid2,
-                               uint8_t address,
-                               uint8_t protocolVersion,
-                               uint8_t *out,
-                               size_t outSize)
+size_t seplosRs485BuildRequestWithStyle(uint8_t cid2,
+                                        uint8_t address,
+                                        uint8_t requestInfo,
+                                        uint8_t protocolVersion,
+                                        seplos_rs485_request_style_t style,
+                                        uint8_t *out,
+                                        size_t outSize)
 {
     char body[32];
     uint16_t checksum = 0u;
-    uint16_t length = seplosLengthField(2u);
     int bodyLen = 0;
     int frameLen = 0;
 
@@ -158,15 +163,27 @@ size_t seplosRs485BuildRequest(uint8_t cid2,
         return 0u;
     }
 
-    bodyLen = snprintf(body,
-                       sizeof(body),
-                       "%02X%02X%02X%02X%04X%02X",
-                       (unsigned)protocolVersion,
-                       (unsigned)address,
-                       (unsigned)SEPLOS_RS485_CID1_BMS,
-                       (unsigned)cid2,
-                       (unsigned)length,
-                       (unsigned)address);
+    if (style == SEPLOS_RS485_REQUEST_STYLE_SIMPLE_LEN_NIBBLE) {
+        bodyLen = snprintf(body,
+                           sizeof(body),
+                           "%02X%02X%02X%02X0002%X",
+                           (unsigned)protocolVersion,
+                           (unsigned)address,
+                           (unsigned)SEPLOS_RS485_CID1_BMS,
+                           (unsigned)cid2,
+                           (unsigned)(requestInfo & 0x0Fu));
+    } else {
+        const uint16_t length = seplosLengthField(2u);
+        bodyLen = snprintf(body,
+                           sizeof(body),
+                           "%02X%02X%02X%02X%04X%02X",
+                           (unsigned)protocolVersion,
+                           (unsigned)address,
+                           (unsigned)SEPLOS_RS485_CID1_BMS,
+                           (unsigned)cid2,
+                           (unsigned)length,
+                           (unsigned)requestInfo);
+    }
     if (bodyLen <= 0 || (size_t)bodyLen >= sizeof(body)) {
         return 0u;
     }
@@ -178,6 +195,21 @@ size_t seplosRs485BuildRequest(uint8_t cid2,
     }
 
     return (size_t)frameLen;
+}
+
+size_t seplosRs485BuildRequest(uint8_t cid2,
+                               uint8_t address,
+                               uint8_t protocolVersion,
+                               uint8_t *out,
+                               size_t outSize)
+{
+    return seplosRs485BuildRequestWithStyle(cid2,
+                                            address,
+                                            SEPLOS_RS485_DEFAULT_REQUEST_INFO,
+                                            protocolVersion,
+                                            SEPLOS_RS485_REQUEST_STYLE_LEN_CHECK,
+                                            out,
+                                            outSize);
 }
 
 bool seplosRs485DecodeFrame(const uint8_t *frame,

@@ -247,6 +247,9 @@ static inline uint32_t bridgeProtocolCanBitrate(uint8_t protocol)
 
 /* --- Seplos RS485 ASCII protocol task --- */
 #define SEPLOS_BMS_ADDRESS                 0x00u
+#define SEPLOS_BMS_REQUEST_INFO            0x00u
+#define SEPLOS_BMS_REQUEST_CANDIDATE_PERIOD 2u
+#define SEPLOS_BMS_RAW_LOGS                1
 #define SEPLOS_BMS_QUERY_PERIOD_MS         500
 #define SEPLOS_BMS_TASK_STACK              6144
 #define SEPLOS_BMS_TASK_PRIORITY           10
