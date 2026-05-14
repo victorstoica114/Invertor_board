@@ -415,6 +415,88 @@ Notes:
 - the generated flash command should include `--flash-size 8MB`
 - the custom partition table is `partitions_8mb_singleapp.csv`
 
+### Local Windows / Codex Access Notes
+
+These notes are for future Codex sessions on the current Windows development
+machine, so they do not have to rediscover the local ESP-IDF setup.
+
+Known local setup:
+
+- workspace: `C:\Users\Admin\Documents\test-CAN+RS485`
+- ESP-IDF path used by the working build: `C:\esp\v6.0.1\esp-idf`
+- ESP-IDF Python: `C:\Espressif\tools\python\v6.0.1\venv\Scripts\python.exe`
+- Ninja: `C:\Espressif\tools\ninja\1.12.1\ninja.EXE`
+- ESP32-C6 serial port used during field tests: `COM11`
+- web UI used during field tests: `http://192.168.141.151/`
+
+Fast incremental build from a Codex/PowerShell shell:
+
+```powershell
+$env:IDF_PATH='C:\esp\v6.0.1\esp-idf'
+$env:PATH='C:\Espressif\tools\ccache\4.12.1\ccache-4.12.1-windows-x86_64;C:\Espressif\tools\riscv32-esp-elf\esp-15.2.0_20251204\riscv32-esp-elf\bin;C:\Espressif\tools\ninja\1.12.1;C:\Espressif\tools\cmake\4.0.3\bin;C:\Espressif\tools\python\v6.0.1\venv\Scripts;' + $env:PATH
+& 'C:\Espressif\tools\ninja\1.12.1\ninja.EXE' -C build
+```
+
+Known harmless build warnings in the Codex sandbox:
+
+- `fatal: detected dubious ownership in repository at 'C:/esp/v6.0.1/esp-idf'`
+- `ESP_ROM_ELF_DIR environment variable is not defined`
+
+The build can still complete and generate `build\project-name.bin`; verify the
+final Ninja result and binary-size line before assuming failure.
+
+Fast flash without rebuilding:
+
+```powershell
+& 'C:\Espressif\tools\python\v6.0.1\venv\Scripts\python.exe' 'C:\esp\v6.0.1\esp-idf\components\esptool_py\esptool\esptool.py' --chip esp32c6 -p COM11 -b 460800 --before default-reset --after hard-reset write_flash --flash-mode dio --flash-freq 80m --flash-size 8MB 0x0 build\bootloader\bootloader.bin 0x8000 build\partition_table\partition-table.bin 0x10000 build\project-name.bin
+```
+
+Serial monitor options:
+
+```powershell
+& 'C:\Espressif\tools\python\v6.0.1\venv\Scripts\python.exe' 'C:\esp\v6.0.1\esp-idf\tools\idf_monitor.py' -p COM11 -b 115200 --toolchain-prefix riscv32-esp-elf- --target esp32c6 'C:\Users\Admin\Documents\test-CAN+RS485\build\project-name.elf'
+```
+
+For a short non-interactive log capture that closes the port automatically:
+
+```powershell
+@'
+import serial
+import sys
+import time
+
+s = serial.Serial('COM11', 115200, timeout=0.2)
+end = time.time() + 8
+while time.time() < end:
+    data = s.read(4096)
+    if data:
+        sys.stdout.write(data.decode('utf-8', 'replace'))
+        sys.stdout.flush()
+s.close()
+'@ | & 'C:\Espressif\tools\python\v6.0.1\venv\Scripts\python.exe' -
+```
+
+If `COM11` reports `Access is denied`, a previous monitor process is usually
+still holding the port. Check for ESP-IDF Python monitor processes before
+starting a new monitor. During field testing, stopping stale
+`C:\Espressif\tools\python\v6.0.1\venv\Scripts\python.exe` monitor processes
+released the port.
+
+Useful web/API checks:
+
+```powershell
+(Invoke-WebRequest -Uri http://192.168.141.151/api/settings -UseBasicParsing -TimeoutSec 8).Content
+(Invoke-WebRequest -Uri http://192.168.141.151/api/telemetry -UseBasicParsing -TimeoutSec 8).Content
+(Invoke-WebRequest -Uri http://192.168.141.151/api/logs -UseBasicParsing -TimeoutSec 8).Content
+```
+
+Current known-good RS485 sanity route on the field bench:
+
+- `bms_line=RS485`, `bms_protocol=RS485_PYLON`, `bms_port=1`
+- `inverter_line=RS485`, `inverter_protocol=RS485_PYLON`, `inverter_port=2`
+- this route produced valid Pylon `0x61`, `0x62`, and `0x63` decoded logs on
+  `RS485_1`, confirming that the physical RS485 port and direction control work
+
 ## Configuration Notes
 
 Most compile-time toggles are in `main/config.h`, including:
