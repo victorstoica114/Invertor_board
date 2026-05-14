@@ -92,7 +92,9 @@ static bool validateSettings(const bridge_runtime_settings_t *s)
         (s->bms_protocol != PROTOCOL_RS485_JKBMS_NATIVE) &&
         (s->bms_protocol != PROTOCOL_RS485_VOLTRONIC) &&
         (s->bms_protocol != PROTOCOL_RS485_CHINA_TOWER) &&
-        (s->bms_protocol != PROTOCOL_RS485_WOW)) {
+        (s->bms_protocol != PROTOCOL_RS485_WOW) &&
+        (s->bms_protocol != PROTOCOL_RS485_SEPLOS) &&
+        (s->bms_protocol != PROTOCOL_RS485_SEPLOS_19200)) {
         return false;
     }
     if ((s->inverter_line == LINE_RS485) &&

@@ -18,6 +18,7 @@
 #include "protocols/pylon/pylon_inverter_task.h"
 #include "protocols/pylon/pylon_rs485_bridge.h"
 #include "protocols/rs485_growatt/rs485_growatt_bridge.h"
+#include "protocols/seplos_rs485/seplos_rs485_bms_task.h"
 #include "protocols/voltronic_modbus/voltronic_modbus_bms_task.h"
 #include "protocols/wow_modbus/wow_modbus_bms_task.h"
 #include "runtime_settings.h"
@@ -27,6 +28,7 @@ int g_routeStubJkbmsModbusBmsStartCount;
 int g_routeStubVoltronicBmsStartCount;
 int g_routeStubChinaTowerBmsStartCount;
 int g_routeStubWowBmsStartCount;
+int g_routeStubSeplosBmsStartCount;
 int g_routeStubPylonInverterStartCount;
 int g_routeStubPylonBridgeEnableCount;
 int g_routeStubCanForwardStartCount;
@@ -38,6 +40,7 @@ void routeSelectionStubReset(void)
     g_routeStubVoltronicBmsStartCount = 0;
     g_routeStubChinaTowerBmsStartCount = 0;
     g_routeStubWowBmsStartCount = 0;
+    g_routeStubSeplosBmsStartCount = 0;
     g_routeStubPylonInverterStartCount = 0;
     g_routeStubPylonBridgeEnableCount = 0;
     g_routeStubCanForwardStartCount = 0;
@@ -152,6 +155,30 @@ esp_err_t wowModbusBmsTaskStart(QueueHandle_t outQueue)
 esp_err_t wowModbusBmsTaskStop(void)
 {
     return ESP_OK;
+}
+
+esp_err_t seplosRs485BmsTaskStart(QueueHandle_t outQueue)
+{
+    (void)outQueue;
+    g_routeStubSeplosBmsStartCount++;
+    return ESP_OK;
+}
+
+esp_err_t seplosRs485BmsTaskStop(void)
+{
+    return ESP_OK;
+}
+
+bool seplosRs485BmsTaskGetLatestPacket(bms_decoded_packet_t *outPacket)
+{
+    (void)outPacket;
+    return false;
+}
+
+bool seplosRs485BmsTaskGetLatestSnapshot(seplos_rs485_snapshot_t *outSnapshot)
+{
+    (void)outSnapshot;
+    return false;
 }
 
 esp_err_t growattInverterTaskStart(QueueHandle_t inQueue)

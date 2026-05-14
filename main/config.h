@@ -125,7 +125,9 @@
 #define PROTOCOL_RS485_JKBMS_115200 16
 #define PROTOCOL_RS485_PYLON_115200 17
 #define PROTOCOL_CAN_JKBMS_250K 18
-#define PROTOCOL_ID_MAX PROTOCOL_CAN_JKBMS_250K
+#define PROTOCOL_RS485_SEPLOS 19
+#define PROTOCOL_RS485_SEPLOS_19200 20
+#define PROTOCOL_ID_MAX PROTOCOL_RS485_SEPLOS_19200
 
 static inline uint8_t bridgeProtocolCanonical(uint8_t protocol)
 {
@@ -155,6 +157,8 @@ static inline uint32_t bridgeProtocolRs485Baudrate(uint8_t protocol)
         case PROTOCOL_RS485_JKBMS_115200:
         case PROTOCOL_RS485_PYLON_115200:
             return RS485_FAST_BAUDRATE;
+        case PROTOCOL_RS485_SEPLOS_19200:
+            return 19200u;
         default:
             return RS485_DEFAULT_BAUDRATE;
     }
@@ -240,6 +244,12 @@ static inline uint32_t bridgeProtocolCanBitrate(uint8_t protocol)
 #define WOW_BMS_PUBLISH_PERIOD_MS          250
 #define WOW_BMS_TASK_STACK                 4096
 #define WOW_BMS_TASK_PRIORITY              10
+
+/* --- Seplos RS485 ASCII protocol task --- */
+#define SEPLOS_BMS_ADDRESS                 0x00u
+#define SEPLOS_BMS_QUERY_PERIOD_MS         500
+#define SEPLOS_BMS_TASK_STACK              6144
+#define SEPLOS_BMS_TASK_PRIORITY           10
 
 /* --- Pylon placeholders --- */
 #define PYLON_BMS_TASK_STACK           3072

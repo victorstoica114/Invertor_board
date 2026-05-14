@@ -12,4 +12,5 @@ target_sources(${COMPONENT_LIB} PRIVATE
     test_modbus_decoder.c
     test_pace_modbus.c
     test_route_selection.c
+    test_seplos_rs485.c
 )

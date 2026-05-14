@@ -70,6 +70,13 @@ HOST_C_TESTS = (
         ),
     ),
     HostCTestTarget(
+        name="seplos_rs485",
+        sources=(
+            "tests/unit/test_seplos_rs485.c",
+            "main/protocols/seplos_rs485/seplos_rs485_protocol.c",
+        ),
+    ),
+    HostCTestTarget(
         name="pace_modbus",
         sources=(
             "tests/unit/test_pace_modbus.c",

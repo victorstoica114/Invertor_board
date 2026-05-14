@@ -108,6 +108,8 @@ def test_protocol_constants_in_config_h():
         'PROTOCOL_RS485_JKBMS_115200',
         'PROTOCOL_RS485_PYLON_115200',
         'PROTOCOL_CAN_JKBMS_250K',
+        'PROTOCOL_RS485_SEPLOS',
+        'PROTOCOL_RS485_SEPLOS_19200',
     ]
 
     for protocol in expected_protocols:
@@ -178,6 +180,7 @@ def test_protocol_directories_exist():
         'voltronic_modbus',
         'china_tower_modbus',
         'wow_modbus',
+        'seplos_rs485',
         'deye',
         'jkbms_can',
     ]

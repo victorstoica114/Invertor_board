@@ -17,6 +17,7 @@
 #include "protocols/pylon/pylon_bms_task.h"
 #include "protocols/pylon/pylon_inverter_task.h"
 #include "protocols/rs485_growatt/rs485_growatt_bridge.h"
+#include "protocols/seplos_rs485/seplos_rs485_bms_task.h"
 #include "protocols/voltronic_modbus/voltronic_modbus_bms_task.h"
 #include "protocols/wow_modbus/wow_modbus_bms_task.h"
 #include "protocols/common/battery_model.h"
@@ -69,6 +70,8 @@ const char *protocolIdToStr(protocol_id_t id)
             return "CHINA_TOWER_MODBUS";
         case PROTOCOL_ID_WOW:
             return "WOW_MODBUS";
+        case PROTOCOL_ID_SEPLOS:
+            return "SEPLOS_RS485";
         default:
             return "UNKNOWN";
     }
@@ -152,6 +155,8 @@ static esp_err_t startBmsTask(protocol_id_t protocol, QueueHandle_t outQueue)
             return chinaTowerModbusBmsTaskStart(outQueue);
         case PROTOCOL_ID_WOW:
             return wowModbusBmsTaskStart(outQueue);
+        case PROTOCOL_ID_SEPLOS:
+            return seplosRs485BmsTaskStart(outQueue);
         default:
             return ESP_ERR_NOT_SUPPORTED;
     }
@@ -196,6 +201,9 @@ static protocol_id_t protocolIdFromUiProtocol(uint8_t protocol)
             return PROTOCOL_ID_CHINA_TOWER;
         case PROTOCOL_RS485_WOW:
             return PROTOCOL_ID_WOW;
+        case PROTOCOL_RS485_SEPLOS:
+        case PROTOCOL_RS485_SEPLOS_19200:
+            return PROTOCOL_ID_SEPLOS;
         default:
             return PROTOCOL_ID_GROWATT;
     }
@@ -394,6 +402,19 @@ static bool isRsWowToRsPylonRoute(const bridge_runtime_settings_t *settings)
            bridgeProtocolIsRs485Pylon(settings->inverter_protocol);
 }
 
+static bool isRsSeplosToRsPylonRoute(const bridge_runtime_settings_t *settings)
+{
+    if (settings == NULL) {
+        return false;
+    }
+
+    return (settings->bms_line == LINE_RS485) &&
+           (settings->inverter_line == LINE_RS485) &&
+           ((settings->bms_protocol == PROTOCOL_RS485_SEPLOS) ||
+            (settings->bms_protocol == PROTOCOL_RS485_SEPLOS_19200)) &&
+           bridgeProtocolIsRs485Pylon(settings->inverter_protocol);
+}
+
 static void clearTransportBuffers(void)
 {
     uint8_t sink[64];
@@ -546,9 +567,10 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
     const bool rsVoltronicToRsPylon = isRsVoltronicToRsPylonRoute(settings);
     const bool rsChinaTowerToRsPylon = isRsChinaTowerToRsPylonRoute(settings);
     const bool rsWowToRsPylon = isRsWowToRsPylonRoute(settings);
+    const bool rsSeplosToRsPylon = isRsSeplosToRsPylonRoute(settings);
     const bool pylonRs485Route = pylonRs485BridgeSupportsRoute(settings);
     ESP_LOGI(EXAMPLE_TAG,
-             "Orchestrator runtime start: bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) canToRsGrowatt=%s rsJkbmsToRsGrowatt=%s rsJkbmsToRsPylon=%s rsGrowattToRsPylon=%s rsPaceToRsPylon=%s rsVoltronicToRsPylon=%s rsChinaTowerToRsPylon=%s rsWowToRsPylon=%s pylonRs485=%s",
+             "Orchestrator runtime start: bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) canToRsGrowatt=%s rsJkbmsToRsGrowatt=%s rsJkbmsToRsPylon=%s rsGrowattToRsPylon=%s rsPaceToRsPylon=%s rsVoltronicToRsPylon=%s rsChinaTowerToRsPylon=%s rsWowToRsPylon=%s rsSeplosToRsPylon=%s pylonRs485=%s",
              (unsigned)settings->bms_line,
              (unsigned)settings->bms_protocol,
              (unsigned)settings->bms_port,
@@ -563,6 +585,7 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
              rsVoltronicToRsPylon ? "YES" : "NO",
              rsChinaTowerToRsPylon ? "YES" : "NO",
              rsWowToRsPylon ? "YES" : "NO",
+             rsSeplosToRsPylon ? "YES" : "NO",
              pylonRs485Route ? "YES" : "NO");
 
     if (canToRsGrowatt) {
@@ -864,6 +887,42 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
         return ESP_OK;
     }
 
+    if (rsSeplosToRsPylon) {
+        if (g_orchestratorTaskHandle != NULL || g_orchestratorCtx.canRs485TranslatorActive) {
+            ESP_LOGW(EXAMPLE_TAG, "Orchestrator already running");
+            return ESP_ERR_INVALID_STATE;
+        }
+
+        memset(&g_orchestratorCtx, 0, sizeof(g_orchestratorCtx));
+        g_orchestratorCtx.bmsProtocol = PROTOCOL_ID_SEPLOS;
+        g_orchestratorCtx.inverterProtocol = PROTOCOL_ID_PYLON;
+
+        g_orchestratorCtx.bmsQueue =
+            xQueueCreate(ORCHESTRATOR_BMS_QUEUE_LEN, sizeof(bms_decoded_packet_t));
+        if (g_orchestratorCtx.bmsQueue == NULL) {
+            orchestratorReset(&g_orchestratorCtx);
+            return ESP_ERR_NO_MEM;
+        }
+
+        esp_err_t err = seplosRs485BmsTaskStart(g_orchestratorCtx.bmsQueue);
+        if (err != ESP_OK) {
+            ESP_LOGW(EXAMPLE_TAG,
+                     "Seplos RS485 BMS task failed for RS485->RS485 Pylon route (err=0x%x)",
+                     (unsigned)err);
+            orchestratorReset(&g_orchestratorCtx);
+            return err;
+        }
+
+        pylonRs485BridgeEnable();
+        g_orchestratorCtx.canRs485TranslatorActive = true;
+        ESP_LOGI(EXAMPLE_TAG,
+                 "Orchestrator started Seplos RS485->RS485 Pylon route: BMS(RS485_%u) -> Inverter(%s:%u)",
+                 (unsigned)settings->bms_port,
+                 rsNameByPort(settings->inverter_port),
+                 (unsigned)settings->inverter_port);
+        return ESP_OK;
+    }
+
     if (pylonRs485Route) {
         if (g_orchestratorTaskHandle != NULL || g_orchestratorCtx.canRs485TranslatorActive) {
             ESP_LOGW(EXAMPLE_TAG, "Orchestrator already running");
@@ -912,6 +971,7 @@ esp_err_t orchestratorStop(void)
     (void)voltronicModbusBmsTaskStop();
     (void)chinaTowerModbusBmsTaskStop();
     (void)wowModbusBmsTaskStop();
+    (void)seplosRs485BmsTaskStop();
     (void)pylonBmsTaskStop();
     (void)pylonInverterTaskStop();
     clearTransportBuffers();

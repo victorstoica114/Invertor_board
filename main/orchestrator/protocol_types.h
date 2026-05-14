@@ -16,6 +16,7 @@ typedef enum {
     PROTOCOL_ID_VOLTRONIC = 5,
     PROTOCOL_ID_CHINA_TOWER = 6,
     PROTOCOL_ID_WOW = 7,
+    PROTOCOL_ID_SEPLOS = 8,
 } protocol_id_t;
 
 #define BMS_DECODED_PACKET_MAX_CELLS 32u

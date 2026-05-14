@@ -34,6 +34,8 @@ idf_component_register(
         "protocols/china_tower_modbus/china_tower_modbus_poller.c"
         "protocols/china_tower_modbus/china_tower_modbus_bms_task.c"
         "protocols/wow_modbus/wow_modbus_bms_task.c"
+        "protocols/seplos_rs485/seplos_rs485_protocol.c"
+        "protocols/seplos_rs485/seplos_rs485_bms_task.c"
         "protocols/rs485_growatt/rs485_growatt_bridge.c"
         "protocols/rs485_growatt/rs485_growatt_registers_map.c"
         "protocols/rs485_growatt/rs485_growatt_modbus_poller.c"

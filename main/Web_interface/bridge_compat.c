@@ -14,6 +14,7 @@
 #include "protocols/jkbms_rs485/jkbms_rs485_bms_task.h"
 #include "protocols/pace_modbus/pace_modbus_bms_task.h"
 #include "protocols/rs485_growatt/rs485_growatt_bridge.h"
+#include "protocols/seplos_rs485/seplos_rs485_bms_task.h"
 #include "protocols/voltronic_modbus/voltronic_modbus_bms_task.h"
 #include "protocols/wow_modbus/wow_modbus_bms_task.h"
 #include "runtime_settings.h"
@@ -88,6 +89,10 @@ static const char *protocolToStr(uint8_t protocol)
             return "CHINA_TOWER_MODBUS";
         case PROTOCOL_RS485_WOW:
             return "WOW_MODBUS";
+        case PROTOCOL_RS485_SEPLOS:
+            return "SEPLOS_RS485";
+        case PROTOCOL_RS485_SEPLOS_19200:
+            return "SEPLOS_RS485_19200";
         default:
             return "UNKNOWN";
     }
@@ -987,6 +992,115 @@ static void fillTelemetryFromJkbmsNativeSnapshot(const jkbms_rs485_native_snapsh
              (unsigned)snapshot->cellCount);
 }
 
+static void fillTelemetryFromSeplosSnapshot(const seplos_rs485_snapshot_t *snapshot,
+                                            bridgeTelemetrySnapshot_t *out)
+{
+    if (snapshot == NULL || out == NULL || !snapshot->valid) {
+        return;
+    }
+
+    out->valid = true;
+    snprintf(out->source, sizeof(out->source), "%s", "SEPLOS_RS485_TASK");
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+    snprintf(out->protocol,
+             sizeof(out->protocol),
+             "%s",
+             (settings.bms_protocol == PROTOCOL_RS485_SEPLOS_19200) ? "SEPLOS_RS485_19200" : "SEPLOS_RS485");
+
+    if (snapshot->hasSocDeciPct) {
+        uint16_t pct = (uint16_t)((snapshot->socDeciPct + 5u) / 10u);
+        out->socPct = (uint8_t)((pct > 100u) ? 100u : pct);
+    }
+    if (snapshot->hasSohDeciPct) {
+        uint16_t pct = (uint16_t)((snapshot->sohDeciPct + 5u) / 10u);
+        out->sohPct = (uint8_t)((pct > 100u) ? 100u : pct);
+    }
+    if (snapshot->hasCycles) {
+        out->cycles = snapshot->cycles;
+    }
+    if (snapshot->hasPackVoltageCv) {
+        out->packVoltageV = (float)snapshot->packVoltageCv / 100.0f;
+    }
+    if (snapshot->hasPackCurrentCa) {
+        out->currentA = (float)snapshot->packCurrentCa / 100.0f;
+    }
+    if (snapshot->hasPackPowerW) {
+        out->packPowerW = (float)snapshot->packPowerW;
+    }
+    if (snapshot->hasRemainingCapacityCah) {
+        out->remainingAh = (float)snapshot->remainingCapacityCah / 100.0f;
+    }
+    if (snapshot->hasFullCapacityCah) {
+        out->fullAh = (float)snapshot->fullCapacityCah / 100.0f;
+    }
+
+    if (snapshot->tempCount > 0u) {
+        out->tempCount = snapshot->tempCount;
+    }
+    if (snapshot->tempCount > 0u) {
+        out->tempT1C = (float)snapshot->tempDeciC[0] / 10.0f;
+    }
+    if (snapshot->tempCount > 1u) {
+        out->tempT2C = (float)snapshot->tempDeciC[1] / 10.0f;
+    }
+    if (snapshot->tempCount > 2u) {
+        out->tempT4C = (float)snapshot->tempDeciC[2] / 10.0f;
+    }
+    if (snapshot->tempCount > 3u) {
+        out->tempT5C = (float)snapshot->tempDeciC[3] / 10.0f;
+    }
+    if (snapshot->tempCount > 5u) {
+        out->tempMosC = (float)snapshot->tempDeciC[5] / 10.0f;
+    } else if (snapshot->tempCount > 4u) {
+        out->tempMosC = (float)snapshot->tempDeciC[4] / 10.0f;
+    }
+
+    out->cellCount = snapshot->cellCount;
+    for (uint8_t i = 0u; i < snapshot->cellCount && i < 32u; i++) {
+        out->cellVoltagesV[i] = (float)snapshot->cellMv[i] / 1000.0f;
+    }
+    if (snapshot->hasCellAvgMv) {
+        out->cellAvgV = (float)snapshot->cellAvgMv / 1000.0f;
+    }
+    if (snapshot->hasCellDiffMv) {
+        out->cellDiffV = (float)snapshot->cellDiffMv / 1000.0f;
+    }
+    if (snapshot->hasCellExtremes) {
+        out->cellMaxV = (float)snapshot->maxCellMv / 1000.0f;
+        out->cellMinV = (float)snapshot->minCellMv / 1000.0f;
+        out->cellMaxIdx = snapshot->maxCellIndex;
+        out->cellMinIdx = snapshot->minCellIndex;
+        out->deltaV = out->cellMaxV - out->cellMinV;
+        if (out->cellDiffV == 0.0f) {
+            out->cellDiffV = out->deltaV;
+        }
+    }
+
+    if (snapshot->hasAlarms) {
+        out->alarmRaw = ((uint32_t)snapshot->warningBytes[0]) |
+                        ((uint32_t)snapshot->warningBytes[1] << 8) |
+                        ((uint32_t)snapshot->warningBytes[2] << 16) |
+                        ((uint32_t)snapshot->warningBytes[3] << 24);
+        seplosRs485FormatAlertFields(snapshot,
+                                     out->protections,
+                                     sizeof(out->protections),
+                                     out->alarms,
+                                     sizeof(out->alarms),
+                                     out->warnings,
+                                     sizeof(out->warnings));
+    }
+
+    snprintf(out->stateFlags,
+             sizeof(out->stateFlags),
+             "Status=0x%02X, Power=0x%02X, CHG=%s, DSG=%s, BAL=0x%04X, Port=%.2fV",
+             snapshot->hasAlarms ? snapshot->systemStatus : 0u,
+             snapshot->hasAlarms ? snapshot->powerStatus : 0u,
+             snapshot->chargeEnabled ? "ON" : "OFF",
+             snapshot->dischargeEnabled ? "ON" : "OFF",
+             snapshot->hasAlarms ? snapshot->balanceFlags : 0u,
+             snapshot->hasPortVoltageCv ? ((double)snapshot->portVoltageCv / 100.0) : 0.0);
+}
+
 static void bridgeFormatBmsInterface(char *out, size_t outSize, const bridge_runtime_settings_t *settings)
 {
     uint8_t port = 1u;
@@ -1023,6 +1137,9 @@ static const char *bridgeBmsTaskDebugName(uint8_t protocol)
             return "CHINA_TOWER";
         case PROTOCOL_RS485_WOW:
             return "WOW";
+        case PROTOCOL_RS485_SEPLOS:
+        case PROTOCOL_RS485_SEPLOS_19200:
+            return "SEPLOS";
         default:
             return "GROWATT";
     }
@@ -1044,6 +1161,9 @@ static const char *bridgeBmsTaskSourceName(uint8_t protocol)
             return "CHINA_TOWER_BMS_TASK";
         case PROTOCOL_RS485_WOW:
             return "WOW_BMS_TASK";
+        case PROTOCOL_RS485_SEPLOS:
+        case PROTOCOL_RS485_SEPLOS_19200:
+            return "SEPLOS_RS485_TASK";
         default:
             return "GROWATT_BMS_TASK";
     }
@@ -1205,6 +1325,28 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
         hasPacket = wowModbusBmsTaskGetLatestPacket(&packet);
         if (hasPacket) {
             srcUpdatedMs = (uint32_t)(packet.timestampUs / 1000ULL);
+        }
+    } else if ((settings.bms_protocol == PROTOCOL_RS485_SEPLOS) ||
+               (settings.bms_protocol == PROTOCOL_RS485_SEPLOS_19200)) {
+        seplos_rs485_snapshot_t snapshot = {0};
+        bool haveSnapshot = seplosRs485BmsTaskGetLatestSnapshot(&snapshot);
+        hasPacket = seplosRs485BmsTaskGetLatestPacket(&packet);
+        if (hasPacket) {
+            srcUpdatedMs = (uint32_t)(packet.timestampUs / 1000ULL);
+        }
+        if (haveSnapshot) {
+            ESP_LOGD(BRIDGE_TAG, "[FILL] Using Seplos snapshot: soc=%u.%u%%, v=%.2fV",
+                     snapshot.hasSocDeciPct ? (unsigned)(snapshot.socDeciPct / 10u) : 0u,
+                     snapshot.hasSocDeciPct ? (unsigned)(snapshot.socDeciPct % 10u) : 0u,
+                     snapshot.hasPackVoltageCv ? ((double)snapshot.packVoltageCv / 100.0) : 0.0);
+            fillTelemetryFromSeplosSnapshot(&snapshot, out);
+            if (srcUpdatedMs != 0u) {
+                out->updatedMs = srcUpdatedMs;
+                if (updatedMsOut != NULL) {
+                    *updatedMsOut = srcUpdatedMs;
+                }
+            }
+            return;
         }
     } else {
         hasPacket = growattBmsTaskGetLatestPacket(&packet);

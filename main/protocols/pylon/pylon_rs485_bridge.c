@@ -98,6 +98,8 @@ static const char *protocolToStrLocal(uint8_t protocol)
         case PROTOCOL_RS485_VOLTRONIC: return "VOLTRONIC_MODBUS";
         case PROTOCOL_RS485_CHINA_TOWER: return "CHINA_TOWER_MODBUS";
         case PROTOCOL_RS485_WOW: return "WOW_MODBUS";
+        case PROTOCOL_RS485_SEPLOS: return "SEPLOS_RS485";
+        case PROTOCOL_RS485_SEPLOS_19200: return "SEPLOS_RS485_19200";
         default: return "UNKNOWN";
     }
 }
