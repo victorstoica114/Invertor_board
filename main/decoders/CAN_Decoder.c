@@ -45,6 +45,16 @@ static inline uint16_t can_le16(const uint8_t *p);
 static inline int16_t can_le16s(const uint8_t *p);
 static void canUpdateUniversalModelFromGrowattCache(const char *ifname);
 
+static float canCorrectPylonPackVoltage(float rawPackVoltageV, float chargeVoltageLimitV)
+{
+    if (rawPackVoltageV > 0.0f &&
+        chargeVoltageLimitV >= 30.0f &&
+        rawPackVoltageV < ((chargeVoltageLimitV * 0.5f) + 2.0f)) {
+        return rawPackVoltageV * 2.0f;
+    }
+    return rawPackVoltageV;
+}
+
 static canBmsCachedFrame_t *canBmsCacheForIf(const char *ifname)
 {
     if (ifname == NULL) {
@@ -170,8 +180,15 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
         haveSoc = true;
     }
 
+    if (canPylonGetFrameById(local, 0x351u, &f351) && f351->dlc >= 6u) {
+        model.chargeVoltageLimitV = (float)can_le16(&f351->data[0]) / 10.0f;
+        model.chargeCurrentLimitA = (float)can_le16(&f351->data[2]) / 10.0f;
+        model.dischargeCurrentLimitA = (float)can_le16(&f351->data[4]) / 10.0f;
+    }
+
     if (canPylonGetFrameById(local, 0x356u, &f356) && f356->dlc >= 6u) {
-        model.packVoltageV = (float)can_le16(&f356->data[0]) / 100.0f;
+        float rawPackVoltageV = (float)can_le16(&f356->data[0]) / 100.0f;
+        model.packVoltageV = canCorrectPylonPackVoltage(rawPackVoltageV, model.chargeVoltageLimitV);
         model.packCurrentA = (float)can_le16s(&f356->data[2]) / 10.0f;
         model.temperaturesC[0] = (float)can_le16(&f356->data[4]) / 10.0f;
         havePack = true;
@@ -212,12 +229,6 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
         model.chargeEnabled = (status & 0x80u) != 0u;
         model.dischargeEnabled = (status & 0x40u) != 0u;
         model.balanceEnabled = (status & 0x20u) != 0u;
-    }
-
-    if (canPylonGetFrameById(local, 0x351u, &f351) && f351->dlc >= 6u) {
-        model.chargeVoltageLimitV = (float)can_le16(&f351->data[0]) / 10.0f;
-        model.chargeCurrentLimitA = (float)can_le16(&f351->data[2]) / 10.0f;
-        model.dischargeCurrentLimitA = (float)can_le16(&f351->data[4]) / 10.0f;
     }
 
     model.valid = haveSoc && havePack;

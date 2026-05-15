@@ -60,7 +60,7 @@
 #define RS485_2_TX_POST_DELAY_MS  0
 
 /* --- Decoder / logging compile-time switches --- */
-#define CAN_DECODER_SHOW_RAW_FRAMES 0
+#define CAN_DECODER_SHOW_RAW_FRAMES 1
 #define REG_RAW_VALUES 0
 #define MODBUS_DECODER_SNAPSHOT_ONLY 1
 #define RS485_FORWARD_VERBOSE_LOGS 0
@@ -82,6 +82,11 @@
 
 /* --- Diagnostic step: force fake replies for CAN_PYLON -> RS485_PYLON route --- */
 #define PYLON_CAN_RS485_FORCE_FAKE_ENABLE 0
+#define PYLON_RS485_ACTIVE_PROBE_ENABLE 0
+#define PYLON_RS485_PACK_ID_FALLBACK_ENABLE 0
+
+/* Diagnostic: ignore persisted NVS route and boot with the config.h route below. */
+#define RUNTIME_SETTINGS_FORCE_DEFAULTS 1
 
 /* Source freshness window for fail-safe (stop answering if source is stale). */
 #define BRIDGE_SOURCE_STALE_MS 2000u
@@ -175,9 +180,9 @@ static inline uint32_t bridgeProtocolCanBitrate(uint8_t protocol)
 }
 
 #define BMS_line LINE_RS485
-#define Inverter_line LINE_CAN
-#define BMS_protocol PROTOCOL_RS485_GROWATT
-#define Inverter_protocol PROTOCOL_CAN_GROWATT
+#define Inverter_line LINE_RS485
+#define BMS_protocol PROTOCOL_RS485_PYLON
+#define Inverter_protocol PROTOCOL_RS485_PYLON
 #define BMS_PORT 1
 #define Inverter_PORT 2
 
@@ -280,7 +285,7 @@ static inline uint32_t bridgeProtocolCanBitrate(uint8_t protocol)
 
 #define WORKING_MODE_HEX_PRINT_LIMIT   64
 #define WORKING_MODE_SNAPSHOT_PERIOD_MS 5000
-#define WORKING_MODE_SNAPSHOT_TASK_STACK 4096
+#define WORKING_MODE_SNAPSHOT_TASK_STACK 8192
 #define WORKING_MODE_SNAPSHOT_TASK_PRIORITY 7
 
 /* --- Web interface --- */

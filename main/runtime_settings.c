@@ -120,6 +120,12 @@ void runtimeSettingsInit(void)
 
     s_runtimeSettings = defaultSettings();
 
+#if RUNTIME_SETTINGS_FORCE_DEFAULTS
+    ESP_LOGW(SETTINGS_TAG, "Ignoring stored runtime settings; using config.h defaults");
+    s_runtimeSettingsInit = true;
+    return;
+#endif
+
     nvs_handle_t nvs = 0;
     err = nvs_open(SETTINGS_NS, NVS_READONLY, &nvs);
     if (err == ESP_OK) {

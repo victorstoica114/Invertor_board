@@ -109,6 +109,35 @@ Bridge mode route selection is done in `orchestratorStartFromRuntime(...)`:
 
 ## Integration Notes
 
+### Known Field Issue: Seplos RS485
+
+As of the 2026-05-15 field session, Seplos communication over RS485 is still
+open.
+
+Observed on the bench:
+
+- Seplos communicates with the inverter when connected directly.
+- With the bridge configured as `RS485_PYLON <-> RS485_PYLON`, the inverter
+  sends valid Pylon requests on `RS485_2` (`0x61` and `0x63`), and the firmware
+  forwards those requests to `RS485_1`.
+- `RS485_1` raw captures after forwarding do not contain a valid Pylon ASCII
+  frame (`~...`), a valid Seplos ASCII frame, or a coherent Modbus RTU response.
+  Captured bytes were mostly `00`, `FF`, `05`, `EE`, and other non-frame data.
+- The same result was observed with `RS485_1` in ESP-IDF half-duplex mode,
+  manual direction control, and inverted manual direction control.
+- Active Seplos proprietary polling at `9600` also did not produce valid
+  responses; only single-byte or short non-frame raw chunks were captured.
+
+Current diagnostic recommendation:
+
+- Start the next RS485 investigation by passively sniffing the direct
+  inverter-to-Seplos link that is known to work, then compare the captured
+  request/response framing against the bridge-forwarded traffic.
+- Keep `RS485_2` as the known-good inverter side unless the hardware wiring is
+  intentionally changed.
+- Do not treat the current Seplos RS485 implementation as production-ready until
+  a valid frame has been captured and decoded from the Seplos side.
+
 ### `JKBMS_MODBUS -> RS485_PYLON`
 
 For generic BMS sources such as `JKBMS_MODBUS`, the synthetic Pylon `0x63` status byte must stay conservative.

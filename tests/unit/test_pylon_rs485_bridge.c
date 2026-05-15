@@ -220,6 +220,19 @@ void test_pylon_synthetic_61_generic_sources_project_percentages_only(void)
     TEST_ASSERT_EQUAL_UINT16(0x11D4u, hexBe16At(info61, 15));
 }
 
+void test_pylon_synthetic_61_native_can_sources_project_pack_voltage_and_current(void)
+{
+    char info61[128] = {0};
+
+    configureNativeCanRoute(PROTOCOL_CAN_PYLON);
+    setValidModel();
+
+    TEST_ASSERT_TRUE(pylonRs485BridgeBuildSyntheticInfo61ForTest(info61, sizeof(info61)));
+    TEST_ASSERT_EQUAL_UINT16(7270u, hexBe16At(info61, 0));
+    TEST_ASSERT_EQUAL_UINT16(123u, hexBe16At(info61, 2));
+    TEST_ASSERT_EQUAL_UINT8(87u, hexByteAt(info61, 4));
+}
+
 void test_pylon_synthetic_payloads_reject_missing_model(void)
 {
     char info61[128] = {0};
@@ -299,6 +312,7 @@ int main(void)
     RUN_TEST(test_pylon_synthetic_jkbms_can_route_does_not_overwrite_source_telemetry);
     RUN_TEST(test_pylon_native_source_still_publishes_pylon_decoded_log);
     RUN_TEST(test_pylon_synthetic_61_generic_sources_project_percentages_only);
+    RUN_TEST(test_pylon_synthetic_61_native_can_sources_project_pack_voltage_and_current);
     RUN_TEST(test_pylon_synthetic_payloads_reject_missing_model);
     RUN_TEST(test_pylon_route_supports_115200_variants);
     RUN_TEST(test_pylon_probe_in_bridge_mode_waits_for_recent_inverter_traffic);

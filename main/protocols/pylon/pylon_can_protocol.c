@@ -39,6 +39,16 @@ static inline int16_t pylonCanLe16s(const uint8_t *p)
     return (int16_t)pylonCanLe16(p);
 }
 
+static float pylonCanCorrectPackVoltage(float rawPackVoltageV, float chargeVoltageLimitV)
+{
+    if (rawPackVoltageV > 0.0f &&
+        chargeVoltageLimitV >= 30.0f &&
+        rawPackVoltageV < ((chargeVoltageLimitV * 0.5f) + 2.0f)) {
+        return rawPackVoltageV * 2.0f;
+    }
+    return rawPackVoltageV;
+}
+
 static void formatCanData(const uint8_t *data, uint8_t dlc, char *out, size_t outSize)
 {
     size_t pos = 0;
@@ -134,6 +144,7 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
     float chargeCurrentLimit = 0.0f;
     float dischargeCurrentLimit = 0.0f;
     float lowerDischargeVoltTentative = 0.0f;
+    float rawPackVolt = 0.0f;
     float packVolt = 0.0f;
     float packCurrent = 0.0f;
     float avgTemp = 0.0f;
@@ -158,7 +169,8 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
         soh = pylonCanLe16(&f355->data[2]);
     }
     if (f356 && f356->dlc >= 6u) {
-        packVolt = (float)pylonCanLe16(&f356->data[0]) / 100.0f;
+        rawPackVolt = (float)pylonCanLe16(&f356->data[0]) / 100.0f;
+        packVolt = pylonCanCorrectPackVoltage(rawPackVolt, chargeVoltLimit);
         packCurrent = (float)pylonCanLe16s(&f356->data[2]) / 10.0f;
         avgTemp = (float)pylonCanLe16(&f356->data[4]) / 10.0f;
     }
@@ -217,9 +229,9 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
     snap.pylonStatus63 = status35C;
 
     ESP_LOGI("PYLON_CAN", "[PYLON_DECODE] Setting manual cache: valid=%s, source=%s, soc=%u%%, "
-             "v=%.2fV, i=%.1fA, modules=%u",
+             "v=%.2fV raw=%.2fV, i=%.1fA, modules=%u",
              snap.valid ? "YES" : "NO", snap.source, snap.socPct,
-             (double)packVolt, (double)packCurrent, moduleCount);
+             (double)packVolt, (double)rawPackVolt, (double)packCurrent, moduleCount);
 
     bridgeSetTelemetrySnapshot(&snap);
 
@@ -253,7 +265,7 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
              "CAN Pylon\n"
              "  valid : %s\n"
              "  name  : %s\n"
-             "  pack  : V=%.2fV  I=%.1fA  avgT=%.1fC  SOC=%u%%  SOH=%u%%\n"
+             "  pack  : V=%.2fV  rawV=%.2fV  I=%.1fA  avgT=%.1fC  SOC=%u%%  SOH=%u%%\n"
              "  limits: chgV=%.1fV  chgI=%.1fA  disI=%.1fA  lowV?=%.1fV\n"
              "  info? : modules=%u  0x359=[%s]  0x35A=[%s]  0x35C=[%s]\n"
              "  ext?  : 0x372=[%s]  0x373=[%s]\n"
@@ -264,6 +276,7 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
              snap.valid ? "YES" : "NO",
              ascii35E[0] ? ascii35E : "(none)",
              (double)packVolt,
+             (double)rawPackVolt,
              (double)packCurrent,
              (double)avgTemp,
              (unsigned)soc,
@@ -296,8 +309,9 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
     ESP_LOGI(TAG, "  valid : %s", snap.valid ? "YES" : "NO");
     ESP_LOGI(TAG, "  name  : %s", ascii35E[0] ? ascii35E : "(none)");
     ESP_LOGI(TAG,
-             "  pack  : V=%.2fV I=%.1fA avgT=%.1fC SOC=%u%% SOH=%u%%",
+             "  pack  : V=%.2fV rawV=%.2fV I=%.1fA avgT=%.1fC SOC=%u%% SOH=%u%%",
              (double)packVolt,
+             (double)rawPackVolt,
              (double)packCurrent,
              (double)avgTemp,
              (unsigned)soc,

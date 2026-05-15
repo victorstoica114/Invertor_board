@@ -4,6 +4,7 @@
 #include "runtime_settings.h"
 
 #include "esp_log.h"
+#include "freertos/task.h"
 
 static uint32_t s_rs485Baud1 = RS485_DEFAULT_BAUDRATE;
 static uint32_t s_rs485Baud2 = RS485_DEFAULT_BAUDRATE;
@@ -51,6 +52,32 @@ static int rs485PortTxLevel(uart_port_t uart)
     return 1;
 }
 
+static TickType_t rs485PortPreDelayTicks(uart_port_t uart)
+{
+    uint32_t delayMs = 0u;
+
+    if (uart == RS485_1_UART) {
+        delayMs = RS485_1_TX_PRE_DELAY_MS;
+    } else if (uart == RS485_2_UART) {
+        delayMs = RS485_2_TX_PRE_DELAY_MS;
+    }
+
+    return (delayMs > 0u) ? pdMS_TO_TICKS(delayMs) : 0;
+}
+
+static TickType_t rs485PortPostDelayTicks(uart_port_t uart)
+{
+    uint32_t delayMs = 0u;
+
+    if (uart == RS485_1_UART) {
+        delayMs = RS485_1_TX_POST_DELAY_MS;
+    } else if (uart == RS485_2_UART) {
+        delayMs = RS485_2_TX_POST_DELAY_MS;
+    }
+
+    return (delayMs > 0u) ? pdMS_TO_TICKS(delayMs) : 0;
+}
+
 static int rs485DirTxLevelByPin(gpio_num_t dirPin)
 {
     if (dirPin == (gpio_num_t)RS485_1_DIR) return RS485_1_DIR_TX_LEVEL;
@@ -93,7 +120,11 @@ esp_err_t rs485WriteBytes(uart_port_t uart,
     }
 
     if (!rs485PortUsesHalfDuplex(uart)) {
+        TickType_t preDelay = rs485PortPreDelayTicks(uart);
         rs485SetDirection(dirPin, true);
+        if (preDelay > 0) {
+            vTaskDelay(preDelay);
+        }
     }
     int written = uart_write_bytes(uart, (const char *)data, len);
     if (written != len) {
@@ -105,6 +136,10 @@ esp_err_t rs485WriteBytes(uart_port_t uart,
 
     esp_err_t waitErr = uart_wait_tx_done(uart, txTimeoutTicks);
     if (!rs485PortUsesHalfDuplex(uart)) {
+        TickType_t postDelay = rs485PortPostDelayTicks(uart);
+        if (postDelay > 0) {
+            vTaskDelay(postDelay);
+        }
         rs485SetDirection(dirPin, false);
     }
     return waitErr;

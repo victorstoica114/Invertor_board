@@ -114,7 +114,8 @@ static void deleteTaskIfRunning(TaskHandle_t *handle)
 
 static bool pylonProbeModeEnabled(uint8_t mode)
 {
-    return (mode == MODE_BRIDGE) || (mode == MODE_FORWARD);
+    return (PYLON_RS485_ACTIVE_PROBE_ENABLE != 0) &&
+           ((mode == MODE_BRIDGE) || (mode == MODE_FORWARD));
 }
 
 static bool pylonCanToRs485ModeEnabled(const bridge_runtime_settings_t *settings)
@@ -369,19 +370,30 @@ static uint16_t pylonLengthField(int infoAsciiLen)
 static bool pylonBuildRequest(uint8_t ver,
                               uint8_t adr,
                               uint8_t cid2,
+                              const char *payloadHex,
                               uint8_t *out,
                               int outSize,
                               int *outLen)
 {
-    char body[32];
+    char body[48];
     uint16_t checksum;
+    size_t payloadLen = (payloadHex != NULL) ? strlen(payloadHex) : 0u;
+    uint16_t lengthField = pylonLengthField((int)payloadLen);
     int len;
 
     if (out == NULL || outLen == NULL || outSize < 20) {
         return false;
     }
+    if (payloadLen > 16u) {
+        return false;
+    }
 
-    snprintf(body, sizeof(body), "%02X%02X46%02X0000", ver, adr, cid2);
+    snprintf(body, sizeof(body), "%02X%02X46%02X%04X%s",
+             ver,
+             adr,
+             cid2,
+             lengthField,
+             (payloadHex != NULL) ? payloadHex : "");
     checksum = pylonAsciiChecksum(body);
     len = snprintf((char *)out, (size_t)outSize, "~%s%04X\r", body, checksum);
     if (len <= 0 || len >= outSize) {
@@ -390,6 +402,16 @@ static bool pylonBuildRequest(uint8_t ver,
 
     *outLen = len;
     return true;
+}
+
+static bool pylonBuildEmptyRequest(uint8_t ver,
+                                   uint8_t adr,
+                                   uint8_t cid2,
+                                   uint8_t *out,
+                                   int outSize,
+                                   int *outLen)
+{
+    return pylonBuildRequest(ver, adr, cid2, NULL, out, outSize, outLen);
 }
 
 static int parseHexAsciiPayload(const char *ascii, uint8_t *out, int maxOut)
@@ -477,14 +499,14 @@ static bool buildCanDerivedInfo61(char *out, size_t outSize)
             bytes[9] = 100u;
         }
     } else if (model.valid) {
-        /*
-         * Preserve the legacy word0 layout for synthetic Pylon 0x61 frames.
-         * Older inverter behaviour proved stable with 0x2190 here, while
-         * treating bytes[0..1] as plain pack voltage caused faults.
-         */
-        bytes[1] = 0x90u;
         if (nativePayloadSource) {
-            putBe16(&bytes[2], (uint16_t)((int16_t)(model.packCurrentA * 100.0f)));
+            uint32_t packCv = 0u;
+
+            if (model.packVoltageV > 0.0f) {
+                packCv = (uint32_t)(model.packVoltageV * 100.0f + 0.5f);
+                putBe16(&bytes[0], (packCv > UINT16_MAX) ? UINT16_MAX : (uint16_t)packCv);
+            }
+            putBe16(&bytes[2], (uint16_t)((int16_t)(model.packCurrentA * 10.0f)));
             bytes[4] = model.socPct;
             putBe16(&bytes[5], model.cycleCount);
             bytes[9] = model.sohPct;
@@ -975,7 +997,64 @@ static void forwardFrame(const char *rxName,
     }
 }
 
-static void logDecodedPylon(const uint8_t *frame, int len)
+static bool pylonPackIdFallbackCid(uint8_t cid2)
+{
+    return (cid2 == 0x61u) || (cid2 == 0x62u) || (cid2 == 0x63u);
+}
+
+static void maybeForwardPylonPackIdFallback(pylonRs485BridgeCtx_t *ctx,
+                                            const uint8_t *request,
+                                            int requestLen,
+                                            int64_t nowUs)
+{
+    uint8_t ver = 0;
+    uint8_t adr = 0;
+    uint8_t cid1 = 0;
+    uint8_t cid2 = 0;
+    uint8_t compat[32];
+    int compatLen = 0;
+
+    if (PYLON_RS485_PACK_ID_FALLBACK_ENABLE == 0) {
+        return;
+    }
+    if (ctx == NULL || request == NULL || !ctx->isInverterSide) {
+        return;
+    }
+    if (requestLen != 18) {
+        return;
+    }
+    if (!parsePylonHeader(request, requestLen, &ver, &adr, &cid1, &cid2)) {
+        return;
+    }
+    if (cid1 != 0x46u || !pylonPackIdFallbackCid(cid2)) {
+        return;
+    }
+
+    /*
+     * Some Pylon/Seplos examples address a concrete pack with payload 01
+     * (length E002). Keep the inverter's original request intact, and only
+     * add this compatibility probe while the BMS side is silent.
+     */
+    if ((s_lastPylonBmsTrafficUs != 0) && ((nowUs - s_lastPylonBmsTrafficUs) < 5000000LL)) {
+        return;
+    }
+
+    if (!pylonBuildRequest(ver, adr, cid2, "01", compat, sizeof(compat), &compatLen)) {
+        return;
+    }
+
+    if (pylonDiagLogsEnabled()) {
+        ESP_LOGI(EXAMPLE_TAG,
+                 "RS485 FWD PYLON_PACK_ID_FALLBACK -> %s: len=%d ASCII=[%.*s]",
+                 ctx->txName,
+                 compatLen,
+                 compatLen,
+                 compat);
+    }
+    forwardFrame("PYLON_PACK_ID_FALLBACK", ctx->txName, ctx->txUart, ctx->txDirPin, compat, compatLen);
+}
+
+static void logDecodedPylon(const char *ifName, const uint8_t *frame, int len)
 {
     uint8_t ver = 0, adr = 0, cid1 = 0, cid2 = 0;
     int infoAsciiLen = len - 18;
@@ -985,7 +1064,8 @@ static void logDecodedPylon(const uint8_t *frame, int len)
 
     if (pylonDiagLogsEnabled()) {
         ESP_LOGI(EXAMPLE_TAG,
-                 "PYLON: ver=0x%02X addr=0x%02X cid1=0x%02X cid2=0x%02X infoLen=0x%04X payloadHexLen=%d chk=OK",
+                 "PYLON RX %s: ver=0x%02X addr=0x%02X cid1=0x%02X cid2=0x%02X infoLen=0x%04X payloadHexLen=%d chk=OK",
+                 (ifName != NULL) ? ifName : "RS485",
                  (unsigned)ver,
                  (unsigned)adr,
                  (unsigned)cid1,
@@ -1010,7 +1090,7 @@ static void updateSummary61(void)
     s_pylonSummary.valid = true;
     s_pylonSummary.raw_word0 = be16(&bytes[0]);
     s_pylonSummary.pack_voltage_cv = be16(&bytes[0]);
-    s_pylonSummary.current_a = (float)be16s(&bytes[2]) / 100.0f;
+    s_pylonSummary.current_a = (float)be16s(&bytes[2]) / 10.0f;
     s_pylonSummary.soc_pct = bytes[4];
     s_pylonSummary.cycles = be16(&bytes[5]);
     s_pylonSummary.soh_pct = bytes[9];
@@ -1348,7 +1428,7 @@ static void processPylonBridgeFrame(pylonRs485BridgeCtx_t *ctx,
         s_lastPylonInverterTrafficUs = nowUs;
     }
 
-    logDecodedPylon(frame, frameLen);
+    logDecodedPylon(ctx->rxName, frame, frameLen);
     maybeHandlePassivePylonDecode(ctx, frame, frameLen, nowUs);
     maybeHandleForwardDecode(ctx, frame, frameLen, nowUs);
     consumedByProbe = maybeHandleProbeResponse(ctx, frame, frameLen);
@@ -1360,6 +1440,7 @@ static void processPylonBridgeFrame(pylonRs485BridgeCtx_t *ctx,
     } else if (settings.mode == MODE_BRIDGE) {
         if (pylonRs485PassthroughModeEnabled(&settings)) {
             forwardFrame(ctx->rxName, ctx->txName, ctx->txUart, ctx->txDirPin, frame, frameLen);
+            maybeForwardPylonPackIdFallback(ctx, frame, frameLen, nowUs);
         } else if (ctx->isInverterSide) {
             sendCachedResponse(ctx, frame, frameLen);
         }
@@ -1384,6 +1465,12 @@ static void pylonBridgeTask(void *pv)
 
         if (len > 0) {
             size_t scan = 0u;
+
+            if (ctx->isBmsSide && pylonDiagLogsEnabled()) {
+                char prefix[48];
+                snprintf(prefix, sizeof(prefix), "PYLON RAW %s", ctx->rxName);
+                logPylonFrame(prefix, rxChunk, len);
+            }
 
             if (haveFrame && (nowUs - lastByteUs) > gapUs) {
                 frameLen = 0;
@@ -1464,7 +1551,7 @@ static void pylonProbeTask(void *pv)
             continue;
         }
 
-        if (pylonBuildRequest(0x20, adr, cid2, frame, sizeof(frame), &frameLen)) {
+        if (pylonBuildEmptyRequest(0x20, adr, cid2, frame, sizeof(frame), &frameLen)) {
             s_probePending.active = true;
             s_probePending.adr = adr;
             s_probePending.cid2 = cid2;
