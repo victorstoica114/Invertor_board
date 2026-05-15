@@ -666,7 +666,8 @@ static bool pylonProbeShouldWaitForQuiet(uint8_t mode,
 {
     int64_t latestTrafficUs = lastBmsTrafficUs;
 
-    if (mode == MODE_FORWARD && lastInverterTrafficUs > latestTrafficUs) {
+    if (((mode == MODE_FORWARD) || (mode == MODE_BRIDGE)) &&
+        lastInverterTrafficUs > latestTrafficUs) {
         latestTrafficUs = lastInverterTrafficUs;
     }
 
@@ -1296,6 +1297,75 @@ static void maybeHandleForwardDecode(const pylonRs485BridgeCtx_t *ctx,
     }
 }
 
+static void maybeHandlePassivePylonDecode(const pylonRs485BridgeCtx_t *ctx,
+                                          const uint8_t *frame,
+                                          int len,
+                                          int64_t nowUs)
+{
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+    uint8_t ver = 0, adr = 0, cid1 = 0, code = 0;
+
+    if (ctx == NULL || settings.mode != MODE_BRIDGE ||
+        !pylonRs485PassthroughModeEnabled(&settings)) {
+        return;
+    }
+    if (!parsePylonHeader(frame, len, &ver, &adr, &cid1, &code) || cid1 != 0x46) {
+        return;
+    }
+
+    if (code == 0x61 || code == 0x62 || code == 0x63) {
+        s_forwardPending.valid = true;
+        s_forwardPending.cid2 = code;
+        s_forwardPending.reqAdr = adr;
+        s_forwardPending.seenUs = nowUs;
+        return;
+    }
+
+    if (code == 0x00 && s_forwardPending.valid &&
+        adr == s_forwardPending.reqAdr &&
+        (nowUs - s_forwardPending.seenUs) <= 1000000LL) {
+        cacheResponse(s_forwardPending.cid2, frame, len);
+        s_forwardPending.valid = false;
+    }
+}
+
+static void processPylonBridgeFrame(pylonRs485BridgeCtx_t *ctx,
+                                    const uint8_t *frame,
+                                    int frameLen,
+                                    int64_t nowUs)
+{
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+    bool consumedByProbe = false;
+
+    if (ctx == NULL || frame == NULL || frameLen <= 0) {
+        return;
+    }
+
+    if (ctx->isBmsSide) {
+        s_lastPylonBmsTrafficUs = nowUs;
+    }
+    if (ctx->isInverterSide) {
+        s_lastPylonInverterTrafficUs = nowUs;
+    }
+
+    logDecodedPylon(frame, frameLen);
+    maybeHandlePassivePylonDecode(ctx, frame, frameLen, nowUs);
+    maybeHandleForwardDecode(ctx, frame, frameLen, nowUs);
+    consumedByProbe = maybeHandleProbeResponse(ctx, frame, frameLen);
+
+    if (settings.mode == MODE_FORWARD) {
+        if (!consumedByProbe) {
+            forwardFrame(ctx->rxName, ctx->txName, ctx->txUart, ctx->txDirPin, frame, frameLen);
+        }
+    } else if (settings.mode == MODE_BRIDGE) {
+        if (pylonRs485PassthroughModeEnabled(&settings)) {
+            forwardFrame(ctx->rxName, ctx->txName, ctx->txUart, ctx->txDirPin, frame, frameLen);
+        } else if (ctx->isInverterSide) {
+            sendCachedResponse(ctx, frame, frameLen);
+        }
+    }
+}
+
 static void pylonBridgeTask(void *pv)
 {
     pylonRs485BridgeCtx_t *ctx = (pylonRs485BridgeCtx_t *)pv;
@@ -1309,11 +1379,12 @@ static void pylonBridgeTask(void *pv)
     while (1) {
         int len = uart_read_bytes(ctx->rxUart, rxChunk, RS485_BUF_SIZE, pdMS_TO_TICKS(5));
         int64_t nowUs = esp_timer_get_time();
-        bool consumedByProbe = false;
 
         maybeCheckProbeTimeout(ctx, nowUs);
 
         if (len > 0) {
+            size_t scan = 0u;
+
             if (haveFrame && (nowUs - lastByteUs) > gapUs) {
                 frameLen = 0;
                 haveFrame = false;
@@ -1331,30 +1402,32 @@ static void pylonBridgeTask(void *pv)
                 haveFrame = true;
             }
 
-            if (haveFrame && frameLen > 0 && frameBuf[frameLen - 1] == '\r') {
-                bridge_runtime_settings_t settings = runtimeSettingsGet();
-                if (ctx->isBmsSide) {
-                    s_lastPylonBmsTrafficUs = nowUs;
-                }
-                if (ctx->isInverterSide) {
-                    s_lastPylonInverterTrafficUs = nowUs;
-                }
-                logDecodedPylon(frameBuf, frameLen);
-                maybeHandleForwardDecode(ctx, frameBuf, frameLen, nowUs);
-                consumedByProbe = maybeHandleProbeResponse(ctx, frameBuf, frameLen);
-
-                if (settings.mode == MODE_FORWARD) {
-                    if (!consumedByProbe) {
-                        forwardFrame(ctx->rxName, ctx->txName, ctx->txUart, ctx->txDirPin, frameBuf, frameLen);
-                    }
-                } else if (settings.mode == MODE_BRIDGE) {
-                    if (ctx->isInverterSide) {
-                        sendCachedResponse(ctx, frameBuf, frameLen);
-                    }
+            while (frameLen > 0u) {
+                while (frameLen > 0u && frameBuf[0] != '~') {
+                    memmove(frameBuf, &frameBuf[1], (size_t)frameLen - 1u);
+                    frameLen--;
                 }
 
-                frameLen = 0;
-                haveFrame = false;
+                for (scan = 0u; scan < (size_t)frameLen; scan++) {
+                    if (frameBuf[scan] == '\r') {
+                        break;
+                    }
+                }
+                if (scan >= (size_t)frameLen) {
+                    break;
+                }
+
+                processPylonBridgeFrame(ctx, frameBuf, (int)scan + 1, nowUs);
+
+                const size_t consumed = scan + 1u;
+                if (consumed >= (size_t)frameLen) {
+                    frameLen = 0;
+                    haveFrame = false;
+                    break;
+                }
+                memmove(frameBuf, &frameBuf[consumed], (size_t)frameLen - consumed);
+                frameLen = (uint16_t)((size_t)frameLen - consumed);
+                haveFrame = frameLen > 0u;
             }
         } else if (haveFrame && (nowUs - lastByteUs) > gapUs) {
             bridge_runtime_settings_t settings = runtimeSettingsGet();
@@ -1369,7 +1442,7 @@ static void pylonBridgeTask(void *pv)
 
 static void pylonProbeTask(void *pv)
 {
-    static const uint8_t addresses[] = {0x02};
+    static const uint8_t addresses[] = {0x12, 0x02};
     static const uint8_t cid2Seq[] = {0x61, 0x63, 0x62};
     pylonProbeTaskCtx_t *ctx = (pylonProbeTaskCtx_t *)pv;
     size_t addrIdx = 0;

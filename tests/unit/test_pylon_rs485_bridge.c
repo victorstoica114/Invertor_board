@@ -264,14 +264,14 @@ void test_pylon_route_supports_115200_variants(void)
     TEST_ASSERT_TRUE(pylonRs485BridgeSupportsRoute(&settings));
 }
 
-void test_pylon_probe_in_bridge_mode_ignores_recent_inverter_traffic(void)
+void test_pylon_probe_in_bridge_mode_waits_for_recent_inverter_traffic(void)
 {
     const int64_t nowUs = 10000000LL;
 
-    TEST_ASSERT_FALSE(pylonRs485BridgeProbeShouldWaitForQuietForTest(MODE_BRIDGE,
-                                                                     nowUs,
-                                                                     0,
-                                                                     nowUs - 100000LL));
+    TEST_ASSERT_TRUE(pylonRs485BridgeProbeShouldWaitForQuietForTest(MODE_BRIDGE,
+                                                                    nowUs,
+                                                                    0,
+                                                                    nowUs - 100000LL));
     TEST_ASSERT_TRUE(pylonRs485BridgeProbeShouldWaitForQuietForTest(MODE_BRIDGE,
                                                                     nowUs,
                                                                     nowUs - 100000LL,
@@ -301,7 +301,7 @@ int main(void)
     RUN_TEST(test_pylon_synthetic_61_generic_sources_project_percentages_only);
     RUN_TEST(test_pylon_synthetic_payloads_reject_missing_model);
     RUN_TEST(test_pylon_route_supports_115200_variants);
-    RUN_TEST(test_pylon_probe_in_bridge_mode_ignores_recent_inverter_traffic);
+    RUN_TEST(test_pylon_probe_in_bridge_mode_waits_for_recent_inverter_traffic);
     RUN_TEST(test_pylon_probe_in_forward_mode_waits_for_recent_inverter_traffic);
     return UNITY_END();
 }
