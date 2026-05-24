@@ -41,6 +41,9 @@ The goal is practical maintenance:
 
 ### Changed
 
+- `RS485_PYLON <-> RS485_PYLON` passthrough now honors the runtime `Fake Inverter Data` override by answering inverter Pylon requests from the synthetic fake model instead of forwarding live BMS frames.
+- Pylon RS485 diagnostics now keep active probing enabled for known Seplos/Pylon pack addresses and can apply a configurable SOC floor to Seplos/Pylon `0x61` responses when the BMS reports an inverter-stopping low SOC.
+- Seplos RS485 field notes were updated after root-cause analysis showed the tested Seplos BMS does not provide RS485 bias resistors and needs the bridge/external hardware to bias the bus.
 - Generic `RS485_PYLON` synthetic `0x61` generation was made more conservative for non-native Pylon sources.
 - Generic `RS485_PYLON` synthetic `0x63` generation now defaults to a permissive `0xC0` status when explicit native Pylon charge/discharge bits are not available.
 - Debug/investigation logs added during root-cause analysis were removed after the fix was validated.
@@ -104,6 +107,8 @@ Behavior kept in code:
 
 ### Operational Notes
 
+- Seplos RS485 requires a fail-safe bias network on the Seplos-facing bus. Without bias, the idle A/B state can float and the bridge may capture noise-like bytes even though the same BMS communicates with an inverter that provides proper bias.
+- `Fake Inverter Data` now works as an inverter-facing override for Pylon RS485 passthrough routes as well as synthetic translator routes; remember it is runtime-only and must be reapplied after reset or flash.
 - `Fake Inverter Data` remains useful as a field diagnostic tool when validating inverter-side protocol behavior independently of live BMS decoding.
 - For future `JKBMS -> Pylon` work, compare synthetic `0x63` semantics first before chasing pack-voltage formatting.
 - The ESP32-C6-WROOM-1-N8 build now leaves roughly `86%` of the `7MB` app partition free.
