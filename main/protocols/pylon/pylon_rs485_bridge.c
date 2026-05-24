@@ -156,6 +156,15 @@ static bool pylonSyntheticSourceModeEnabled(const bridge_runtime_settings_t *set
            !pylonRs485PassthroughModeEnabled(settings);
 }
 
+static bool pylonFakeResponderModeEnabled(const bridge_runtime_settings_t *settings)
+{
+    return (settings != NULL) &&
+           (settings->mode == MODE_BRIDGE) &&
+           (settings->inverter_line == LINE_RS485) &&
+           bridgeProtocolIsRs485Pylon(settings->inverter_protocol) &&
+           batteryModelIsDebugOverrideEnabled();
+}
+
 static bool pylonSourceUsesNativePayloadEncoding(const bridge_runtime_settings_t *settings)
 {
     return (settings != NULL) &&
@@ -214,6 +223,23 @@ static bool pylonBmsSourceFresh(const bridge_runtime_settings_t *settings)
 
     if (settings == NULL) {
         return false;
+    }
+
+    if (pylonFakeResponderModeEnabled(settings)) {
+        universal_battery_model_t model = {0};
+        batteryModelGet(&model);
+        if (pylonDiagLogsEnabled() && ((nowUs - s_lastCanSourceDiagUs) >= 1000000LL)) {
+            ESP_LOGI(EXAMPLE_TAG,
+                     "PYLON fake override source check: model.valid=%s soc=%u soh=%u I=%.2fA V=%.2fV status=0x%02X",
+                     model.valid ? "YES" : "NO",
+                     (unsigned)model.socPct,
+                     (unsigned)model.sohPct,
+                     (double)model.packCurrentA,
+                     (double)model.packVoltageV,
+                     (unsigned)(model.protocolState & 0xFFu));
+            s_lastCanSourceDiagUs = nowUs;
+        }
+        return model.valid;
     }
 
     if (pylonSyntheticSourceModeEnabled(settings)) {
@@ -354,6 +380,51 @@ static uint16_t pylonAsciiChecksum(const char *body)
         sum += (uint8_t)(*p);
     }
     return (uint16_t)((~sum + 1u) & 0xFFFFu);
+}
+
+static uint8_t hexDigitUpper(uint8_t v)
+{
+    v &= 0x0Fu;
+    return (uint8_t)((v < 10u) ? ('0' + v) : ('A' + (v - 10u)));
+}
+
+static void writeAsciiHexByte(uint8_t *p, uint8_t v)
+{
+    p[0] = hexDigitUpper((uint8_t)(v >> 4));
+    p[1] = hexDigitUpper(v);
+}
+
+static void writeAsciiHexWord(uint8_t *p, uint16_t v)
+{
+    p[0] = hexDigitUpper((uint8_t)(v >> 12));
+    p[1] = hexDigitUpper((uint8_t)(v >> 8));
+    p[2] = hexDigitUpper((uint8_t)(v >> 4));
+    p[3] = hexDigitUpper((uint8_t)v);
+}
+
+static uint16_t pylonAsciiChecksumBytes(const uint8_t *body, int bodyLen)
+{
+    uint32_t sum = 0;
+
+    if (body == NULL || bodyLen <= 0) {
+        return 0u;
+    }
+    for (int i = 0; i < bodyLen; i++) {
+        sum += body[i];
+    }
+    return (uint16_t)((~sum + 1u) & 0xFFFFu);
+}
+
+static bool pylonRewriteChecksum(uint8_t *frame, int len)
+{
+    if (!isLikelyPylonAsciiFrame(frame, len)) {
+        return false;
+    }
+
+    int checksumPos = len - 5;
+    uint16_t checksum = pylonAsciiChecksumBytes(&frame[1], checksumPos - 1);
+    writeAsciiHexWord(&frame[checksumPos], checksum);
+    return true;
 }
 
 static uint16_t pylonLengthField(int infoAsciiLen)
@@ -714,7 +785,8 @@ static void maybeRefreshSyntheticCacheFromUniversal(void)
     char info63[sizeof(s_pylonCache.info63)] = {0};
     int64_t nowUs = esp_timer_get_time();
 
-    if (!pylonSyntheticSourceModeEnabled(&settings)) {
+    if (!pylonSyntheticSourceModeEnabled(&settings) &&
+        !pylonFakeResponderModeEnabled(&settings)) {
         return;
     }
 
@@ -803,7 +875,8 @@ static void telemetryFromSummary(void)
     bridge_runtime_settings_t settings = runtimeSettingsGet();
     universal_battery_model_t model = {0};
     char iface[12] = {0};
-    bool preferModelTelemetry = pylonSyntheticSourceModeEnabled(&settings);
+    bool preferModelTelemetry = pylonSyntheticSourceModeEnabled(&settings) ||
+                                pylonFakeResponderModeEnabled(&settings);
     bool useModelTelemetry = false;
 
     if (!pylonShouldPublishTelemetrySnapshot(&settings)) {
@@ -1409,13 +1482,69 @@ static void maybeHandlePassivePylonDecode(const pylonRs485BridgeCtx_t *ctx,
     }
 }
 
+static bool maybeApplyPylonSocFloor(const pylonRs485BridgeCtx_t *ctx,
+                                    uint8_t *frame,
+                                    int len,
+                                    int64_t nowUs)
+{
+#if PYLON_RS485_SOC_FLOOR_ENABLE
+    uint8_t ver = 0, adr = 0, cid1 = 0, code = 0;
+    uint8_t oldSoc = 0;
+    uint8_t floorSoc = (PYLON_RS485_SOC_FLOOR_PCT > 100u)
+                           ? 100u
+                           : (uint8_t)PYLON_RS485_SOC_FLOOR_PCT;
+    const int socAsciiPos = 13 + (4 * 2);
+    const int payloadLen = len - 18;
+    bool pending61 = false;
+
+    if (ctx == NULL || frame == NULL || !ctx->isBmsSide || floorSoc == 0u) {
+        return false;
+    }
+    if (!parsePylonHeader(frame, len, &ver, &adr, &cid1, &code) ||
+        cid1 != 0x46 || code != 0x00) {
+        return false;
+    }
+    pending61 = s_forwardPending.valid &&
+                s_forwardPending.cid2 == 0x61 &&
+                (nowUs - s_forwardPending.seenUs) <= 1000000LL;
+    if (!pending61 && payloadLen != 98) {
+        return false;
+    }
+    if ((socAsciiPos + 1) >= (len - 5)) {
+        return false;
+    }
+    if (!parseAsciiHexByte(&frame[socAsciiPos], &oldSoc) || oldSoc >= floorSoc) {
+        return false;
+    }
+
+    writeAsciiHexByte(&frame[socAsciiPos], floorSoc);
+    if (!pylonRewriteChecksum(frame, len)) {
+        return false;
+    }
+
+    ESP_LOGW(EXAMPLE_TAG,
+             "Pylon SOC floor applied on %s: %u%% -> %u%%",
+             ctx->rxName,
+             (unsigned)oldSoc,
+             (unsigned)floorSoc);
+    return true;
+#else
+    (void)ctx;
+    (void)frame;
+    (void)len;
+    (void)nowUs;
+    return false;
+#endif
+}
+
 static void processPylonBridgeFrame(pylonRs485BridgeCtx_t *ctx,
-                                    const uint8_t *frame,
+                                    uint8_t *frame,
                                     int frameLen,
                                     int64_t nowUs)
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
     bool consumedByProbe = false;
+    bool fakeResponder = pylonFakeResponderModeEnabled(&settings);
 
     if (ctx == NULL || frame == NULL || frameLen <= 0) {
         return;
@@ -1428,6 +1557,8 @@ static void processPylonBridgeFrame(pylonRs485BridgeCtx_t *ctx,
         s_lastPylonInverterTrafficUs = nowUs;
     }
 
+    (void)maybeApplyPylonSocFloor(ctx, frame, frameLen, nowUs);
+
     logDecodedPylon(ctx->rxName, frame, frameLen);
     maybeHandlePassivePylonDecode(ctx, frame, frameLen, nowUs);
     maybeHandleForwardDecode(ctx, frame, frameLen, nowUs);
@@ -1439,6 +1570,16 @@ static void processPylonBridgeFrame(pylonRs485BridgeCtx_t *ctx,
         }
     } else if (settings.mode == MODE_BRIDGE) {
         if (pylonRs485PassthroughModeEnabled(&settings)) {
+            if (fakeResponder) {
+                if (ctx->isInverterSide) {
+                    sendCachedResponse(ctx, frame, frameLen);
+                } else if (pylonDiagLogsEnabled()) {
+                    ESP_LOGI(EXAMPLE_TAG,
+                             "RS485 PYLON fake override active: live BMS frame on %s consumed, not forwarded",
+                             ctx->rxName);
+                }
+                return;
+            }
             forwardFrame(ctx->rxName, ctx->txName, ctx->txUart, ctx->txDirPin, frame, frameLen);
             maybeForwardPylonPackIdFallback(ctx, frame, frameLen, nowUs);
         } else if (ctx->isInverterSide) {
@@ -1466,7 +1607,7 @@ static void pylonBridgeTask(void *pv)
         if (len > 0) {
             size_t scan = 0u;
 
-            if (ctx->isBmsSide && pylonDiagLogsEnabled()) {
+            if (pylonDiagLogsEnabled()) {
                 char prefix[48];
                 snprintf(prefix, sizeof(prefix), "PYLON RAW %s", ctx->rxName);
                 logPylonFrame(prefix, rxChunk, len);
@@ -1529,7 +1670,7 @@ static void pylonBridgeTask(void *pv)
 
 static void pylonProbeTask(void *pv)
 {
-    static const uint8_t addresses[] = {0x12, 0x02};
+    static const uint8_t addresses[] = {0x02, 0x12, 0x22, 0x32, 0x42};
     static const uint8_t cid2Seq[] = {0x61, 0x63, 0x62};
     pylonProbeTaskCtx_t *ctx = (pylonProbeTaskCtx_t *)pv;
     size_t addrIdx = 0;
@@ -1634,6 +1775,14 @@ void pylonRs485BridgeEnable(void)
     inverterCtx.txDirPin = (settings.bms_port == 1) ? rs485GetDir1() : rs485GetDir2();
     inverterCtx.isBmsSide = false;
     inverterCtx.isInverterSide = true;
+
+#if PYLON_RS485_BMS_UART_INVERT
+    (void)uart_set_line_inverse(bmsCtx.rxUart, UART_SIGNAL_TXD_INV | UART_SIGNAL_RXD_INV);
+    ESP_LOGI(EXAMPLE_TAG, "Pylon BMS UART TX/RX inversion enabled on %s", bmsCtx.rxName);
+#else
+    (void)uart_set_line_inverse(bmsCtx.rxUart, UART_SIGNAL_INV_DISABLE);
+#endif
+    (void)uart_set_line_inverse(inverterCtx.rxUart, UART_SIGNAL_INV_DISABLE);
 
     if (pylonRs485PassthroughModeEnabled(&settings)) {
         xTaskCreate(pylonBridgeTask, "pylon_bms_rx", 6144, &bmsCtx, 9, &s_pylonBmsTask);

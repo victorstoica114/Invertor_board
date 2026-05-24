@@ -111,8 +111,16 @@ Bridge mode route selection is done in `orchestratorStartFromRuntime(...)`:
 
 ### Known Field Issue: Seplos RS485
 
-As of the 2026-05-15 field session, Seplos communication over RS485 is still
-open.
+As of the 2026-05-24 field session, the Seplos RS485 issue was traced to a
+hardware-layer requirement: the tested Seplos BMS does not provide RS485 bias
+resistors on its interface. The bridge hardware used during testing also does
+not provide enough fail-safe bias on that bus, so the idle RS485 line can float.
+In that state the firmware sees noise-like bytes or short invalid chunks even
+though the same Seplos BMS communicates normally with an inverter that provides
+proper bus bias.
+
+This is a hardware compatibility issue, not primarily a Pylon/Seplos protocol
+decoder problem.
 
 Observed on the bench:
 
@@ -127,16 +135,23 @@ Observed on the bench:
   manual direction control, and inverted manual direction control.
 - Active Seplos proprietary polling at `9600` also did not produce valid
   responses; only single-byte or short non-frame raw chunks were captured.
+- Adding external RS485 bias resistors to the Seplos-facing bus made the link
+  behave normally enough for valid Pylon-style Seplos responses to be captured
+  and decoded.
 
-Current diagnostic recommendation:
+Hardware requirement / diagnostic recommendation:
 
-- Start the next RS485 investigation by passively sniffing the direct
-  inverter-to-Seplos link that is known to work, then compare the captured
-  request/response framing against the bridge-forwarded traffic.
+- The Seplos-facing RS485 bus must have a fail-safe bias network. Do not rely on
+  the Seplos BMS to provide bias.
+- Add bias resistors on the bridge board revision, or fit external bias on the
+  Seplos RS485 pair during bench testing.
+- Termination alone is not a substitute for bias; the idle A/B state must be
+  driven to a known level.
 - Keep `RS485_2` as the known-good inverter side unless the hardware wiring is
   intentionally changed.
-- Do not treat the current Seplos RS485 implementation as production-ready until
-  a valid frame has been captured and decoded from the Seplos side.
+- If Seplos appears to work when connected directly to the inverter but not via
+  the bridge, check RS485 bias before changing protocol code, baud rate, UART
+  inversion, or direction-control settings.
 
 ### `JKBMS_MODBUS -> RS485_PYLON`
 

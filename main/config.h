@@ -82,7 +82,10 @@
 
 /* --- Diagnostic step: force fake replies for CAN_PYLON -> RS485_PYLON route --- */
 #define PYLON_CAN_RS485_FORCE_FAKE_ENABLE 0
-#define PYLON_RS485_ACTIVE_PROBE_ENABLE 0
+#define PYLON_RS485_ACTIVE_PROBE_ENABLE 1
+#define PYLON_RS485_BMS_UART_INVERT 0
+#define PYLON_RS485_SOC_FLOOR_ENABLE 1
+#define PYLON_RS485_SOC_FLOOR_PCT 20u
 #define PYLON_RS485_PACK_ID_FALLBACK_ENABLE 0
 
 /* Diagnostic: ignore persisted NVS route and boot with the config.h route below. */
