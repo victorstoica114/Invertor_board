@@ -43,11 +43,11 @@ typedef struct {
 #define RS485_GROWATT_MB_REG_CYCLE_COUNT_TENTATIVE   RS485_GROWATT_MB_REG_CYCLE_COUNT
 #define RS485_GROWATT_MB_REG_ICHG_LIM_CA_TENTATIVE   RS485_GROWATT_MB_REG_MAX_CHG_DISCHG_CA
 
-/* Cell voltage block: start 0x0070, count 0x0011 (0x0070..0x0080) */
-#define RS485_GROWATT_MB_REG_CELL_BASE  0x0070u
+/* Cell voltage block: 0x0070 is a header/reserved word; cells are 0x0071..0x0080. */
+#define RS485_GROWATT_MB_REG_CELL_HEADER 0x0070u
+#define RS485_GROWATT_MB_REG_CELL_BASE  0x0071u
 #define RS485_GROWATT_MB_CELL_COUNT     16u
-#define RS485_GROWATT_MB_REG_CELL_LAST  0x007Fu
-#define RS485_GROWATT_MB_REG_CELL_EXTRA 0x0080u
+#define RS485_GROWATT_MB_REG_CELL_LAST  0x0080u
 
 extern const rs485_growatt_poll_block_t g_rs485GrowattPollBlocks[];
 extern const size_t g_rs485GrowattPollBlocksCount;

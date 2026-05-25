@@ -276,6 +276,75 @@ static bool reqQueuePopForResp(modbusDecoder_t *d,
     return false;
 }
 
+static bool reqQueueHasForResp(modbusDecoder_t *d,
+                               uint8_t slave,
+                               uint8_t func,
+                               uint16_t respRegCount,
+                               int64_t respTsUs)
+{
+    if (d == NULL || d->reqQSize == 0u) {
+        return false;
+    }
+
+    reqQueuePruneExpired(d, respTsUs);
+
+    for (uint8_t i = 0u; i < d->reqQSize; i++) {
+        const uint8_t idx = (uint8_t)((d->reqQHead + i) % MODBUS_DECODER_REQ_QUEUE_LEN);
+        if (d->reqQSlave[idx] != slave || d->reqQFunc[idx] != func) {
+            continue;
+        }
+
+        const int64_t ageUs = respTsUs - d->reqQTsUs[idx];
+        if (ageUs < 0 || ageUs > MODBUS_DECODER_REQ_MAX_AGE_US) {
+            continue;
+        }
+
+        if (d->reqQCount[idx] == respRegCount) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool reqQueuePopFirstForFunc(modbusDecoder_t *d,
+                                    uint8_t slave,
+                                    uint8_t func,
+                                    int64_t respTsUs,
+                                    uint16_t *startOut,
+                                    uint16_t *countOut)
+{
+    if (d == NULL || d->reqQSize == 0u) {
+        return false;
+    }
+
+    reqQueuePruneExpired(d, respTsUs);
+
+    for (uint8_t i = 0u; i < d->reqQSize; i++) {
+        const uint8_t idx = (uint8_t)((d->reqQHead + i) % MODBUS_DECODER_REQ_QUEUE_LEN);
+        if (d->reqQSlave[idx] != slave || d->reqQFunc[idx] != func) {
+            continue;
+        }
+
+        const int64_t ageUs = respTsUs - d->reqQTsUs[idx];
+        if (ageUs < 0 || ageUs > MODBUS_DECODER_REQ_MAX_AGE_US) {
+            continue;
+        }
+
+        if (startOut != NULL) {
+            *startOut = d->reqQStart[idx];
+        }
+        if (countOut != NULL) {
+            *countOut = d->reqQCount[idx];
+        }
+
+        reqQueueDropAt(d, i);
+        return true;
+    }
+
+    return false;
+}
+
 static void printReq03(modbusDecoder_t *d, const uint8_t *f, int len, bool crcOk)
 {
     if (len < 8) {
@@ -305,6 +374,39 @@ static void printReq03(modbusDecoder_t *d, const uint8_t *f, int len, bool crcOk
     reqQueuePush(d, slave, func, start, count, d->lastByteUs);
 }
 
+static bool isReadRegsFunc(uint8_t func)
+{
+    return func == 0x03u || func == 0x04u;
+}
+
+static void printExceptionResp(modbusDecoder_t *d, const uint8_t *frame, int len, bool crcOk)
+{
+    if (d == NULL || frame == NULL || len < 5) {
+        return;
+    }
+
+    const uint8_t slave = frame[0];
+    const uint8_t exceptionFunc = frame[1];
+    const uint8_t func = (uint8_t)(exceptionFunc & 0x7Fu);
+    const uint8_t code = frame[2];
+    uint16_t start = 0xFFFFu;
+    uint16_t count = 0u;
+
+    if (isReadRegsFunc(func)) {
+        (void)reqQueuePopFirstForFunc(d, slave, func, d->lastByteUs, &start, &count);
+    }
+
+    MODBUS_RUNTIME_LOGI(
+             "EXCEPTION on %s: slave=%u func=0x%02X code=0x%02X start=0x%04X count=%u crc=%s",
+             d->ifName,
+             (unsigned)slave,
+             (unsigned)func,
+             (unsigned)code,
+             (unsigned)start,
+             (unsigned)count,
+             crcOk ? "OK" : "BAD");
+}
+
 static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool crcOk)
 {
     if (len < 5) {
@@ -315,8 +417,8 @@ static void printResp03(modbusDecoder_t *d, const uint8_t *frame, int len, bool 
     uint8_t slave = frame[0];
     uint8_t func = frame[1];
 
-    if (func != 0x03) {
-        MODBUS_RUNTIME_LOGI( "RESP on %s: func=0x%02X (not 0x03)", d->ifName, func);
+    if (!isReadRegsFunc(func)) {
+        MODBUS_RUNTIME_LOGI( "RESP on %s: func=0x%02X (not read-registers)", d->ifName, func);
         return;
     }
 
@@ -655,7 +757,7 @@ static bool isReq03Frame(const uint8_t *f, int len)
     if (f == NULL || len != 8) {
         return false;
     }
-    if (f[1] != 0x03u) {
+    if (!isReadRegsFunc(f[1])) {
         return false;
     }
     const uint16_t count = be16(&f[4]);
@@ -670,7 +772,7 @@ static bool isVoltronicReq03Frame(const uint8_t *f, int len)
     if (f == NULL || len != 8) {
         return false;
     }
-    if (f[0] != 0x03u || f[1] == 0u || f[1] > 16u) {
+    if (!isReadRegsFunc(f[0]) || f[1] == 0u || f[1] > 16u) {
         return false;
     }
     const uint16_t count = be16(&f[4]);
@@ -685,7 +787,7 @@ static bool isResp03Frame(const uint8_t *f, int len)
     if (f == NULL || len < 5) {
         return false;
     }
-    if (f[1] != 0x03u) {
+    if (!isReadRegsFunc(f[1])) {
         return false;
     }
     const int expLen = (int)f[2] + 5;
@@ -700,7 +802,7 @@ static bool isWordCountResp03Frame(const uint8_t *f, int len)
     if (f == NULL || len < 6) {
         return false;
     }
-    if (f[1] != 0x03u) {
+    if (!isReadRegsFunc(f[1])) {
         return false;
     }
     const uint16_t regCount = be16(&f[2]);
@@ -714,12 +816,42 @@ static bool isWordCountResp03Frame(const uint8_t *f, int len)
     return modbusCheckCrc(f, len);
 }
 
+static bool isWideByteCountResp03Frame(const uint8_t *f, int len)
+{
+    if (f == NULL || len < 6) {
+        return false;
+    }
+    if (!isReadRegsFunc(f[1])) {
+        return false;
+    }
+    const uint16_t byteCount = be16(&f[2]);
+    if (byteCount == 0u || (byteCount & 1u) != 0u || byteCount > 250u) {
+        return false;
+    }
+    const int expLen = 4 + (int)byteCount + 2;
+    if (len != expLen) {
+        return false;
+    }
+    return modbusCheckCrc(f, len);
+}
+
+static bool isExceptionRespFrame(const uint8_t *f, int len)
+{
+    if (f == NULL || len != 5) {
+        return false;
+    }
+    if ((f[1] & 0x80u) == 0u || !isReadRegsFunc((uint8_t)(f[1] & 0x7Fu))) {
+        return false;
+    }
+    return modbusCheckCrc(f, len);
+}
+
 static bool isVoltronicResp03Frame(const uint8_t *f, int len)
 {
     if (f == NULL || len < 5) {
         return false;
     }
-    if (f[0] != 0x03u || f[1] == 0u || f[1] > 16u) {
+    if (!isReadRegsFunc(f[0]) || f[1] == 0u || f[1] > 16u) {
         return false;
     }
     const int expLen = (int)f[2] + 5;
@@ -734,7 +866,7 @@ static bool isVoltronicWordCountResp03Frame(const uint8_t *f, int len)
     if (f == NULL || len < 6) {
         return false;
     }
-    if (f[0] != 0x03u || f[1] == 0u || f[1] > 16u) {
+    if (!isReadRegsFunc(f[0]) || f[1] == 0u || f[1] > 16u) {
         return false;
     }
     const uint16_t regCount = be16(&f[2]);
@@ -742,6 +874,25 @@ static bool isVoltronicWordCountResp03Frame(const uint8_t *f, int len)
         return false;
     }
     const int expLen = 4 + ((int)regCount * 2) + 2;
+    if (len != expLen) {
+        return false;
+    }
+    return modbusCheckCrc(f, len);
+}
+
+static bool isVoltronicWideByteCountResp03Frame(const uint8_t *f, int len)
+{
+    if (f == NULL || len < 6) {
+        return false;
+    }
+    if (!isReadRegsFunc(f[0]) || f[1] == 0u || f[1] > 16u) {
+        return false;
+    }
+    const uint16_t byteCount = be16(&f[2]);
+    if (byteCount == 0u || (byteCount & 1u) != 0u || byteCount > 250u) {
+        return false;
+    }
+    const int expLen = 4 + (int)byteCount + 2;
     if (len != expLen) {
         return false;
     }
@@ -794,6 +945,39 @@ static int normalizeWordCountResp03Frame(const uint8_t *src,
     return normLen;
 }
 
+static int normalizeWideByteCountResp03Frame(const uint8_t *src,
+                                             int len,
+                                             bool functionFirst,
+                                             uint8_t *dst,
+                                             int dstCap)
+{
+    if (src == NULL || dst == NULL || len < 6) {
+        return 0;
+    }
+
+    const uint16_t byteCount = be16(&src[2]);
+    const int dataLen = (int)byteCount;
+    const int normLen = 3 + dataLen + 2;
+    if (byteCount == 0u || (byteCount & 1u) != 0u || byteCount > 250u ||
+        (4 + dataLen + 2) > len ||
+        dstCap < normLen) {
+        return 0;
+    }
+
+    if (functionFirst) {
+        dst[0] = src[1];
+        dst[1] = src[0];
+    } else {
+        dst[0] = src[0];
+        dst[1] = src[1];
+    }
+    dst[2] = (uint8_t)dataLen;
+    memcpy(&dst[3], &src[4], (size_t)dataLen);
+    dst[normLen - 2] = src[len - 2];
+    dst[normLen - 1] = src[len - 1];
+    return normLen;
+}
+
 static void decodeFrame(modbusDecoder_t *d, const uint8_t *f, int len)
 {
     if (len < 4) {
@@ -807,6 +991,48 @@ static void decodeFrame(modbusDecoder_t *d, const uint8_t *f, int len)
     while ((len - off) >= 4) {
         const uint8_t *cur = &f[off];
         const int rem = len - off;
+
+        if (rem >= 6) {
+            const uint16_t byteCount = be16(&cur[2]);
+            const uint16_t respRegCount = (uint16_t)(byteCount / 2u);
+            const int wideRespLen = 4 + (int)byteCount + 2;
+
+            if (wideRespLen >= 6 &&
+                wideRespLen <= rem &&
+                isWideByteCountResp03Frame(cur, wideRespLen) &&
+                reqQueueHasForResp(d, cur[0], cur[1], respRegCount, d->lastByteUs)) {
+                uint8_t normalized[256];
+                int normLen = normalizeWideByteCountResp03Frame(cur,
+                                                                wideRespLen,
+                                                                false,
+                                                                normalized,
+                                                                sizeof(normalized));
+                if (normLen > 0) {
+                    printResp03(d, normalized, normLen, true);
+                    off += wideRespLen;
+                    decodedAny = true;
+                    continue;
+                }
+            }
+
+            if (wideRespLen >= 6 &&
+                wideRespLen <= rem &&
+                isVoltronicWideByteCountResp03Frame(cur, wideRespLen) &&
+                reqQueueHasForResp(d, cur[1], cur[0], respRegCount, d->lastByteUs)) {
+                uint8_t normalized[256];
+                int normLen = normalizeWideByteCountResp03Frame(cur,
+                                                                wideRespLen,
+                                                                true,
+                                                                normalized,
+                                                                sizeof(normalized));
+                if (normLen > 0) {
+                    printResp03(d, normalized, normLen, true);
+                    off += wideRespLen;
+                    decodedAny = true;
+                    continue;
+                }
+            }
+        }
 
         if (rem >= 8 && isReq03Frame(cur, 8)) {
             printReq03(d, cur, 8, true);
@@ -825,6 +1051,13 @@ static void decodeFrame(modbusDecoder_t *d, const uint8_t *f, int len)
         }
 
         if (rem >= 5) {
+            if (isExceptionRespFrame(cur, 5)) {
+                printExceptionResp(d, cur, 5, true);
+                off += 5;
+                decodedAny = true;
+                continue;
+            }
+
             const int respLen = (int)cur[2] + 5;
             if (respLen >= 5 && respLen <= rem && isResp03Frame(cur, respLen)) {
                 printResp03(d, cur, respLen, true);
@@ -840,6 +1073,40 @@ static void decodeFrame(modbusDecoder_t *d, const uint8_t *f, int len)
                 off += respLen;
                 decodedAny = true;
                 continue;
+            }
+
+            const uint16_t byteCount = be16(&cur[2]);
+            const int wideRespLen = 4 + (int)byteCount + 2;
+            if (wideRespLen >= 6 && wideRespLen <= rem && isWideByteCountResp03Frame(cur, wideRespLen)) {
+                uint8_t normalized[256];
+                int normLen = normalizeWideByteCountResp03Frame(cur,
+                                                                wideRespLen,
+                                                                false,
+                                                                normalized,
+                                                                sizeof(normalized));
+                if (normLen > 0) {
+                    printResp03(d, normalized, normLen, true);
+                    off += wideRespLen;
+                    decodedAny = true;
+                    continue;
+                }
+            }
+
+            if (wideRespLen >= 6 &&
+                wideRespLen <= rem &&
+                isVoltronicWideByteCountResp03Frame(cur, wideRespLen)) {
+                uint8_t normalized[256];
+                int normLen = normalizeWideByteCountResp03Frame(cur,
+                                                                wideRespLen,
+                                                                true,
+                                                                normalized,
+                                                                sizeof(normalized));
+                if (normLen > 0) {
+                    printResp03(d, normalized, normLen, true);
+                    off += wideRespLen;
+                    decodedAny = true;
+                    continue;
+                }
             }
 
             const uint16_t regCount = be16(&cur[2]);
@@ -887,9 +1154,11 @@ static void decodeFrame(modbusDecoder_t *d, const uint8_t *f, int len)
     bool crcOk = modbusCheckCrc(f, len);
     uint8_t func = f[1];
 
-    if (func == 0x03 && len == 8) {
+    if (isReadRegsFunc(func) && len == 8) {
         printReq03(d, f, len, crcOk);
-    } else if (func == 0x03 && len >= 5) {
+    } else if (isExceptionRespFrame(f, len)) {
+        printExceptionResp(d, f, len, crcOk);
+    } else if (isReadRegsFunc(func) && len >= 5) {
         printResp03(d, f, len, crcOk);
     } else if (len == 8 && isVoltronicReq03Frame(f, len)) {
         uint8_t normalized[8];
@@ -902,6 +1171,22 @@ static void decodeFrame(modbusDecoder_t *d, const uint8_t *f, int len)
     } else if (len >= 6 && isWordCountResp03Frame(f, len)) {
         uint8_t normalized[256];
         int normLen = normalizeWordCountResp03Frame(f, len, false, normalized, sizeof(normalized));
+        if (normLen > 0) {
+            printResp03(d, normalized, normLen, true);
+        } else {
+            printFrameGeneric(d, f, len, crcOk);
+        }
+    } else if (len >= 6 && isWideByteCountResp03Frame(f, len)) {
+        uint8_t normalized[256];
+        int normLen = normalizeWideByteCountResp03Frame(f, len, false, normalized, sizeof(normalized));
+        if (normLen > 0) {
+            printResp03(d, normalized, normLen, true);
+        } else {
+            printFrameGeneric(d, f, len, crcOk);
+        }
+    } else if (len >= 6 && isVoltronicWideByteCountResp03Frame(f, len)) {
+        uint8_t normalized[256];
+        int normLen = normalizeWideByteCountResp03Frame(f, len, true, normalized, sizeof(normalized));
         if (normLen > 0) {
             printResp03(d, normalized, normLen, true);
         } else {
@@ -1169,10 +1454,11 @@ static void printSnapshotDecoded(modbusDecoder_t *d)
         if (modbusDecoderGetCachedReg(d, GROWATT_MB_REG_MAIN_RAW_0013, &r0013) &&
             modbusDecoderGetCachedReg(d, GROWATT_MB_REG_CELL_N(13), &cell13)) {
             ESP_LOGI(EXAMPLE_TAG,
-                     "%s reg[0x0013] = 0x%04X (%u)  |  Cell13 @0x007C = %.3f V (%u mV)",
+                     "%s reg[0x0013] = 0x%04X (%u)  |  Cell13 @0x%04X = %.3f V (%u mV)",
                      ifn,
                      (unsigned)r0013,
                      (unsigned)r0013,
+                     (unsigned)GROWATT_MB_REG_CELL_N(13u),
                      (double)cell13 / 1000.0,
                      (unsigned)cell13);
         }

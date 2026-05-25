@@ -38,6 +38,11 @@ static int64_t g_lastSourceStaleLogUs;
 #define GROWATT_WARNING_CODE_MASK 0x3FFFu
 #define GROWATT_ERROR_CODE_MASK   0x7FFFu
 
+static bool growattCellVoltageValid(uint16_t mv)
+{
+    return mv >= GROWATT_MIN_CELL_MV && mv <= GROWATT_MAX_CELL_MV;
+}
+
 static bool decoderCacheFresh(const modbusDecoder_t *decoder, int64_t nowUs, int64_t *newestCacheUsOut)
 {
     const int64_t newestCacheUs = modbusDecoderGetNewestCacheTsUs(decoder);
@@ -73,6 +78,49 @@ static void rs485GrowattClearLatestPacket(void)
 static uint8_t clampU8(uint16_t v, uint8_t vmax)
 {
     return (uint8_t)((v > vmax) ? vmax : v);
+}
+
+static uint16_t rs485GrowattPackVoltageRawToCv(const modbusDecoder_t *decoder, uint16_t raw)
+{
+    uint16_t status = 0u;
+    uint32_t cellSumMv = 0u;
+    uint8_t validCells = 0u;
+
+    if (decoder == NULL || raw == 0u) {
+        return raw;
+    }
+
+    for (uint8_t i = 0u; i < RS485_GROWATT_MB_CELL_COUNT; i++) {
+        uint16_t mv = 0u;
+        const uint16_t addr = (uint16_t)(RS485_GROWATT_MB_REG_CELL_BASE + i);
+        if (!modbusDecoderGetCachedReg(decoder, addr, &mv) || !growattCellVoltageValid(mv)) {
+            continue;
+        }
+        cellSumMv += mv;
+        validCells++;
+    }
+
+    /*
+     * Seplos HV in Growatt485 mode has been observed returning status 0x0069,
+     * one 8-cell module in the cell table, and the full stack voltage at 0x0016
+     * in 0.1 V units. Convert that raw value into the centivolt unit used by
+     * the shared bridge model so the inverter-facing Pylon responder sees the
+     * real stack voltage.
+     */
+    if (raw <= (UINT16_MAX / 10u) &&
+        validCells > 0u &&
+        validCells <= 8u &&
+        modbusDecoderGetCachedReg(decoder, RS485_GROWATT_MB_REG_STATUS_FLAGS, &status) &&
+        status == 0x0069u) {
+        const uint32_t rawAsCvMv = (uint32_t)raw * 10u;
+        const uint32_t lowMv = (cellSumMv * 9u) / 10u;
+        const uint32_t highMv = (cellSumMv * 11u) / 10u;
+        if (rawAsCvMv >= lowMv && rawAsCvMv <= highMv) {
+            return (uint16_t)(raw * 10u);
+        }
+    }
+
+    return raw;
 }
 
 static void rs485GrowattPublishBatteryModel(const modbusDecoder_t *decoder,
@@ -114,7 +162,8 @@ static void rs485GrowattPublishBatteryModel(const modbusDecoder_t *decoder,
         model.cycleCount = regVal;
     }
     if (modbusDecoderGetCachedReg(decoder, RS485_GROWATT_MB_REG_CV_TARGET_CV, &regVal)) {
-        model.chargeVoltageLimitV = (float)regVal / 100.0f;
+        model.chargeVoltageLimitV =
+            (float)rs485GrowattPackVoltageRawToCv(decoder, regVal) / 100.0f;
     }
     if (modbusDecoderGetCachedReg(decoder, RS485_GROWATT_MB_REG_ICHG_LIM_CA_TENTATIVE, &regVal)) {
         model.chargeCurrentLimitA = (float)regVal / 100.0f;
@@ -156,7 +205,7 @@ bool rs485GrowattBuildDecodedPacket(const modbusDecoder_t *decoder,
     }
     if (modbusDecoderGetCachedReg(decoder, RS485_GROWATT_MB_REG_PACK_V_CV, &regVal)) {
         outPacket->hasPackVoltageCv = true;
-        outPacket->packVoltageCv = regVal;
+        outPacket->packVoltageCv = rs485GrowattPackVoltageRawToCv(decoder, regVal);
     }
     if (modbusDecoderGetCachedReg(decoder, RS485_GROWATT_MB_REG_STATUS_FLAGS, &regVal)) {
         outPacket->hasStatusFlags = true;
@@ -197,7 +246,7 @@ bool rs485GrowattBuildDecodedPacket(const modbusDecoder_t *decoder,
         if (!modbusDecoderGetCachedReg(decoder, addr, &regVal)) {
             continue;
         }
-        if (regVal < GROWATT_MIN_CELL_MV || regVal > GROWATT_MAX_CELL_MV) {
+        if (!growattCellVoltageValid(regVal)) {
             continue;
         }
         if (i < BMS_DECODED_PACKET_MAX_CELLS) {
@@ -305,6 +354,7 @@ static void rs485GrowattBmsTask(void *pv)
             }
             ctx->lastPublishUs = nowUs;
         }
+
     }
 }
 

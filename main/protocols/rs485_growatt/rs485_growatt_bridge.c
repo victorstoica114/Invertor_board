@@ -639,7 +639,7 @@ static uint16_t synthRegFromSnapshot(const growattSynthSnapshot_t *snap, uint16_
             return cellMaxIdx;
         case GROWATT_MB_REG_CELL_MIN_IDX:
             return cellMinIdx;
-        case GROWATT_MB_REG_CELL_EXTRA:
+        case GROWATT_MB_REG_CELL_HEADER:
             return 0u;
         default:
             if (addr >= GROWATT_MB_REG_CELL_BASE && addr <= GROWATT_MB_REG_CELL_LAST) {
@@ -723,7 +723,7 @@ static uint16_t synthReg(const canRs485GrowattCtx_t *ctx, uint16_t addr)
             return cellMaxIdx;
         case GROWATT_MB_REG_CELL_MIN_IDX:
             return cellMinIdx;
-        case GROWATT_MB_REG_CELL_EXTRA:
+        case GROWATT_MB_REG_CELL_HEADER:
             return 0u;
         default:
             if (addr >= GROWATT_MB_REG_CELL_BASE && addr <= GROWATT_MB_REG_CELL_LAST) {

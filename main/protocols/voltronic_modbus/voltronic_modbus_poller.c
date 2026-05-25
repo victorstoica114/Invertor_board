@@ -22,23 +22,26 @@ static uint16_t voltronicModbusCrc16(const uint8_t *data, int len)
     return crc;
 }
 
-static int voltronicBuildReadHoldingRegsReq(uint8_t slave,
-                                            uint16_t start,
-                                            uint16_t count,
-                                            uint8_t frameOrder,
-                                            uint8_t *out,
-                                            size_t outCap)
+static int voltronicBuildReadRegsReq(uint8_t slave,
+                                     uint8_t functionCode,
+                                     uint16_t start,
+                                     uint16_t count,
+                                     uint8_t frameOrder,
+                                     uint8_t *out,
+                                     size_t outCap)
 {
-    if (out == NULL || outCap < 8u || count == 0u || count > 125u) {
+    if (out == NULL || outCap < 8u || count == 0u || count > 125u ||
+        (functionCode != VOLTRONIC_MB_READ_HOLDING_REGS &&
+         functionCode != VOLTRONIC_MB_READ_INPUT_REGS)) {
         return 0;
     }
 
     if (frameOrder == VOLTRONIC_MB_FRAME_FUNCTION_FIRST) {
-        out[0] = 0x03u;
+        out[0] = functionCode;
         out[1] = slave;
     } else {
         out[0] = slave;
-        out[1] = 0x03u;
+        out[1] = functionCode;
     }
     out[2] = (uint8_t)((start >> 8) & 0xFFu);
     out[3] = (uint8_t)(start & 0xFFu);
@@ -82,12 +85,13 @@ esp_err_t voltronicModbusPollerTick(voltronic_modbus_poller_t *poller,
     const voltronic_modbus_poll_block_t *block =
         &g_voltronicModbusPollBlocks[poller->pollIndex];
     uint8_t req[8];
-    int reqLen = voltronicBuildReadHoldingRegsReq(poller->slaveAddr,
-                                                  block->start,
-                                                  block->count,
-                                                  block->frameOrder,
-                                                  req,
-                                                  sizeof(req));
+    int reqLen = voltronicBuildReadRegsReq(poller->slaveAddr,
+                                           block->functionCode,
+                                           block->start,
+                                           block->count,
+                                           block->frameOrder,
+                                           req,
+                                           sizeof(req));
     if (reqLen <= 0) {
         return ESP_ERR_INVALID_SIZE;
     }
@@ -100,7 +104,7 @@ esp_err_t voltronicModbusPollerTick(voltronic_modbus_poller_t *poller,
     if (err == ESP_OK) {
         poller->lastReqValid = true;
         poller->lastReqSlave = poller->slaveAddr;
-        poller->lastReqFunc = 0x03u;
+        poller->lastReqFunc = block->functionCode;
         poller->lastReqStart = block->start;
         poller->lastReqCount = block->count;
         poller->lastReqFrameOrder = block->frameOrder;

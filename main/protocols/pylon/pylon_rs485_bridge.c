@@ -170,6 +170,8 @@ static bool pylonSourceUsesNativePayloadEncoding(const bridge_runtime_settings_t
     return (settings != NULL) &&
            ((settings->bms_protocol == PROTOCOL_CAN_PYLON) ||
             bridgeProtocolIsRs485Pylon(settings->bms_protocol) ||
+            (settings->bms_protocol == PROTOCOL_RS485_GROWATT) ||
+            (settings->bms_protocol == PROTOCOL_RS485_VOLTRONIC) ||
             (settings->bms_protocol == PROTOCOL_CAN_DEYE));
 }
 

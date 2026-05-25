@@ -521,7 +521,7 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "const modeOpts=[{value:1,label:'sniffer'},{value:2,label:'forward'},{value:3,label:'bridge'}];"
         "const lineOpts=[{value:1,label:'CAN'},{value:2,label:'RS485'}];"
         "const bmsCanProtoOpts=[{value:18,label:'JK BMS CAN Protocol (250K) V2.0'},{value:1,label:'CAN_GROWATT (CAN BMS)'},{value:4,label:'CAN_PYLON'},{value:5,label:'CAN_DEYE'},{value:7,label:'CAN_GOODWE'},{value:8,label:'CAN_SOFAR'},{value:9,label:'CAN_SMA'},{value:10,label:'CAN_VICTRON'}];"
-        "const bmsRsProtoOpts=[{value:2,label:'RS485_GROWATT (Modbus Poller)'},{value:6,label:'JKBMS_MODBUS (RS485 Poller, 9600)'},{value:16,label:'JKBMS_MODBUS (RS485 Poller, 115200)'},{value:12,label:'JKBMS_RS485_NATIVE (Native Poller)'},{value:19,label:'SEPLOS_RS485 (Native Poller, 9600)'},{value:20,label:'SEPLOS_RS485 (Native Poller, 19200)'},{value:11,label:'PACE_RS485_MODBUS_V1.3 (Modbus Poller)'},{value:13,label:'VOLTRONIC_MODBUS / JK 007 (RS485 Poller)'},{value:14,label:'CHINA_TOWER_MODBUS / JK 008 (RS485 Poller)'},{value:15,label:'WOW_MODBUS / JK 009 (RS485 Poller)'},{value:3,label:'RS485_PYLON (9600)'},{value:17,label:'RS485_PYLON (115200)'}];"
+        "const bmsRsProtoOpts=[{value:2,label:'RS485_GROWATT (Modbus Poller)'},{value:6,label:'JKBMS_MODBUS (RS485 Poller, 9600)'},{value:16,label:'JKBMS_MODBUS (RS485 Poller, 115200)'},{value:12,label:'JKBMS_RS485_NATIVE (Native Poller)'},{value:19,label:'SEPLOS_RS485 (Native Poller, 9600)'},{value:20,label:'SEPLOS_RS485 (Native Poller, 19200)'},{value:11,label:'PACE_RS485_MODBUS_V1.3 (Modbus Poller)'},{value:13,label:'VOLTRONIC_MODBUS'},{value:14,label:'CHINA_TOWER_MODBUS / JK 008 (RS485 Poller)'},{value:15,label:'WOW_MODBUS / JK 009 (RS485 Poller)'},{value:3,label:'RS485_PYLON (9600)'},{value:17,label:'RS485_PYLON (115200)'}];"
         "const invCanProtoOpts=[{value:1,label:'CAN_GROWATT'},{value:4,label:'CAN_PYLON'},{value:5,label:'CAN_DEYE'},{value:7,label:'CAN_GOODWE'},{value:8,label:'CAN_SOFAR'},{value:9,label:'CAN_SMA'},{value:10,label:'CAN_VICTRON'}];"
         "const invRsProtoOpts=[{value:2,label:'RS485_GROWATT'},{value:3,label:'RS485_PYLON (9600)'},{value:17,label:'RS485_PYLON (115200)'}];"
         "const portOpts=[{value:1,label:'1'},{value:2,label:'2'}];"
@@ -560,14 +560,14 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "else if(bl===2&&(bp===6||bp===16||bp===12)&&il===2&&(ip===3||ip===17)){txt='Special route active: '+protoLabel(bp)+' (RS485_'+bport+') -> '+protoLabel(ip)+' responder (RS485_'+iport+').';}"
         "else if(bl===2&&bp===11&&il===2&&(ip===3||ip===17)){txt='Special route active: PACE_RS485_MODBUS_V1.3 (RS485_'+bport+') -> '+protoLabel(ip)+' responder (RS485_'+iport+').';}"
         "else if(bl===2&&bp===2&&il===2&&(ip===3||ip===17)){txt='Special route active: RS485_GROWATT / JK 006 (RS485_'+bport+') -> '+protoLabel(ip)+' responder (RS485_'+iport+').';}"
-        "else if(bl===2&&bp===13&&il===2&&(ip===3||ip===17)){txt='Special route active: VOLTRONIC_MODBUS / JK 007 (RS485_'+bport+') -> '+protoLabel(ip)+' responder (RS485_'+iport+').';}"
+        "else if(bl===2&&bp===13&&il===2&&(ip===3||ip===17)){txt='Special route active: VOLTRONIC_MODBUS (RS485_'+bport+') -> '+protoLabel(ip)+' responder (RS485_'+iport+').';}"
         "else if(bl===2&&bp===14&&il===2&&(ip===3||ip===17)){txt='Special route active: CHINA_TOWER_MODBUS / JK 008 (RS485_'+bport+') -> '+protoLabel(ip)+' responder (RS485_'+iport+').';}"
         "else if(bl===2&&bp===15&&il===2&&(ip===3||ip===17)){txt='Special route active: WOW_MODBUS / JK 009 (RS485_'+bport+') -> '+protoLabel(ip)+' responder (RS485_'+iport+').';}"
         "else if(bl===2&&(bp===19||bp===20)&&il===2&&(ip===3||ip===17)){txt='Special route active: '+protoLabel(bp)+' (RS485_'+bport+') -> '+protoLabel(ip)+' responder (RS485_'+iport+').';}"
         "else if(bl===2&&(bp===6||bp===16)){txt='Testing '+protoLabel(bp)+' poller on RS485_'+bport+'.';}"
         "else if(bl===2&&bp===12){txt='Testing JKBMS_RS485_NATIVE poller on RS485_'+bport+'.';}"
         "else if(bl===2&&bp===11){txt='Testing PACE_RS485_MODBUS_V1.3 poller on RS485_'+bport+'.';}"
-        "else if(bl===2&&bp===13){txt='Testing VOLTRONIC_MODBUS / JK 007 poller on RS485_'+bport+'.';}"
+        "else if(bl===2&&bp===13){txt='Testing VOLTRONIC_MODBUS poller on RS485_'+bport+'.';}"
         "else if(bl===2&&bp===14){txt='Testing CHINA_TOWER_MODBUS / JK 008 poller on RS485_'+bport+'.';}"
         "else if(bl===2&&bp===15){txt='Testing WOW_MODBUS / JK 009 poller on RS485_'+bport+'.';}"
         "else if(bl===2&&(bp===19||bp===20)){txt='Testing '+protoLabel(bp)+' poller on RS485_'+bport+'.';}"
@@ -721,6 +721,47 @@ static esp_err_t rootHandler(httpd_req_t *req)
     return httpd_resp_send(req, html, HTTPD_RESP_USE_STRLEN);
 }
 
+static void overlayFakeTelemetry(bridgeTelemetrySnapshot_t *snap)
+{
+    battery_model_t model = {0};
+    bool enabled = false;
+
+    if (snap == NULL) {
+        return;
+    }
+
+    batteryModelGetDebugOverride(&model, &enabled);
+    if (!enabled || !model.valid) {
+        return;
+    }
+
+    snap->valid = true;
+    snap->currentA = model.packCurrentA;
+    snap->packVoltageV = model.packVoltageV;
+    snap->packPowerW = model.packVoltageV * model.packCurrentA;
+    snap->socPct = model.socPct;
+    snap->sohPct = model.sohPct;
+    snap->cycles = model.cycleCount;
+    snap->cellMaxV = model.cellMaxV;
+    snap->cellMinV = model.cellMinV;
+    snap->cellMaxIdx = model.cellMaxIdx;
+    snap->cellMinIdx = model.cellMinIdx;
+    snap->deltaV = model.cellDeltaV;
+    snap->cellDiffV = model.cellDeltaV;
+    snap->tempMosC = model.temperaturesC[0];
+    snap->tempT1C = model.temperaturesC[1];
+    snap->tempT2C = model.temperaturesC[2];
+    snap->tempT4C = model.temperaturesC[3];
+    snap->tempT5C = model.temperaturesC[4];
+    snap->pylonStatus63 = (uint8_t)(model.protocolState & 0xFFu);
+    snprintf(snap->stateFlags,
+             sizeof(snap->stateFlags),
+             "Fake override: charge=%s, discharge=%s, balance=%s",
+             model.chargeEnabled ? "ON" : "OFF",
+             model.dischargeEnabled ? "ON" : "OFF",
+             model.balanceEnabled ? "ON" : "OFF");
+}
+
 static esp_err_t telemetryHandler(httpd_req_t *req)
 {
     bridgeTelemetrySnapshot_t snap = {0};
@@ -729,6 +770,9 @@ static esp_err_t telemetryHandler(httpd_req_t *req)
     int pos = 0;
 
     bridgeGetTelemetrySnapshot(&snap);
+    if (fakeOverride) {
+        overlayFakeTelemetry(&snap);
+    }
 
     ESP_LOGI(WEB_TAG, "[API_TELEMETRY] Returning: valid=%s, stale=%s, source=%s, soc=%u%%, "
              "v=%.2fV, age=%u ms",

@@ -82,6 +82,29 @@ static int buildWordCountResp03(uint8_t slave,
     return len;
 }
 
+static int buildWideByteCountResp03(uint8_t slave,
+                                    const uint16_t *regs,
+                                    uint8_t count,
+                                    uint8_t *out,
+                                    int outCap)
+{
+    int len = 4 + ((int)count * 2) + 2;
+    TEST_ASSERT_TRUE(len <= outCap);
+
+    out[0] = slave;
+    out[1] = 0x03u;
+    out[2] = 0x00u;
+    out[3] = (uint8_t)(count * 2u);
+    for (uint8_t i = 0; i < count; i++) {
+        out[4 + (i * 2)] = (uint8_t)((regs[i] >> 8) & 0xFFu);
+        out[5 + (i * 2)] = (uint8_t)(regs[i] & 0xFFu);
+    }
+    uint16_t crc = crc16(out, len - 2);
+    out[len - 2] = (uint8_t)(crc & 0xFFu);
+    out[len - 1] = (uint8_t)((crc >> 8) & 0xFFu);
+    return len;
+}
+
 static void feedVoltronicResponse(modbusDecoder_t *decoder,
                                   uint16_t start,
                                   const uint16_t *regs,
@@ -123,6 +146,29 @@ static void feedVoltronicWordCountResponse(modbusDecoder_t *decoder,
                                count,
                                1000);
     modbusDecoderFeed(decoder, frame, len, 2000);
+    modbusDecoderFlush(decoder);
+}
+
+static void feedVoltronicWideByteCountResponse(modbusDecoder_t *decoder,
+                                               uint16_t start,
+                                               const uint16_t *regs,
+                                               uint8_t count,
+                                               int64_t requestUs)
+{
+    uint8_t frame[128];
+    int len = buildWideByteCountResp03(VOLTRONIC_MODBUS_DEFAULT_SLAVE_ADDR,
+                                       regs,
+                                       count,
+                                       frame,
+                                       sizeof(frame));
+
+    modbusDecoderRecordRequest(decoder,
+                               VOLTRONIC_MODBUS_DEFAULT_SLAVE_ADDR,
+                               0x03u,
+                               start,
+                               count,
+                               requestUs);
+    modbusDecoderFeed(decoder, frame, len, requestUs + 1000);
     modbusDecoderFlush(decoder);
 }
 
@@ -413,13 +459,85 @@ void test_voltronic_modbus_maps_fixed_status_word_count_response(void)
     TEST_ASSERT_EQUAL_UINT16(726u, (uint16_t)(snapshot.packVoltageV * 10.0f + 0.5f));
 }
 
+void test_voltronic_modbus_decodes_seplos_wide_byte_count_single_regs(void)
+{
+    modbusDecoder_t decoder;
+    voltronic_modbus_snapshot_t snapshot;
+    bms_decoded_packet_t packet;
+    int64_t requestUs = 1000;
+
+    modbusDecoderInit(&decoder, "VOLTRONIC_SEPLOS_WIDE_BYTE", 5000);
+
+    feedVoltronicWideByteCountResponse(&decoder, VOLTRONIC_MB_REG_CHARGE_CURRENT_DA,
+                                       (const uint16_t[]){0u}, 1u, requestUs += 10000);
+    feedVoltronicWideByteCountResponse(&decoder, VOLTRONIC_MB_REG_DISCHARGE_CURRENT_DA,
+                                       (const uint16_t[]){0u}, 1u, requestUs += 10000);
+    feedVoltronicWideByteCountResponse(&decoder, VOLTRONIC_MB_REG_MODULE_VOLTAGE_DV,
+                                       (const uint16_t[]){249u}, 1u, requestUs += 10000);
+    feedVoltronicWideByteCountResponse(&decoder, VOLTRONIC_MB_REG_SOC_PCT,
+                                       (const uint16_t[]){2u}, 1u, requestUs += 10000);
+    feedVoltronicWideByteCountResponse(&decoder, VOLTRONIC_MB_REG_TOTAL_CAPACITY_MAH,
+                                       (const uint16_t[]){0x0003u}, 1u, requestUs += 10000);
+    feedVoltronicWideByteCountResponse(&decoder, (uint16_t)(VOLTRONIC_MB_REG_TOTAL_CAPACITY_MAH + 1u),
+                                       (const uint16_t[]){0x0D40u}, 1u, requestUs += 10000);
+    feedVoltronicWideByteCountResponse(&decoder, VOLTRONIC_MB_REG_CHARGE_V_LIMIT_DV,
+                                       (const uint16_t[]){576u}, 1u, requestUs += 10000);
+    feedVoltronicWideByteCountResponse(&decoder, VOLTRONIC_MB_REG_DISCHARGE_V_LIMIT_DV,
+                                       (const uint16_t[]){104u}, 1u, requestUs += 10000);
+    feedVoltronicWideByteCountResponse(&decoder, VOLTRONIC_MB_REG_CHARGE_I_LIMIT_DA,
+                                       (const uint16_t[]){1800u}, 1u, requestUs += 10000);
+    feedVoltronicWideByteCountResponse(&decoder, VOLTRONIC_MB_REG_DISCHARGE_I_LIMIT_DA,
+                                       (const uint16_t[]){1800u}, 1u, requestUs += 10000);
+    feedVoltronicWideByteCountResponse(&decoder, VOLTRONIC_MB_REG_CHG_DSG_STATUS,
+                                       (const uint16_t[]){0x00F0u}, 1u, requestUs += 10000);
+
+    TEST_ASSERT_TRUE(voltronicModbusBuildDecodedSnapshot(&decoder, requestUs + 2000, &snapshot));
+    TEST_ASSERT_TRUE(snapshot.valid);
+    TEST_ASSERT_TRUE(snapshot.hasSoc);
+    TEST_ASSERT_EQUAL_UINT8(2u, snapshot.socPct);
+    TEST_ASSERT_TRUE(snapshot.hasPackVoltage);
+    TEST_ASSERT_EQUAL_UINT16(249u, (uint16_t)(snapshot.packVoltageV * 10.0f + 0.5f));
+    TEST_ASSERT_TRUE(snapshot.hasFullMah);
+    TEST_ASSERT_EQUAL_UINT32(200000u, snapshot.fullMah);
+    TEST_ASSERT_TRUE(snapshot.hasChargeLimits);
+    TEST_ASSERT_EQUAL_UINT16(576u, (uint16_t)(snapshot.chargeVoltageLimitV * 10.0f + 0.5f));
+    TEST_ASSERT_EQUAL_UINT16(104u, (uint16_t)(snapshot.dischargeVoltageLimitV * 10.0f + 0.5f));
+    TEST_ASSERT_EQUAL_UINT16(1800u, (uint16_t)(snapshot.chargeCurrentLimitA * 10.0f + 0.5f));
+    TEST_ASSERT_EQUAL_UINT16(1800u, (uint16_t)(snapshot.dischargeCurrentLimitA * 10.0f + 0.5f));
+    TEST_ASSERT_TRUE(snapshot.hasStatusFlags);
+    TEST_ASSERT_EQUAL_UINT16(0x00F0u, snapshot.statusFlags);
+    TEST_ASSERT_TRUE(snapshot.chargeEnabled);
+    TEST_ASSERT_TRUE(snapshot.dischargeEnabled);
+
+    TEST_ASSERT_TRUE(voltronicModbusBuildDecodedPacket(&snapshot, 88u, &packet));
+    TEST_ASSERT_TRUE(packet.hasSoc);
+    TEST_ASSERT_EQUAL_UINT8(2u, packet.socPct);
+    TEST_ASSERT_TRUE(packet.hasPackVoltageCv);
+    TEST_ASSERT_EQUAL_UINT16(2490u, packet.packVoltageCv);
+    TEST_ASSERT_TRUE(packet.hasStatusFlags);
+    TEST_ASSERT_EQUAL_UINT16(0x00F0u, packet.statusFlags);
+}
+
 void test_voltronic_modbus_register_map_matches_poll_plan(void)
 {
-    TEST_ASSERT_EQUAL_UINT32(1u, (uint32_t)g_voltronicModbusPollBlocksCount);
+    TEST_ASSERT_EQUAL_UINT32(12u, (uint32_t)g_voltronicModbusPollBlocksCount);
 
-    TEST_ASSERT_EQUAL_UINT16(VOLTRONIC_MB_REG_STATUS_START, g_voltronicModbusPollBlocks[0].start);
-    TEST_ASSERT_EQUAL_UINT16(48u, g_voltronicModbusPollBlocks[0].count);
+    TEST_ASSERT_EQUAL_UINT16(VOLTRONIC_MB_REG_PROTOCOL_TYPE, g_voltronicModbusPollBlocks[0].start);
+    TEST_ASSERT_EQUAL_UINT16(1u, g_voltronicModbusPollBlocks[0].count);
     TEST_ASSERT_EQUAL_UINT8(VOLTRONIC_MB_FRAME_CLASSIC, g_voltronicModbusPollBlocks[0].frameOrder);
+    TEST_ASSERT_EQUAL_UINT8(VOLTRONIC_MB_READ_HOLDING_REGS, g_voltronicModbusPollBlocks[0].functionCode);
+    TEST_ASSERT_EQUAL_UINT16(VOLTRONIC_MB_REG_CHARGE_CURRENT_DA, g_voltronicModbusPollBlocks[1].start);
+    TEST_ASSERT_EQUAL_UINT8(VOLTRONIC_MB_READ_HOLDING_REGS, g_voltronicModbusPollBlocks[1].functionCode);
+    TEST_ASSERT_EQUAL_UINT16(VOLTRONIC_MB_REG_DISCHARGE_CURRENT_DA, g_voltronicModbusPollBlocks[2].start);
+    TEST_ASSERT_EQUAL_UINT8(VOLTRONIC_MB_READ_HOLDING_REGS, g_voltronicModbusPollBlocks[2].functionCode);
+    TEST_ASSERT_EQUAL_UINT16(VOLTRONIC_MB_REG_MODULE_VOLTAGE_DV, g_voltronicModbusPollBlocks[3].start);
+    TEST_ASSERT_EQUAL_UINT8(VOLTRONIC_MB_FRAME_CLASSIC, g_voltronicModbusPollBlocks[3].frameOrder);
+    TEST_ASSERT_EQUAL_UINT8(VOLTRONIC_MB_READ_HOLDING_REGS, g_voltronicModbusPollBlocks[3].functionCode);
+    TEST_ASSERT_EQUAL_UINT16(VOLTRONIC_MB_REG_SOC_PCT, g_voltronicModbusPollBlocks[4].start);
+    TEST_ASSERT_EQUAL_UINT16(VOLTRONIC_MB_REG_TOTAL_CAPACITY_MAH, g_voltronicModbusPollBlocks[5].start);
+    TEST_ASSERT_EQUAL_UINT16((VOLTRONIC_MB_REG_TOTAL_CAPACITY_MAH + 1u), g_voltronicModbusPollBlocks[6].start);
+    TEST_ASSERT_EQUAL_UINT16(VOLTRONIC_MB_REG_LIMITS_START, g_voltronicModbusPollBlocks[7].start);
+    TEST_ASSERT_EQUAL_UINT16(VOLTRONIC_MB_REG_CHG_DSG_STATUS, g_voltronicModbusPollBlocks[11].start);
 
     TEST_ASSERT_EQUAL_UINT16(0x0010u, VOLTRONIC_MB_REG_CELL_COUNT);
     TEST_ASSERT_EQUAL_UINT16(0x0025u, VOLTRONIC_MB_REG_TEMP_COUNT);
@@ -442,28 +560,32 @@ void test_voltronic_modbus_poller_cycles_public_then_jk_blocks(void)
     TEST_ASSERT_EQUAL(8, g_rs485StubLastWriteLen);
     TEST_ASSERT_EQUAL_UINT8(VOLTRONIC_MODBUS_DEFAULT_SLAVE_ADDR, g_rs485StubLastWrite[0]);
     TEST_ASSERT_EQUAL_UINT8(0x03u, g_rs485StubLastWrite[1]);
-    TEST_ASSERT_EQUAL_UINT8((uint8_t)(VOLTRONIC_MB_REG_STATUS_START >> 8), g_rs485StubLastWrite[2]);
-    TEST_ASSERT_EQUAL_UINT8((uint8_t)(VOLTRONIC_MB_REG_STATUS_START & 0xFFu), g_rs485StubLastWrite[3]);
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)(VOLTRONIC_MB_REG_PROTOCOL_TYPE >> 8), g_rs485StubLastWrite[2]);
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)(VOLTRONIC_MB_REG_PROTOCOL_TYPE & 0xFFu), g_rs485StubLastWrite[3]);
     TEST_ASSERT_EQUAL_UINT8(VOLTRONIC_MODBUS_DEFAULT_SLAVE_ADDR, poller.lastReqSlave);
-    TEST_ASSERT_EQUAL_UINT8(0x03u, poller.lastReqFunc);
+    TEST_ASSERT_EQUAL_UINT8(VOLTRONIC_MB_READ_HOLDING_REGS, poller.lastReqFunc);
     TEST_ASSERT_EQUAL_UINT8(VOLTRONIC_MB_FRAME_CLASSIC, poller.lastReqFrameOrder);
-    TEST_ASSERT_EQUAL_UINT16(VOLTRONIC_MB_REG_STATUS_START, poller.lastReqStart);
-    TEST_ASSERT_EQUAL_UINT16(48u, poller.lastReqCount);
+    TEST_ASSERT_EQUAL_UINT16(VOLTRONIC_MB_REG_PROTOCOL_TYPE, poller.lastReqStart);
+    TEST_ASSERT_EQUAL_UINT16(1u, poller.lastReqCount);
 
     TEST_ASSERT_EQUAL(ESP_OK, voltronicModbusPollerTick(&poller, 1100000LL, 250u));
-    TEST_ASSERT_EQUAL_UINT16(VOLTRONIC_MB_REG_STATUS_START, poller.lastReqStart);
+    TEST_ASSERT_EQUAL_UINT16(VOLTRONIC_MB_REG_PROTOCOL_TYPE, poller.lastReqStart);
 
     TEST_ASSERT_EQUAL(ESP_OK, voltronicModbusPollerTick(&poller, 1300000LL, 250u));
-    TEST_ASSERT_EQUAL_UINT16(VOLTRONIC_MB_REG_STATUS_START, poller.lastReqStart);
-    TEST_ASSERT_EQUAL_UINT16(48u, poller.lastReqCount);
+    TEST_ASSERT_EQUAL_UINT16(VOLTRONIC_MB_REG_CHARGE_CURRENT_DA, poller.lastReqStart);
+    TEST_ASSERT_EQUAL_UINT8(VOLTRONIC_MB_READ_HOLDING_REGS, poller.lastReqFunc);
+    TEST_ASSERT_EQUAL_UINT16(1u, poller.lastReqCount);
 
     TEST_ASSERT_EQUAL(ESP_OK, voltronicModbusPollerTick(&poller, 1600000LL, 250u));
-    TEST_ASSERT_EQUAL_UINT16(VOLTRONIC_MB_REG_STATUS_START, poller.lastReqStart);
-    TEST_ASSERT_EQUAL_UINT16(48u, poller.lastReqCount);
+    TEST_ASSERT_EQUAL_UINT16(VOLTRONIC_MB_REG_DISCHARGE_CURRENT_DA, poller.lastReqStart);
+    TEST_ASSERT_EQUAL_UINT8(VOLTRONIC_MB_READ_HOLDING_REGS, poller.lastReqFunc);
+    TEST_ASSERT_EQUAL_UINT16(1u, poller.lastReqCount);
 
     TEST_ASSERT_EQUAL(ESP_OK, voltronicModbusPollerTick(&poller, 1900000LL, 250u));
-    TEST_ASSERT_EQUAL_UINT16(VOLTRONIC_MB_REG_STATUS_START, poller.lastReqStart);
-    TEST_ASSERT_EQUAL_UINT16(48u, poller.lastReqCount);
+    TEST_ASSERT_EQUAL_UINT16(VOLTRONIC_MB_REG_MODULE_VOLTAGE_DV, poller.lastReqStart);
+    TEST_ASSERT_EQUAL_UINT8(VOLTRONIC_MB_FRAME_CLASSIC, poller.lastReqFrameOrder);
+    TEST_ASSERT_EQUAL_UINT8(VOLTRONIC_MB_READ_HOLDING_REGS, poller.lastReqFunc);
+    TEST_ASSERT_EQUAL_UINT16(1u, poller.lastReqCount);
 }
 
 int main(void)
@@ -473,6 +595,7 @@ int main(void)
     RUN_TEST(test_voltronic_modbus_decodes_status_warnings_limits);
     RUN_TEST(test_voltronic_modbus_decodes_jk_vendor_compat_map);
     RUN_TEST(test_voltronic_modbus_maps_fixed_status_word_count_response);
+    RUN_TEST(test_voltronic_modbus_decodes_seplos_wide_byte_count_single_regs);
     RUN_TEST(test_voltronic_modbus_register_map_matches_poll_plan);
     RUN_TEST(test_voltronic_modbus_poller_cycles_public_then_jk_blocks);
 

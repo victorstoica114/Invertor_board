@@ -62,7 +62,8 @@ The goal is practical maintenance:
 - `RS485_GROWATT` BMS telemetry now decodes Growatt `0x0014` error/protection bits and `0x0022` warning bits for JK UART profile `006` instead of leaving the web alert cards empty.
 - `RS485_GROWATT` web telemetry now displays only the single live pack temperature exposed by register `0x0018`, instead of duplicating it as MOS/T1/T2/T4/T5.
 - `VOLTRONIC_MODBUS` web telemetry follows the PACE/Growatt integration standard: expose real cells and temperatures, keep raw alert/status diagnostics visible, and feed the existing Pylon responder with the decoded battery model.
-- `VOLTRONIC_MODBUS` poll frames use the Voltronic-published function-first byte order with BMS address/slave ID `1`, while the shared Modbus decoder now accepts both classic and Voltronic `0x03` response ordering.
+- `VOLTRONIC_MODBUS` now supports the live-tested Seplos Voltronic RS485 behavior: classic slave-`1` single-register `0x03` reads, 16-bit byte-count responses such as `01 03 00 02 ... CRC`, and exception responses for unsupported broad ranges.
+- `VOLTRONIC_MODBUS` poll frames retain compatibility with standard Modbus/JK variants through the shared decoder while using the Seplos-safe single-register poll plan for the active field profile.
 - `CHINA_TOWER_MODBUS` uses the bench-observed JK profile `008` register layout, with cell millivolts starting at `0x0009` and temperature registers kept at the live-tested offsets.
 - `CHINA_TOWER_MODBUS` web telemetry now treats the compact summary temperatures as the only confirmed live sensors and hides non-live `Battery T4`/`Battery T5` values instead of displaying Pylon-template leftovers.
 - `CHINA_TOWER_MODBUS` now captures the live-tested raw candidate warning/protection/status registers (`0x0019..0x001B`) without assigning unconfirmed names; non-zero unknown bits are preserved for future correlation with the JK app.

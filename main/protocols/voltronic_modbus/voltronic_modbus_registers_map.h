@@ -7,12 +7,16 @@ typedef struct {
     uint16_t start;
     uint16_t count;
     uint8_t frameOrder;
+    uint8_t functionCode;
 } voltronic_modbus_poll_block_t;
 
 #define VOLTRONIC_MODBUS_DEFAULT_SLAVE_ADDR 0x01u
 
 #define VOLTRONIC_MB_FRAME_CLASSIC        0u
 #define VOLTRONIC_MB_FRAME_FUNCTION_FIRST 1u
+
+#define VOLTRONIC_MB_READ_HOLDING_REGS    0x03u
+#define VOLTRONIC_MB_READ_INPUT_REGS      0x04u
 
 /* Voltronic Power "Inverter and BMS 485 communication Protocol", 2020-03-25. */
 #define VOLTRONIC_MB_REG_VERSION_START        0x0001u

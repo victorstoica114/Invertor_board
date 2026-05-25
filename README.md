@@ -299,10 +299,10 @@ These are useful for reference/history, but are not the primary active implement
 `main/protocols/voltronic_modbus/`
 
 - active Voltronic RS485 Modbus poller + decoder for JK UART profile `007 - Voltronic_Inverter_and_BMS_485`
-- polls the public Voltronic map blocks around `0x0010` status/cells/temperatures, `0x0040` warning states, and `0x0070` charge/discharge limits/status
-- uses the Voltronic-published RTU byte order (`function`, then BMS address/slave ID `1`) while decoding responses into the shared register cache
+- polls the Seplos-compatible public Voltronic core registers as single `0x03` reads; the tested Seplos firmware rejects broad reads but answers single-register requests with a 16-bit byte-count response (`01 03 00 02 ... CRC`)
+- keeps decoding support for standard Modbus responses, Voltronic function-first responses, and JK-compatible word-count responses in the shared register cache
 - supports `RS485_VOLTRONIC -> RS485_PYLON` bridge-mode translation through the shared synthetic Pylon responder path
-- web/API telemetry includes pack values, all cell voltages, individual temperature registers, alarm/protection registers, warning state registers, charge/discharge status, and raw protocol flags
+- web/API telemetry includes the confirmed live Seplos Voltronic pack values (`SOC`, voltage/current, capacity, charge/discharge limits/status) and raw protocol flags; the tested Seplos Voltronic profile did not expose per-cell voltages through this map
 
 `main/protocols/china_tower_modbus/`
 

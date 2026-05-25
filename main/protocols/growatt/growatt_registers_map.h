@@ -73,11 +73,12 @@ typedef struct {
 /* Backward compatibility name kept for existing code/config references. */
 #define GROWATT_MB_REG_MAIN_RAW_0013           GROWATT_MB_REG_STATUS_FLAGS
 
-/* Cell voltage block: start 0x0070, count 0x0011 (0x0070..0x0080) */
-#define GROWATT_MB_REG_CELL_BASE               0x0070u
+/* Cell voltage block: 0x0070 is a header/reserved word; cells are 0x0071..0x0080. */
+#define GROWATT_MB_REG_CELL_HEADER             0x0070u
+#define GROWATT_MB_REG_CELL_BASE               0x0071u
 #define GROWATT_MB_CELL_COUNT                  16u
-#define GROWATT_MB_REG_CELL_LAST               0x007Fu
-#define GROWATT_MB_REG_CELL_EXTRA              0x0080u /* usually 0 */
+#define GROWATT_MB_REG_CELL_LAST               0x0080u
+#define GROWATT_MB_REG_CELL_EXTRA              GROWATT_MB_REG_CELL_HEADER /* legacy alias */
 
 /* Helper macro: cell N register (N: 1..16) */
 #define GROWATT_MB_REG_CELL_N(n)               (GROWATT_MB_REG_CELL_BASE + ((n) - 1u))
