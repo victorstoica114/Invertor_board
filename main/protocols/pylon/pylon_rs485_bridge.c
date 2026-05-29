@@ -100,6 +100,7 @@ static const char *protocolToStrLocal(uint8_t protocol)
         case PROTOCOL_RS485_WOW: return "WOW_MODBUS";
         case PROTOCOL_RS485_SEPLOS: return "SEPLOS_RS485";
         case PROTOCOL_RS485_SEPLOS_19200: return "SEPLOS_RS485_19200";
+        case PROTOCOL_RS485_DALY: return "DALY_RS485";
         default: return "UNKNOWN";
     }
 }
@@ -172,7 +173,26 @@ static bool pylonSourceUsesNativePayloadEncoding(const bridge_runtime_settings_t
             bridgeProtocolIsRs485Pylon(settings->bms_protocol) ||
             (settings->bms_protocol == PROTOCOL_RS485_GROWATT) ||
             (settings->bms_protocol == PROTOCOL_RS485_VOLTRONIC) ||
+            (settings->bms_protocol == PROTOCOL_RS485_DALY) ||
             (settings->bms_protocol == PROTOCOL_CAN_DEYE));
+}
+
+static uint32_t pylonSyntheticModelStaleMs(const bridge_runtime_settings_t *settings)
+{
+    if (settings != NULL && settings->bms_protocol == PROTOCOL_RS485_DALY) {
+        return DALY_RS485_SOURCE_STALE_MS;
+    }
+    return BRIDGE_SOURCE_STALE_MS;
+}
+
+static void pylonGetBatteryModelForSettings(const bridge_runtime_settings_t *settings,
+                                            universal_battery_model_t *model)
+{
+    if (model == NULL) {
+        return;
+    }
+
+    batteryModelGetWithStaleMs(model, pylonSyntheticModelStaleMs(settings));
 }
 
 static bool pylonShouldPublishDecodedLogSnapshot(const bridge_runtime_settings_t *settings)
@@ -229,7 +249,7 @@ static bool pylonBmsSourceFresh(const bridge_runtime_settings_t *settings)
 
     if (pylonFakeResponderModeEnabled(settings)) {
         universal_battery_model_t model = {0};
-        batteryModelGet(&model);
+        pylonGetBatteryModelForSettings(settings, &model);
         if (pylonDiagLogsEnabled() && ((nowUs - s_lastCanSourceDiagUs) >= 1000000LL)) {
             ESP_LOGI(EXAMPLE_TAG,
                      "PYLON fake override source check: model.valid=%s soc=%u soh=%u I=%.2fA V=%.2fV status=0x%02X",
@@ -247,7 +267,7 @@ static bool pylonBmsSourceFresh(const bridge_runtime_settings_t *settings)
     if (pylonSyntheticSourceModeEnabled(settings)) {
         universal_battery_model_t model = {0};
         uint32_t ageMs = 0u;
-        batteryModelGet(&model);
+        pylonGetBatteryModelForSettings(settings, &model);
         if (model.updatedMs != 0u) {
             uint32_t nowMs = (uint32_t)(nowUs / 1000LL);
             ageMs = nowMs - model.updatedMs;
@@ -511,6 +531,11 @@ static int16_t be16s(const uint8_t *p)
     return (int16_t)be16(p);
 }
 
+static bool modelTempValid(float tempC)
+{
+    return tempC > -99.0f && tempC < 120.0f;
+}
+
 static void putBe16(uint8_t *p, uint16_t v)
 {
     p[0] = (uint8_t)((v >> 8) & 0xFFu);
@@ -554,7 +579,7 @@ static bool buildCanDerivedInfo61(char *out, size_t outSize)
     uint8_t maxIdx = 3u;
     uint8_t minIdx = 12u;
 
-    batteryModelGet(&model);
+    pylonGetBatteryModelForSettings(&settings, &model);
     if (!forceStaticPayload && !model.valid) {
         return false;
     }
@@ -622,23 +647,23 @@ static bool buildCanDerivedInfo61(char *out, size_t outSize)
         putBe16(&bytes[13], maxIdx);
         putBe16(&bytes[17], minIdx);
 
-        if (model.temperaturesC[0] > -100.0f) {
+        if (modelTempValid(model.temperaturesC[0])) {
             kelvinTemp = (uint16_t)(model.temperaturesC[0] * 10.0f + 2731.0f);
             putBe16(&bytes[19], kelvinTemp);
         }
-        if (model.temperaturesC[1] > -100.0f) {
+        if (modelTempValid(model.temperaturesC[1])) {
             kelvinTemp = (uint16_t)(model.temperaturesC[1] * 10.0f + 2731.0f);
             putBe16(&bytes[21], kelvinTemp);
         }
-        if (model.temperaturesC[2] > -100.0f) {
+        if (modelTempValid(model.temperaturesC[2])) {
             kelvinTemp = (uint16_t)(model.temperaturesC[2] * 10.0f + 2731.0f);
             putBe16(&bytes[25], kelvinTemp);
         }
-        if (model.temperaturesC[3] > -100.0f) {
+        if (modelTempValid(model.temperaturesC[3])) {
             kelvinTemp = (uint16_t)(model.temperaturesC[3] * 10.0f + 2731.0f);
             putBe16(&bytes[29], kelvinTemp);
         }
-        if (model.temperaturesC[4] > -100.0f) {
+        if (modelTempValid(model.temperaturesC[4])) {
             kelvinTemp = (uint16_t)(model.temperaturesC[4] * 10.0f + 2731.0f);
             putBe16(&bytes[31], kelvinTemp);
             putBe16(&bytes[35], kelvinTemp);
@@ -663,7 +688,7 @@ static bool buildCanDerivedInfo63(char *out, size_t outSize)
     const char *reason = "template";
     int64_t nowUs = esp_timer_get_time();
 
-    batteryModelGet(&model);
+    pylonGetBatteryModelForSettings(&settings, &model);
     if (!forceStaticPayload && !model.valid) {
         return false;
     }
@@ -782,7 +807,6 @@ bool pylonRs485BridgeProbeShouldWaitForQuietForTest(uint8_t mode,
 static void maybeRefreshSyntheticCacheFromUniversal(void)
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
-    universal_battery_model_t model = {0};
     char info61[sizeof(s_pylonCache.info61)] = {0};
     char info63[sizeof(s_pylonCache.info63)] = {0};
     int64_t nowUs = esp_timer_get_time();
@@ -791,8 +815,6 @@ static void maybeRefreshSyntheticCacheFromUniversal(void)
         !pylonFakeResponderModeEnabled(&settings)) {
         return;
     }
-
-    batteryModelGet(&model);
 
     if (!pylonBmsSourceFresh(&settings)) {
         if (pylonSyntheticSourceModeEnabled(&settings) && PYLON_CAN_RS485_FORCE_FAKE_ENABLE) {
@@ -861,7 +883,6 @@ static void maybeRefreshSyntheticCacheFromUniversal(void)
         s_lastCacheBuildDiagUs = nowUs;
     }
 
-    (void)model;
 }
 
 #ifdef HOST_TEST
@@ -900,7 +921,7 @@ static void telemetryFromSummary(void)
     }
 
     if (preferModelTelemetry) {
-        batteryModelGet(&model);
+        pylonGetBatteryModelForSettings(&settings, &model);
         useModelTelemetry = model.valid;
     }
 
@@ -923,11 +944,35 @@ static void telemetryFromSummary(void)
     snap.cellMaxIdx = useModelTelemetry ? model.cellMaxIdx : s_pylonSummary.max_cell_idx;
     snap.cellMinIdx = useModelTelemetry ? model.cellMinIdx : s_pylonSummary.min_cell_idx;
     snap.deltaV = useModelTelemetry ? model.cellDeltaV : (snap.cellMaxV - snap.cellMinV);
-    snap.tempMosC = useModelTelemetry ? model.temperaturesC[0] : ((float)s_pylonSummary.temp_mos_c10 / 10.0f);
-    snap.tempT1C = useModelTelemetry ? model.temperaturesC[1] : ((float)s_pylonSummary.temp_t1_c10 / 10.0f);
-    snap.tempT2C = useModelTelemetry ? model.temperaturesC[2] : ((float)s_pylonSummary.temp_t2_c10 / 10.0f);
-    snap.tempT4C = useModelTelemetry ? model.temperaturesC[3] : ((float)s_pylonSummary.temp_t4_c10 / 10.0f);
-    snap.tempT5C = useModelTelemetry ? model.temperaturesC[4] : ((float)s_pylonSummary.temp_t5_c10 / 10.0f);
+    if (useModelTelemetry) {
+        if (modelTempValid(model.temperaturesC[0])) {
+            snap.tempMosC = model.temperaturesC[0];
+            snap.tempCount = 1u;
+        }
+        if (modelTempValid(model.temperaturesC[1])) {
+            snap.tempT1C = model.temperaturesC[1];
+            snap.tempCount = 2u;
+        }
+        if (modelTempValid(model.temperaturesC[2])) {
+            snap.tempT2C = model.temperaturesC[2];
+            snap.tempCount = 3u;
+        }
+        if (modelTempValid(model.temperaturesC[3])) {
+            snap.tempT4C = model.temperaturesC[3];
+            snap.tempCount = 4u;
+        }
+        if (modelTempValid(model.temperaturesC[4])) {
+            snap.tempT5C = model.temperaturesC[4];
+            snap.tempCount = 5u;
+        }
+    } else {
+        snap.tempMosC = (float)s_pylonSummary.temp_mos_c10 / 10.0f;
+        snap.tempT1C = (float)s_pylonSummary.temp_t1_c10 / 10.0f;
+        snap.tempT2C = (float)s_pylonSummary.temp_t2_c10 / 10.0f;
+        snap.tempT4C = (float)s_pylonSummary.temp_t4_c10 / 10.0f;
+        snap.tempT5C = (float)s_pylonSummary.temp_t5_c10 / 10.0f;
+        snap.tempCount = 5u;
+    }
     snap.pylonStatus63 = s_pylonSummary.status_63;
     if (useModelTelemetry) {
         (void)fillTelemetryStateFromModel(&settings, &model, &snap);

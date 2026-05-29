@@ -8,6 +8,7 @@
 #include "config.h"
 #include "orchestrator/protocol_types.h"
 #include "protocols/china_tower_modbus/china_tower_modbus_bms_task.h"
+#include "protocols/daly_rs485/daly_rs485_bms_task.h"
 #include "protocols/growatt/growatt_bms_task.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_alerts.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_bms_task.h"
@@ -34,6 +35,14 @@ static portMUX_TYPE g_bridgeMux = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t bridgeNowMs(void)
 {
     return (uint32_t)(esp_timer_get_time() / 1000LL);
+}
+
+static uint32_t bridgeTelemetryStaleMs(uint8_t bmsProtocol)
+{
+    if (bmsProtocol == PROTOCOL_RS485_DALY) {
+        return DALY_RS485_SOURCE_STALE_MS;
+    }
+    return WEB_TELEMETRY_STALE_MS;
 }
 
 static const char *modeToStr(uint8_t mode)
@@ -93,6 +102,8 @@ static const char *protocolToStr(uint8_t protocol)
             return "SEPLOS_RS485";
         case PROTOCOL_RS485_SEPLOS_19200:
             return "SEPLOS_RS485_19200";
+        case PROTOCOL_RS485_DALY:
+            return "DALY_RS485";
         default:
             return "UNKNOWN";
     }
@@ -1101,6 +1112,106 @@ static void fillTelemetryFromSeplosSnapshot(const seplos_rs485_snapshot_t *snaps
              snapshot->hasPortVoltageCv ? ((double)snapshot->portVoltageCv / 100.0) : 0.0);
 }
 
+static uint8_t pctFromDeci(uint16_t deciPct)
+{
+    uint16_t pct = (uint16_t)((deciPct + 5u) / 10u);
+    return (uint8_t)((pct > 100u) ? 100u : pct);
+}
+
+static void fillTelemetryFromDalySnapshot(const daly_rs485_snapshot_t *snapshot,
+                                          bridgeTelemetrySnapshot_t *out)
+{
+    if (snapshot == NULL || out == NULL || !snapshot->valid) {
+        return;
+    }
+
+    out->valid = true;
+    snprintf(out->source, sizeof(out->source), "%s", "DALY_RS485_TASK");
+    snprintf(out->protocol, sizeof(out->protocol), "%s", "DALY_RS485");
+
+    if (snapshot->hasPackVoltageCv) {
+        out->packVoltageV = (float)snapshot->packVoltageCv / 100.0f;
+    }
+    if (snapshot->hasCurrentDeciA) {
+        out->currentA = (float)snapshot->currentDeciA / 10.0f;
+    }
+    out->packPowerW = out->packVoltageV * out->currentA;
+    if (snapshot->hasSocDeciPct) {
+        out->socPct = pctFromDeci(snapshot->socDeciPct);
+    }
+    out->sohPct = 100u;
+    if (snapshot->hasCycles) {
+        out->cycles = snapshot->cycles;
+    }
+    if (snapshot->hasCapacity) {
+        out->remainingAh = (float)snapshot->remainingCapacityMah / 1000.0f;
+        out->fullAh = (float)snapshot->ratedCapacityMah / 1000.0f;
+    }
+    if (snapshot->hasCellExtremes) {
+        out->cellMaxV = (float)snapshot->maxCellMv / 1000.0f;
+        out->cellMinV = (float)snapshot->minCellMv / 1000.0f;
+        out->cellMaxIdx = snapshot->maxCellIndex;
+        out->cellMinIdx = snapshot->minCellIndex;
+        out->deltaV = out->cellMaxV - out->cellMinV;
+        out->cellDiffV = out->deltaV;
+    }
+    if (snapshot->cellCount > 0u) {
+        uint32_t sumMv = 0u;
+        uint8_t counted = 0u;
+        uint8_t count = snapshot->cellCount;
+        if (count > 32u) {
+            count = 32u;
+        }
+        out->cellCount = count;
+        for (uint8_t i = 0u; i < count; i++) {
+            out->cellVoltagesV[i] = (float)snapshot->cellMv[i] / 1000.0f;
+            if (snapshot->cellMv[i] > 0u) {
+                sumMv += snapshot->cellMv[i];
+                counted++;
+            }
+        }
+        if (counted > 0u) {
+            out->cellAvgV = ((float)sumMv / (float)counted) / 1000.0f;
+        }
+    }
+    out->tempCount = 0u;
+    out->tempMosC = 0.0f;
+    out->tempT1C = 0.0f;
+    out->tempT2C = 0.0f;
+    out->tempT4C = 0.0f;
+    out->tempT5C = 0.0f;
+    if (snapshot->tempCount > 0u) {
+        out->tempCount = snapshot->tempCount;
+        out->tempMosC = (float)snapshot->tempDeciC[0] / 10.0f;
+        if (snapshot->tempCount > 1u) out->tempT1C = (float)snapshot->tempDeciC[1] / 10.0f;
+        if (snapshot->tempCount > 2u) out->tempT2C = (float)snapshot->tempDeciC[2] / 10.0f;
+        if (snapshot->tempCount > 3u) out->tempT4C = (float)snapshot->tempDeciC[3] / 10.0f;
+        if (snapshot->tempCount > 4u) out->tempT5C = (float)snapshot->tempDeciC[4] / 10.0f;
+    }
+
+    out->alarmRaw = snapshot->alarmMask;
+    out->pylonStatus63 =
+        (snapshot->chargeEnabled ? 0x80u : 0u) |
+        (snapshot->dischargeEnabled ? 0x40u : 0u) |
+        (snapshot->balanceEnabled ? 0x20u : 0u);
+    snprintf(out->stateFlags,
+             sizeof(out->stateFlags),
+             "Charge %s, Discharge %s, Balance %s",
+             snapshot->chargeEnabled ? "ON" : "OFF",
+             snapshot->dischargeEnabled ? "ON" : "OFF",
+             snapshot->balanceEnabled ? "ON" : "OFF");
+    if (snapshot->alarmMask != 0u) {
+        char item[40];
+        snprintf(item, sizeof(item), "Daly faults 0x%08" PRIX32, snapshot->alarmMask);
+        appendListItem(out->protections, sizeof(out->protections), item);
+    }
+    if (snapshot->warningMask != 0u) {
+        char item[40];
+        snprintf(item, sizeof(item), "Daly warnings 0x%08" PRIX32, snapshot->warningMask);
+        appendListItem(out->warnings, sizeof(out->warnings), item);
+    }
+}
+
 static void bridgeFormatBmsInterface(char *out, size_t outSize, const bridge_runtime_settings_t *settings)
 {
     uint8_t port = 1u;
@@ -1140,6 +1251,8 @@ static const char *bridgeBmsTaskDebugName(uint8_t protocol)
         case PROTOCOL_RS485_SEPLOS:
         case PROTOCOL_RS485_SEPLOS_19200:
             return "SEPLOS";
+        case PROTOCOL_RS485_DALY:
+            return "DALY";
         default:
             return "GROWATT";
     }
@@ -1164,6 +1277,8 @@ static const char *bridgeBmsTaskSourceName(uint8_t protocol)
         case PROTOCOL_RS485_SEPLOS:
         case PROTOCOL_RS485_SEPLOS_19200:
             return "SEPLOS_RS485_TASK";
+        case PROTOCOL_RS485_DALY:
+            return "DALY_RS485_TASK";
         default:
             return "GROWATT_BMS_TASK";
     }
@@ -1340,6 +1455,30 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
                      snapshot.hasSocDeciPct ? (unsigned)(snapshot.socDeciPct % 10u) : 0u,
                      snapshot.hasPackVoltageCv ? ((double)snapshot.packVoltageCv / 100.0) : 0.0);
             fillTelemetryFromSeplosSnapshot(&snapshot, out);
+            if (srcUpdatedMs != 0u) {
+                out->updatedMs = srcUpdatedMs;
+                if (updatedMsOut != NULL) {
+                    *updatedMsOut = srcUpdatedMs;
+                }
+            }
+            return;
+        }
+    } else if (settings.bms_protocol == PROTOCOL_RS485_DALY) {
+        daly_rs485_snapshot_t snapshot = {0};
+        bool haveSnapshot = dalyRs485BmsTaskGetLatestSnapshot(&snapshot);
+        hasPacket = dalyRs485BmsTaskGetLatestPacket(&packet);
+        if (hasPacket) {
+            srcUpdatedMs = (uint32_t)(packet.timestampUs / 1000ULL);
+        }
+        if (haveSnapshot) {
+            ESP_LOGD(BRIDGE_TAG, "[FILL] Using Daly snapshot: soc=%u.%u%%, v=%.2fV",
+                     snapshot.hasSocDeciPct ? (unsigned)(snapshot.socDeciPct / 10u) : 0u,
+                     snapshot.hasSocDeciPct ? (unsigned)(snapshot.socDeciPct % 10u) : 0u,
+                     snapshot.hasPackVoltageCv ? ((double)snapshot.packVoltageCv / 100.0) : 0.0);
+            fillTelemetryFromDalySnapshot(&snapshot, out);
+            if (srcUpdatedMs == 0u && snapshot.timestampUs > 0) {
+                srcUpdatedMs = (uint32_t)(snapshot.timestampUs / 1000ULL);
+            }
             if (srcUpdatedMs != 0u) {
                 out->updatedMs = srcUpdatedMs;
                 if (updatedMsOut != NULL) {
@@ -1542,6 +1681,7 @@ void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
     snprintf(out->source, sizeof(out->source), "runtime");
     snprintf(out->protocol, sizeof(out->protocol), "%s", protocolToStr(settings.bms_protocol));
 
+    uint32_t telemetryStaleMs = bridgeTelemetryStaleMs(settings.bms_protocol);
     bool usedManualCache = false;
     bool manualCacheStale = false;
     bool noManualCache = false;
@@ -1554,7 +1694,7 @@ void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
         updatedMs = g_manualTelemetryUpdatedMs;
         manualAge = (nowMs >= g_manualTelemetryUpdatedMs) ? (nowMs - g_manualTelemetryUpdatedMs) : 0u;
         if ((g_manualTelemetryUpdatedMs != 0u) &&
-            ((nowMs - g_manualTelemetryUpdatedMs) <= WEB_TELEMETRY_STALE_MS)) {
+            ((nowMs - g_manualTelemetryUpdatedMs) <= telemetryStaleMs)) {
             *out = g_manualTelemetry;
             usedManualCache = true;
             snprintf(manualSource, sizeof(manualSource), "%s", g_manualTelemetry.source);
@@ -1574,8 +1714,8 @@ void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
         ESP_LOGD(BRIDGE_TAG, "[TELEM] Using manual cache: age=%u ms, source=%s, valid=%s, soc=%u%%",
                  manualAge, manualSource, out->valid ? "YES" : "NO", manualSoc);
     } else if (manualCacheStale) {
-        ESP_LOGD(BRIDGE_TAG, "[TELEM] Manual cache STALE: age=%u ms > threshold=%d ms",
-                 manualAge, WEB_TELEMETRY_STALE_MS);
+        ESP_LOGD(BRIDGE_TAG, "[TELEM] Manual cache STALE: age=%u ms > threshold=%u ms",
+                 manualAge, telemetryStaleMs);
     } else if (noManualCache) {
         ESP_LOGD(BRIDGE_TAG, "[TELEM] No manual cache available");
     }
@@ -1605,11 +1745,11 @@ void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
     }
 
     {
-        bool ageStale = (out->updatedMs != 0u) && (out->ageMs > WEB_TELEMETRY_STALE_MS);
+        bool ageStale = (out->updatedMs != 0u) && (out->ageMs > telemetryStaleMs);
         out->stale = ageStale || (manualStale && (updatedMs == 0u));
-        ESP_LOGD(BRIDGE_TAG, "[TELEM] Stale check: ageStale=%s (age=%u ms, threshold=%d ms), "
+        ESP_LOGD(BRIDGE_TAG, "[TELEM] Stale check: ageStale=%s (age=%u ms, threshold=%u ms), "
                  "manualStale=%s, final_stale=%s",
-                 ageStale ? "YES" : "NO", out->ageMs, WEB_TELEMETRY_STALE_MS,
+                 ageStale ? "YES" : "NO", out->ageMs, telemetryStaleMs,
                  manualStale ? "YES" : "NO", out->stale ? "YES" : "NO");
     }
 

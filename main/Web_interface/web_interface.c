@@ -117,6 +117,7 @@ static const char *protocolToStr(int protocol)
         case PROTOCOL_RS485_WOW: return "WOW_MODBUS";
         case PROTOCOL_RS485_SEPLOS: return "SEPLOS_RS485";
         case PROTOCOL_RS485_SEPLOS_19200: return "SEPLOS_RS485_19200";
+        case PROTOCOL_RS485_DALY: return "DALY_RS485";
         default: return "UNKNOWN";
     }
 }
@@ -419,7 +420,6 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "currentTab=id;document.getElementById(id).classList.add('active');if(id==='settings'){loadSettings();}if(id==='logs'){refreshLogs();}}"
         "function row(k,v){return '<tr><td>'+k+'</td><td class=\"mono\">'+v+'</td></tr>';}"
         "function card(title,rows){return '<div class=\"card\"><h3>'+title+'</h3><table>'+rows.join('')+'</table></div>';}"
-        "const STALE_MS=parseInt('" STR(WEB_TELEMETRY_STALE_MS) "',10);"
         "function isNum(v){return typeof v==='number'&&Number.isFinite(v);}"
         "function fmt(v,d,u){return isNum(v)?v.toFixed(d)+(u||''):'-';}"
         "function fmtInt(v){return (v||v===0)?v:'-';}"
@@ -473,6 +473,7 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "const china=t.protocol==='CHINA_TOWER_MODBUS';"
         "const wow=t.protocol==='WOW_MODBUS';"
         "const seplos=t.protocol==='SEPLOS_RS485'||t.protocol==='SEPLOS_RS485_19200';"
+        "const daly=t.protocol==='DALY_RS485';"
         "if(growatt){return card('Temperatures',[row('Pack',hasData?fmt(t.temp_mos_c,1,' C'):'-')]);}"
         "if(jkCan){"
         "const n=isNum(t.temp_count)?t.temp_count:0;"
@@ -491,12 +492,17 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "const v=(field,ok)=>hasData&&ok?fmt(t[field],1,' C'):'-';"
         "return card('Temperatures',[row('MOS',v('temp_mos_c',n>2)),row('Temp 1',v('temp_t1_c',n>0)),row('Temp 2',v('temp_t2_c',n>1)),row('Temp 4','-'),row('Temp 5','-')]);"
         "}"
+        "if(daly){"
+        "const n=isNum(t.temp_count)?t.temp_count:0;"
+        "const v=(field,ok)=>hasData&&ok?fmt(t[field],1,' C'):'-';"
+        "return card('Temperatures',[row('MOS',v('temp_mos_c',n>0)),row('T1',v('temp_t1_c',n>1)),row('T2',v('temp_t2_c',n>2)),row('T4',v('temp_t4_c',n>3)),row('T5',v('temp_t5_c',n>4))]);"
+        "}"
         "const labels=seplos?['MOS','Temp 1','Temp 2','Temp 3','Temp 4']:((pace||voltronic||china||wow)?['MOS','Battery T1','Battery T2','Battery T4','Battery T5']:(nativeJk?['Tube/MOS','Battery','Box','T4','T5']:['MOS','T1','T2','T4','T5']));"
         "return card('Temperatures',[row(labels[0],hasData?fmt(t.temp_mos_c,1,' C'):'-'),row(labels[1],hasData?fmt(t.temp_t1_c,1,' C'):'-'),row(labels[2],hasData?fmt(t.temp_t2_c,1,' C'):'-'),row(labels[3],hasData?fmt(t.temp_t4_c,1,' C'):'-'),row(labels[4],hasData?fmt(t.temp_t5_c,1,' C'):'-')]);"
         "}"
         "function renderTelemetry(t){"
         "const age=isNum(t.age_ms)?t.age_ms:0;"
-        "const stale=Boolean(t.stale)||(age>STALE_MS&&age!==0);"
+        "const stale=Boolean(t.stale);"
         "const hasData=Boolean(t.valid)&&!stale;"
         "const sourceLabel=(hasData&&t.source)?t.source:'-';"
         "const protocolLabel=(hasData&&t.protocol)?t.protocol:'-';"
@@ -521,7 +527,7 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "const modeOpts=[{value:1,label:'sniffer'},{value:2,label:'forward'},{value:3,label:'bridge'}];"
         "const lineOpts=[{value:1,label:'CAN'},{value:2,label:'RS485'}];"
         "const bmsCanProtoOpts=[{value:18,label:'JK BMS CAN Protocol (250K) V2.0'},{value:1,label:'CAN_GROWATT (CAN BMS)'},{value:4,label:'CAN_PYLON'},{value:5,label:'CAN_DEYE'},{value:7,label:'CAN_GOODWE'},{value:8,label:'CAN_SOFAR'},{value:9,label:'CAN_SMA'},{value:10,label:'CAN_VICTRON'}];"
-        "const bmsRsProtoOpts=[{value:2,label:'RS485_GROWATT (Modbus Poller)'},{value:6,label:'JKBMS_MODBUS (RS485 Poller, 9600)'},{value:16,label:'JKBMS_MODBUS (RS485 Poller, 115200)'},{value:12,label:'JKBMS_RS485_NATIVE (Native Poller)'},{value:19,label:'SEPLOS_RS485 (Native Poller, 9600)'},{value:20,label:'SEPLOS_RS485 (Native Poller, 19200)'},{value:11,label:'PACE_RS485_MODBUS_V1.3 (Modbus Poller)'},{value:13,label:'VOLTRONIC_MODBUS'},{value:14,label:'CHINA_TOWER_MODBUS / JK 008 (RS485 Poller)'},{value:15,label:'WOW_MODBUS / JK 009 (RS485 Poller)'},{value:3,label:'RS485_PYLON (9600)'},{value:17,label:'RS485_PYLON (115200)'}];"
+        "const bmsRsProtoOpts=[{value:2,label:'RS485_GROWATT (Modbus Poller)'},{value:6,label:'JKBMS_MODBUS (RS485 Poller, 9600)'},{value:16,label:'JKBMS_MODBUS (RS485 Poller, 115200)'},{value:12,label:'JKBMS_RS485_NATIVE (Native Poller)'},{value:21,label:'DALY_RS485 (Native Poller, 9600)'},{value:19,label:'SEPLOS_RS485 (Native Poller, 9600)'},{value:20,label:'SEPLOS_RS485 (Native Poller, 19200)'},{value:11,label:'PACE_RS485_MODBUS_V1.3 (Modbus Poller)'},{value:13,label:'VOLTRONIC_MODBUS'},{value:14,label:'CHINA_TOWER_MODBUS / JK 008 (RS485 Poller)'},{value:15,label:'WOW_MODBUS / JK 009 (RS485 Poller)'},{value:3,label:'RS485_PYLON (9600)'},{value:17,label:'RS485_PYLON (115200)'}];"
         "const invCanProtoOpts=[{value:1,label:'CAN_GROWATT'},{value:4,label:'CAN_PYLON'},{value:5,label:'CAN_DEYE'},{value:7,label:'CAN_GOODWE'},{value:8,label:'CAN_SOFAR'},{value:9,label:'CAN_SMA'},{value:10,label:'CAN_VICTRON'}];"
         "const invRsProtoOpts=[{value:2,label:'RS485_GROWATT'},{value:3,label:'RS485_PYLON (9600)'},{value:17,label:'RS485_PYLON (115200)'}];"
         "const portOpts=[{value:1,label:'1'},{value:2,label:'2'}];"
@@ -564,12 +570,14 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "else if(bl===2&&bp===14&&il===2&&(ip===3||ip===17)){txt='Special route active: CHINA_TOWER_MODBUS / JK 008 (RS485_'+bport+') -> '+protoLabel(ip)+' responder (RS485_'+iport+').';}"
         "else if(bl===2&&bp===15&&il===2&&(ip===3||ip===17)){txt='Special route active: WOW_MODBUS / JK 009 (RS485_'+bport+') -> '+protoLabel(ip)+' responder (RS485_'+iport+').';}"
         "else if(bl===2&&(bp===19||bp===20)&&il===2&&(ip===3||ip===17)){txt='Special route active: '+protoLabel(bp)+' (RS485_'+bport+') -> '+protoLabel(ip)+' responder (RS485_'+iport+').';}"
+        "else if(bl===2&&bp===21&&il===2&&(ip===3||ip===17)){txt='Special route active: DALY_RS485 (RS485_'+bport+') -> '+protoLabel(ip)+' responder (RS485_'+iport+').';}"
         "else if(bl===2&&(bp===6||bp===16)){txt='Testing '+protoLabel(bp)+' poller on RS485_'+bport+'.';}"
         "else if(bl===2&&bp===12){txt='Testing JKBMS_RS485_NATIVE poller on RS485_'+bport+'.';}"
         "else if(bl===2&&bp===11){txt='Testing PACE_RS485_MODBUS_V1.3 poller on RS485_'+bport+'.';}"
         "else if(bl===2&&bp===13){txt='Testing VOLTRONIC_MODBUS poller on RS485_'+bport+'.';}"
         "else if(bl===2&&bp===14){txt='Testing CHINA_TOWER_MODBUS / JK 008 poller on RS485_'+bport+'.';}"
         "else if(bl===2&&bp===15){txt='Testing WOW_MODBUS / JK 009 poller on RS485_'+bport+'.';}"
+        "else if(bl===2&&bp===21){txt='Testing DALY_RS485 native poller on RS485_'+bport+'.';}"
         "else if(bl===2&&(bp===19||bp===20)){txt='Testing '+protoLabel(bp)+' poller on RS485_'+bport+'.';}"
         "else if(bl===2&&bp===2){txt='Testing RS485_GROWATT poller on RS485_'+bport+'.';}"
         "else if(bl===1&&bp===1&&il===2&&ip===2){txt='Special route active: CAN_GROWATT -> RS485_GROWATT translator.';}"
@@ -753,6 +761,7 @@ static void overlayFakeTelemetry(bridgeTelemetrySnapshot_t *snap)
     snap->tempT2C = model.temperaturesC[2];
     snap->tempT4C = model.temperaturesC[3];
     snap->tempT5C = model.temperaturesC[4];
+    snap->tempCount = 5u;
     snap->pylonStatus63 = (uint8_t)(model.protocolState & 0xFFu);
     snprintf(snap->stateFlags,
              sizeof(snap->stateFlags),

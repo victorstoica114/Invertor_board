@@ -17,7 +17,7 @@ static uint32_t batteryModelNowMs(void)
     return (uint32_t)(esp_timer_get_time() / 1000LL);
 }
 
-bool batteryModelIsFresh(const battery_model_t *model)
+static bool batteryModelIsFreshForMs(const battery_model_t *model, uint32_t staleMs)
 {
     const uint32_t nowMs = batteryModelNowMs();
 
@@ -25,10 +25,15 @@ bool batteryModelIsFresh(const battery_model_t *model)
         return false;
     }
 
-    return (nowMs - model->updatedMs) <= BRIDGE_SOURCE_STALE_MS;
+    return (nowMs - model->updatedMs) <= staleMs;
 }
 
-void batteryModelGet(battery_model_t *out)
+bool batteryModelIsFresh(const battery_model_t *model)
+{
+    return batteryModelIsFreshForMs(model, BRIDGE_SOURCE_STALE_MS);
+}
+
+void batteryModelGetWithStaleMs(battery_model_t *out, uint32_t staleMs)
 {
     const uint32_t nowMs = batteryModelNowMs();
 
@@ -46,9 +51,14 @@ void batteryModelGet(battery_model_t *out)
     *out = g_batteryModel;
     portEXIT_CRITICAL(&g_batteryModelMux);
 
-    if (!batteryModelIsFresh(out)) {
+    if (!batteryModelIsFreshForMs(out, staleMs)) {
         memset(out, 0, sizeof(*out));
     }
+}
+
+void batteryModelGet(battery_model_t *out)
+{
+    batteryModelGetWithStaleMs(out, BRIDGE_SOURCE_STALE_MS);
 }
 
 void batteryModelGetReal(battery_model_t *out)

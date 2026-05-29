@@ -12,6 +12,7 @@ typedef universal_battery_model_t battery_model_t;
 
 bool batteryModelIsFresh(const battery_model_t *model);
 void batteryModelGet(battery_model_t *out);
+void batteryModelGetWithStaleMs(battery_model_t *out, uint32_t staleMs);
 void batteryModelGetReal(battery_model_t *out);
 void batteryModelSet(const battery_model_t *in);
 void batteryModelClear(void);
