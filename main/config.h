@@ -69,6 +69,7 @@
 #define CAN_FORWARD_ENABLE 0
 #define RS485_FORWARD_ENABLE 0
 #define CAN_EXCLUDE_LIST_ENABLE 0
+#define CAN_FORWARD_PYLON_16S_TO_8S_ENABLE 0
 
 /* --- RS485 -> CAN translator (uses RS485 SOC/TEMP to synthesize CAN 0x322) --- */
 #define RS485_CAN_322_TRANSLATOR_ENABLE 1
@@ -98,7 +99,7 @@
 #define WEB_TELEMETRY_STALE_MS 10000u
 
 /* --- Global working mode --- */
-#define ACTIVE_WORKING_MODE 0 /* 0=bridge, 1=forward, 2=sniffer */
+#define ACTIVE_WORKING_MODE 1 /* 0=bridge, 1=forward, 2=sniffer */
 
 /* --- Active protocol selection --- */
 #define ACTIVE_BMS_PROTOCOL      0 /* 0=Growatt, 1=Pylon */
@@ -188,9 +189,9 @@ static inline uint32_t bridgeProtocolCanBitrate(uint8_t protocol)
 }
 
 #define BMS_line LINE_CAN
-#define Inverter_line LINE_RS485
-#define BMS_protocol PROTOCOL_CAN_DALY
-#define Inverter_protocol PROTOCOL_RS485_PYLON
+#define Inverter_line LINE_CAN
+#define BMS_protocol PROTOCOL_CAN_PYLON
+#define Inverter_protocol PROTOCOL_CAN_PYLON
 #define BMS_PORT 1
 #define Inverter_PORT 2
 
@@ -292,6 +293,15 @@ static inline uint32_t bridgeProtocolCanBitrate(uint8_t protocol)
 #define PYLON_INVERTER_TASK_STACK      3072
 #define PYLON_INVERTER_TASK_PRIORITY   8
 #define PYLON_PLACEHOLDER_TASK_PERIOD_MS 1000
+
+/* --- EASUN Pylon CAN 24V diagnostic sender ---
+ * Sends a controlled 8S/24V Pylon frame set on CAN2 while sniffer mode is active.
+ * This is intentionally not a CAN1->CAN2 forwarder, because JK Pylon CAN is 16S/48V.
+ */
+#define EASUN_PYLON_24V_DIAG_SENDER_ENABLE 0
+#define EASUN_PYLON_24V_DIAG_TX_PERIOD_MS  1000
+#define EASUN_PYLON_24V_DIAG_TASK_STACK    3072
+#define EASUN_PYLON_24V_DIAG_TASK_PRIORITY 8
 
 /* --- Working mode task settings --- */
 #define FORWARD_CAN_DECODE_ENABLE      1

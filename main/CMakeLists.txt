@@ -15,6 +15,7 @@ idf_component_register(
         "protocols/common/battery_model.c"
         "protocols/pylon/pylon_rs485_bridge.c"
         "protocols/pylon/pylon_can_protocol.c"
+        "protocols/pylon/pylon_can_diag_sender.c"
         "protocols/deye/deye_can_protocol.c"
         "protocols/jkbms_can/jkbms_can_protocol.c"
         "protocols/growatt/growatt_registers_map.c"
