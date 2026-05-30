@@ -15,5 +15,9 @@ htmlcov/
 *.gcno
 *.gcov
 
+# KiCad local/generated files
+**/fp-info-cache
+**/*.bak
+
 # Local-only credentials. Keep main/secrets.example.h public as the template.
 main/secrets.h

@@ -1,0 +1,9 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP ESHF-105-01-L-D-TH
+D .050" Shrouded Terminal Strip For FFSD, through hole, dual row,  positions per row
+K
+F http://suddendocs.samtec.com/prints/shf-1xx-01-x-d-xx-xx-mkt.pdf
+$ENDCMP
+#
+#End Doc Library

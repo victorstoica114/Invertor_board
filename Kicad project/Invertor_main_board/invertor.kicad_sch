@@ -1,0 +1,1841 @@
+(kicad_sch
+	(version 20260306)
+	(generator "eeschema")
+	(generator_version "10.0")
+	(uuid "bbbda9e5-bfe3-4c48-9a16-310282237854")
+	(paper "A4")
+	(title_block
+		(date "2025-01-28")
+		(rev "V1 REV.A")
+	)
+	(lib_symbols
+		(symbol "CE-symbol:LOGO"
+			(pin_names
+				(offset 1.016)
+			)
+			(exclude_from_sim no)
+			(in_bom yes)
+			(on_board yes)
+			(in_pos_files yes)
+			(duplicate_pin_numbers_are_jumpers no)
+			(property "Reference" "#G"
+				(at 0 2.1244 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Value" "LOGO"
+				(at 0 -2.1244 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Footprint" ""
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Datasheet" ""
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Description" ""
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(symbol "LOGO_0_0"
+				(polyline
+					(pts
+						(xy -0.4579 -2.0132) (xy -0.4086 -1.9837) (xy -0.3851 -1.9179) (xy -0.3767 -1.8057) (xy -0.373 -1.6373)
+						(xy -0.3636 -1.2633) (xy -0.5405 -1.2633) (xy -0.6424 -1.2592) (xy -0.9107 -1.2115) (xy -1.169 -1.1166)
+						(xy -1.4002 -0.9818) (xy -1.5871 -0.8145) (xy -1.6437 -0.7418) (xy -1.7276 -0.613) (xy -1.7985 -0.482)
+						(xy -1.872 -0.2967) (xy -1.9317 -0.0159) (xy -1.9336 0.26) (xy -1.8817 0.5239) (xy -1.7803 0.7686)
+						(xy -1.6334 0.9872) (xy -1.4452 1.1725) (xy -1.2196 1.3173) (xy -0.961 1.4148) (xy -0.6733 1.4576)
+						(xy -0.399 1.4697) (xy -0.399 2.2043) (xy -0.7146 2.1836) (xy -0.7228 2.183) (xy -1.1025 2.1278)
+						(xy -1.4501 2.0179) (xy -1.7617 1.8559) (xy -2.0335 1.644) (xy -2.2618 1.3848) (xy -2.4428 1.0805)
+						(xy -2.4756 1.0107) (xy -2.5624 0.8059) (xy -2.6208 0.6207) (xy -2.6583 0.4282) (xy -2.6822 0.2016)
+						(xy -2.6874 0.0813) (xy -2.6594 -0.255) (xy -2.5722 -0.5791) (xy -2.4312 -0.8848) (xy -2.2417 -1.1662)
+						(xy -2.009 -1.417) (xy -1.7385 -1.6314) (xy -1.4355 -1.8031) (xy -1.1054 -1.9262) (xy -0.7534 -1.9945)
+						(xy -0.6764 -2.0031) (xy -0.5437 -2.0164) (xy -0.4579 -2.0132)
+					)
+					(stroke
+						(width 0.01)
+						(type default)
+					)
+					(fill
+						(type outline)
+					)
+				)
+				(polyline
+					(pts
+						(xy 2.5987 -2.0133) (xy 2.6495 -1.9839) (xy 2.6736 -1.9181) (xy 2.682 -1.8059) (xy 2.6857 -1.6373)
+						(xy 2.6951 -1.2633) (xy 2.5181 -1.2633) (xy 2.4149 -1.2591) (xy 2.1469 -1.2113) (xy 1.8889 -1.1163)
+						(xy 1.6581 -0.9816) (xy 1.4717 -0.8145) (xy 1.4149 -0.7415) (xy 1.3308 -0.6129) (xy 1.2594 -0.482)
+						(xy 1.1636 -0.2826) (xy 1.7122 -0.2735) (xy 2.2607 -0.2643) (xy 2.2607 0.4987) (xy 1.7121 0.4987)
+						(xy 1.5786 0.4993) (xy 1.4135 0.5017) (xy 1.2819 0.5058) (xy 1.195 0.5112) (xy 1.1636 0.5174)
+						(xy 1.1666 0.5385) (xy 1.199 0.6221) (xy 1.2588 0.7337) (xy 1.3355 0.8563) (xy 1.4186 0.9727)
+						(xy 1.4979 1.0658) (xy 1.5828 1.1459) (xy 1.8208 1.3095) (xy 2.0882 1.4136) (xy 2.3834 1.4575)
+						(xy 2.6556 1.4695) (xy 2.6659 1.8365) (xy 2.6763 2.2034) (xy 2.3604 2.1835) (xy 2.2124 2.1705)
+						(xy 1.8538 2.1026) (xy 1.5326 1.9833) (xy 1.2421 1.8096) (xy 0.9755 1.5787) (xy 0.8008 1.3793)
+						(xy 0.6376 1.1253) (xy 0.515 0.839) (xy 0.4259 0.5058) (xy 0.3851 0.2295) (xy 0.385 -0.1347) (xy 0.4486 -0.481)
+						(xy 0.5754 -0.8076) (xy 0.7648 -1.1124) (xy 1.0161 -1.3935) (xy 1.3022 -1.6302) (xy 1.605 -1.8072)
+						(xy 1.9313 -1.9267) (xy 2.2905 -1.9929) (xy 2.373 -2.0022) (xy 2.5102 -2.0161) (xy 2.5987 -2.0133)
+					)
+					(stroke
+						(width 0.01)
+						(type default)
+					)
+					(fill
+						(type outline)
+					)
+				)
+			)
+			(embedded_fonts no)
+		)
+		(symbol "Graphic:SYM_ESD_Small"
+			(exclude_from_sim no)
+			(in_bom no)
+			(on_board no)
+			(in_pos_files yes)
+			(duplicate_pin_numbers_are_jumpers no)
+			(property "Reference" "#SYM"
+				(at 0 3.556 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Value" "SYM_ESD_Small"
+				(at 0 -3.175 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Footprint" ""
+				(at 0 0.254 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Datasheet" ""
+				(at 0 0.254 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Description" "ESD warning/\"Do not touch\" symbol, small"
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Sim.Enable" "0"
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "ki_keywords" "symbol ESD"
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(symbol "SYM_ESD_Small_0_0"
+				(polyline
+					(pts
+						(xy -2.667 -1.905) (xy 2.794 -1.905) (xy 0 2.54) (xy -2.667 -1.905)
+					)
+					(stroke
+						(width 0.254)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(polyline
+					(pts
+						(xy -1.27 0.381) (xy 2.159 -1.016)
+					)
+					(stroke
+						(width 0.254)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(polyline
+					(pts
+						(xy 2.7432 -1.905) (xy 2.7178 -1.8796) (xy 2.6162 -1.6764) (xy 2.5654 -1.6002) (xy 2.4892 -1.4986)
+						(xy 2.4384 -1.3716) (xy 1.7526 -0.2286) (xy 1.7018 -0.127) (xy 1.6256 -0.0508) (xy 1.6002 0.0508)
+						(xy 1.5494 0.1016) (xy 1.4986 0.2032) (xy 1.4732 0.2286) (xy 1.4732 0.2032) (xy 1.4478 0.2032)
+						(xy 1.3208 0.0762) (xy 1.2954 0.0254) (xy 1.2954 -0.0254) (xy 1.27 -0.0762) (xy 1.2446 -0.1524)
+						(xy 1.143 -0.254) (xy 1.0922 -0.3302) (xy 1.0414 -0.3556) (xy 0.9144 -0.4826) (xy 0.762 -0.5842)
+						(xy 0.6604 -0.6604) (xy 0.508 -0.762) (xy 0.4572 -0.8128) (xy 0.3556 -0.8636) (xy 0.3048 -0.9144)
+						(xy 0.2286 -0.9652) (xy 0.0762 -1.1938) (xy 0.0254 -1.2954) (xy -0.0254 -1.4224) (xy -0.0508 -1.4986)
+						(xy -0.1016 -1.5748) (xy -0.127 -1.651) (xy -0.1778 -1.6764) (xy -0.2032 -1.7272) (xy -0.254 -1.7526)
+						(xy -0.4064 -1.7526) (xy -0.4064 -1.7272) (xy -0.4572 -1.7018) (xy -0.4826 -1.6256) (xy -0.508 -1.524)
+						(xy -0.508 -1.0922) (xy -0.4572 -0.889) (xy -0.4064 -0.8128) (xy -0.254 -0.6604) (xy -0.2032 -0.5842)
+						(xy -0.127 -0.5334) (xy -0.1016 -0.4826) (xy -0.0762 -0.4064) (xy -0.0508 -0.3556) (xy -0.0254 -0.3302)
+						(xy -0.0254 -0.2794) (xy 0 -0.2286) (xy -0.0762 -0.1524) (xy -0.127 -0.127) (xy -0.1524 -0.0762)
+						(xy -0.2032 -0.0508) (xy -0.2286 -0.0254) (xy -0.254 -0.0254) (xy -0.3048 -0.0762) (xy -0.3556 -0.1016)
+						(xy -0.4318 -0.127) (xy -0.4826 -0.1524) (xy -0.5588 -0.2286) (xy -0.6096 -0.254) (xy -0.8382 -0.4826)
+						(xy -0.8128 -0.5588) (xy -0.7874 -0.5842) (xy -0.7874 -0.8636) (xy -0.8128 -0.889) (xy -0.8128 -0.9652)
+						(xy -0.762 -1.016) (xy -0.762 -1.0414) (xy -0.6604 -1.2954) (xy -0.6604 -1.5748) (xy -0.6858 -1.6002)
+						(xy -0.6858 -1.6256) (xy -0.7366 -1.7018) (xy -0.8382 -1.7526) (xy -0.9144 -1.7526) (xy -0.9398 -1.7272)
+						(xy -0.9652 -1.6764) (xy -1.016 -1.6002) (xy -1.0414 -1.524) (xy -1.143 -1.27) (xy -1.2192 -1.0414)
+						(xy -1.27 -0.9652) (xy -1.2954 -0.889) (xy -1.3208 -0.8382) (xy -1.3208 -0.8128) (xy -1.3716 -0.7112)
+						(xy -1.397 -0.5842) (xy -1.397 -0.4826) (xy -1.3716 -0.381) (xy -1.3208 -0.254) (xy -1.2954 -0.2032)
+						(xy -1.1938 -0.0508) (xy -1.0414 0.1524) (xy -0.9906 0.2032) (xy -0.9652 0.254) (xy -0.9144 0.3302)
+						(xy -0.889 0.381) (xy -0.8636 0.381) (xy -0.8128 0.508) (xy -0.6096 0.7112) (xy -0.5334 0.7366)
+						(xy -0.508 0.762) (xy -0.4318 0.762) (xy -0.3556 0.7874) (xy -0.2286 0.8128) (xy -0.1016 0.8128)
+						(xy 0.0508 0.8382) (xy 0.2032 0.8382) (xy 0.3048 0.8636) (xy 0.4826 0.8636) (xy 0.5334 0.889)
+						(xy 0.5842 0.889) (xy 0.6858 0.9398) (xy 0.7112 0.9652) (xy 0.762 0.9906) (xy 0.8128 1.0414) (xy 0.8636 1.0668)
+						(xy 0.889 1.1176) (xy 0.9144 1.143) (xy 0.9144 1.1938) (xy 0.889 1.2192) (xy 0.8636 1.27) (xy 0.8128 1.3462)
+						(xy 0.7112 1.5494) (xy 0.635 1.651) (xy 0.5842 1.7526) (xy 0.508 1.8796) (xy 0.4572 1.9558) (xy 0.381 2.0828)
+						(xy 0.3048 2.1844) (xy 0.254 2.286) (xy 0.2032 2.3622) (xy 0.1778 2.4384) (xy 0.1016 2.5146) (xy 0.1016 2.54)
+						(xy 0.0762 2.5654) (xy 0.0762 2.5908) (xy 0.0254 2.5908) (xy 0.0254 2.5654) (xy -0.0254 2.5146)
+						(xy -0.1016 2.3622) (xy -0.254 2.1336) (xy -0.3048 2.032) (xy -0.4572 1.778) (xy -0.5588 1.6256)
+						(xy -0.762 1.27) (xy -0.889 1.0668) (xy -1.016 0.8382) (xy -1.1684 0.6096) (xy -1.3208 0.3302)
+						(xy -1.397 0.2032) (xy -1.524 -0.0254) (xy -1.778 -0.4318) (xy -1.8796 -0.635) (xy -2.0066 -0.8128)
+						(xy -2.1082 -0.9906) (xy -2.2098 -1.143) (xy -2.286 -1.2954) (xy -2.4384 -1.5494) (xy -2.4892 -1.651)
+						(xy -2.5654 -1.7526) (xy -2.5908 -1.8288) (xy -2.6162 -1.8796) (xy -2.6416 -1.905) (xy -2.6416 -1.9304)
+						(xy 2.7432 -1.9304) (xy 2.7432 -1.905)
+					)
+					(stroke
+						(width 0.127)
+						(type default)
+					)
+					(fill
+						(type background)
+					)
+				)
+			)
+			(embedded_fonts no)
+		)
+		(symbol "Mechanical:MountingHole"
+			(pin_names
+				(offset 1.016)
+			)
+			(exclude_from_sim no)
+			(in_bom yes)
+			(on_board yes)
+			(in_pos_files yes)
+			(duplicate_pin_numbers_are_jumpers no)
+			(property "Reference" "H"
+				(at 0 5.08 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Value" "MountingHole"
+				(at 0 3.175 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Footprint" ""
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Datasheet" ""
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Description" "Mounting Hole without connection"
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "ki_keywords" "mounting hole"
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "ki_fp_filters" "MountingHole*"
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(symbol "MountingHole_0_1"
+				(circle
+					(center 0 0)
+					(radius 1.27)
+					(stroke
+						(width 1.27)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+			)
+			(embedded_fonts no)
+		)
+		(symbol "WEE-symbol:LOGO"
+			(pin_names
+				(offset 1.016)
+			)
+			(exclude_from_sim no)
+			(in_bom yes)
+			(on_board yes)
+			(in_pos_files yes)
+			(duplicate_pin_numbers_are_jumpers no)
+			(property "Reference" "#G"
+				(at 0 3.0907 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Value" "LOGO"
+				(at 0 -3.0907 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Footprint" ""
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Datasheet" ""
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Description" ""
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(symbol "LOGO_0_0"
+				(polyline
+					(pts
+						(xy 0.5439 2.0124) (xy -0.4351 2.0124) (xy -0.4351 1.6588) (xy 0.5439 1.6588) (xy 0.5439 2.0124)
+					)
+					(stroke
+						(width 0.01)
+						(type default)
+					)
+					(fill
+						(type outline)
+					)
+				)
+				(polyline
+					(pts
+						(xy 0.9286 -1.2104) (xy 0.991 -1.1634) (xy 1.0268 -1.0911) (xy 1.0214 -1.0138) (xy 0.964 -0.9344)
+						(xy 0.9447 -0.9161) (xy 0.8855 -0.8807) (xy 0.8213 -0.8828) (xy 0.8093 -0.886) (xy 0.7297 -0.9336)
+						(xy 0.6857 -1.0076) (xy 0.6824 -1.0929) (xy 0.7249 -1.1741) (xy 0.7638 -1.2036) (xy 0.8453 -1.2241)
+						(xy 0.9286 -1.2104)
+					)
+					(stroke
+						(width 0.01)
+						(type default)
+					)
+					(fill
+						(type outline)
+					)
+				)
+				(polyline
+					(pts
+						(xy 2.4475 -2.4748) (xy -2.4476 -2.4748) (xy -2.4476 -3.7257) (xy 2.4475 -3.7257) (xy 2.4475 -2.4748)
+					)
+					(stroke
+						(width 0.01)
+						(type default)
+					)
+					(fill
+						(type outline)
+					)
+				)
+				(polyline
+					(pts
+						(xy 2.4696 -2.0893) (xy 2.4745 -2.0707) (xy 2.4606 -2.0351) (xy 2.4256 -1.9789) (xy 2.3669 -1.8989)
+						(xy 2.2821 -1.7916) (xy 2.1687 -1.6537) (xy 2.0242 -1.4818) (xy 1.8461 -1.2726) (xy 1.8423 -1.2682)
+						(xy 1.6913 -1.0915) (xy 1.5497 -0.926) (xy 1.4218 -0.7768) (xy 1.312 -0.6488) (xy 1.2246 -0.5471)
+						(xy 1.1639 -0.4768) (xy 1.1342 -0.4427) (xy 1.0797 -0.3823) (xy 1.1671 0.6315) (xy 1.1872 0.8642)
+						(xy 1.2068 1.0898) (xy 1.2249 1.2973) (xy 1.241 1.4794) (xy 1.2543 1.629) (xy 1.2642 1.7388) (xy 1.2702 1.8016)
+						(xy 1.2859 1.958) (xy 1.6589 1.958) (xy 1.6589 2.2281) (xy 1.6588 2.2884) (xy 1.6575 2.3907) (xy 1.6525 2.4534)
+						(xy 1.6412 2.4868) (xy 1.621 2.5012) (xy 1.5894 2.5069) (xy 1.5821 2.5081) (xy 1.5674 2.5155)
+						(xy 1.5655 2.5322) (xy 1.5795 2.5628) (xy 1.6129 2.6118) (xy 1.6687 2.6838) (xy 1.7504 2.7833)
+						(xy 1.8611 2.9148) (xy 2.0042 3.0829) (xy 2.0125 3.0927) (xy 2.1389 3.242) (xy 2.2525 3.3784)
+						(xy 2.3488 3.4961) (xy 2.4233 3.5895) (xy 2.4713 3.6531) (xy 2.4883 3.6812) (xy 2.4883 3.6818)
+						(xy 2.4826 3.7042) (xy 2.4638 3.7056) (xy 2.4289 3.6832) (xy 2.3748 3.6339) (xy 2.2985 3.5546)
+						(xy 2.1968 3.4424) (xy 2.0667 3.2942) (xy 1.9052 3.107) (xy 1.8677 3.0633) (xy 1.7374 2.9132)
+						(xy 1.6192 2.7788) (xy 1.5177 2.6654) (xy 1.4374 2.578) (xy 1.383 2.5218) (xy 1.3592 2.5019) (xy 1.3588 2.5019)
+						(xy 1.3402 2.5262) (xy 1.3325 2.5835) (xy 1.335 2.6265) (xy 1.3563 2.6583) (xy 1.4141 2.6651)
+						(xy 1.4713 2.6739) (xy 1.4957 2.7015) (xy 1.5138 2.7343) (xy 1.5642 2.7691) (xy 1.6144 2.8064)
+						(xy 1.6659 2.8873) (xy 1.6861 2.9817) (xy 1.6838 2.9936) (xy 1.6548 3.045) (xy 1.6034 3.1054)
+						(xy 1.5517 3.1516) (xy 1.4981 3.1754) (xy 1.4334 3.1713) (xy 1.3597 3.1437) (xy 1.2994 3.0981)
+						(xy 1.2761 3.0717) (xy 1.2513 3.0603) (xy 1.2204 3.0808) (xy 1.1686 3.1377) (xy 1.1362 3.1701)
+						(xy 1.0155 3.251) (xy 0.859 3.3154) (xy 0.6798 3.3573) (xy 0.6271 3.3656) (xy 0.5388 3.3832) (xy 0.4891 3.4025)
+						(xy 0.4672 3.4294) (xy 0.4623 3.4691) (xy 0.4623 3.5353) (xy -0.3536 3.5353) (xy -0.3536 3.4708)
+						(xy -0.3557 3.4537) (xy -0.272 3.4537) (xy 0.3807 3.4537) (xy 0.3807 3.2633) (xy -0.272 3.2633)
+						(xy -0.272 3.4537) (xy -0.3557 3.4537) (xy -0.3578 3.4365) (xy -0.3793 3.4139) (xy -0.4305 3.3995)
+						(xy -0.5235 3.3871) (xy -0.6032 3.3775) (xy -0.7007 3.3642) (xy -0.7683 3.353) (xy -0.782 3.3505)
+						(xy -0.8299 3.3521) (xy -0.8431 3.3823) (xy -0.8538 3.4087) (xy -0.8952 3.4227) (xy -0.979 3.4265)
+						(xy -1.115 3.4265) (xy -1.115 3.3231) (xy -1.119 3.2693) (xy -1.1459 3.2009) (xy -1.2084 3.1291)
+						(xy -1.2326 3.1042) (xy -1.2941 3.0281) (xy -1.334 2.9606) (xy -1.3432 2.9398) (xy -1.3661 2.9084)
+						(xy -1.2734 2.9084) (xy -1.2566 2.9525) (xy -1.1974 3.025) (xy -1.1166 3.1138) (xy -1.1163 3.0701)
+						(xy -0.8431 3.0701) (xy -0.8423 3.1602) (xy -0.8338 3.2204) (xy -0.8082 3.2581) (xy -0.7565 3.2805)
+						(xy -0.6692 3.2947) (xy -0.5371 3.3079) (xy -0.503 3.3111) (xy -0.4197 3.3171) (xy -0.375 3.3135)
+						(xy -0.3569 3.2978) (xy -0.3536 3.2672) (xy -0.3531 3.2539) (xy -0.3469 3.2353) (xy -0.3268 3.2227)
+						(xy -0.2848 3.215) (xy -0.2126 3.2109) (xy -0.1023 3.2092) (xy 0.0544 3.2089) (xy 0.1392 3.209)
+						(xy 0.2716 3.2099) (xy 0.3619 3.2127) (xy 0.4179 3.2185) (xy 0.448 3.2286) (xy 0.4601 3.2439)
+						(xy 0.4623 3.2657) (xy 0.4625 3.2769) (xy 0.4719 3.3055) (xy 0.5055 3.3132) (xy 0.5779 3.3047)
+						(xy 0.6337 3.2954) (xy 0.8354 3.2463) (xy 0.9933 3.1777) (xy 1.1142 3.0857) (xy 1.2049 2.9669)
+						(xy 1.254 2.8826) (xy -0.8431 2.8826) (xy -0.8431 3.0701) (xy -1.1163 3.0701) (xy -1.1158 2.9982)
+						(xy -1.1158 2.9627) (xy -1.122 2.9081) (xy -1.1454 2.8865) (xy -1.1966 2.8826) (xy -1.2476 2.8871)
+						(xy -1.2734 2.9084) (xy -1.3661 2.9084) (xy -1.3706 2.9022) (xy -1.4157 2.886) (xy -1.4968 2.8826)
+						(xy -1.5374 2.8821) (xy -1.6159 2.8777) (xy -1.6635 2.8706) (xy -1.664 2.8704) (xy -1.6943 2.8883)
+						(xy -1.754 2.9439) (xy -1.8389 3.0327) (xy -1.9446 3.1503) (xy -2.0668 3.292) (xy -2.1006 3.3317)
+						(xy -2.2081 3.4571) (xy -2.3026 3.5654) (xy -2.3785 3.6502) (xy -2.4304 3.7057) (xy -2.4528 3.7255)
+						(xy -2.471 3.7217) (xy -2.4782 3.7023) (xy -2.4637 3.6636) (xy -2.4251 3.602) (xy -2.36 3.5141)
+						(xy -2.2657 3.3962) (xy -2.1399 3.2451) (xy -1.9801 3.057) (xy -1.9446 3.0155) (xy -1.8111 2.859)
+						(xy -1.6883 2.7146) (xy -1.6464 2.6651) (xy -1.5271 2.6651) (xy -1.4602 2.6651) (xy -1.313 2.6651)
+						(xy 1.2509 2.6651) (xy 1.2509 2.5835) (xy 1.2493 2.548) (xy 1.2315 2.5107) (xy 1.183 2.5019) (xy 1.1458 2.4986)
+						(xy 1.1249 2.4799) (xy 1.1165 2.4327) (xy 1.1151 2.3523) (xy 1.1694 2.3523) (xy 1.1697 2.3668)
+						(xy 1.1862 2.4095) (xy 1.2386 2.4203) (xy 1.2392 2.4203) (xy 1.2853 2.4176) (xy 1.2905 2.4001)
+						(xy 1.259 2.3532) (xy 1.2478 2.3381) (xy 1.2032 2.2926) (xy 1.1776 2.2974) (xy 1.1694 2.3523)
+						(xy 1.1151 2.3523) (xy 1.115 2.3442) (xy 1.115 2.1865) (xy 1.0142 2.0682) (xy 1.1751 2.0682) (xy 1.1959 2.1241)
+						(xy 1.2562 2.2077) (xy 1.3554 2.3244) (xy 1.4341 2.3947) (xy 1.5085 2.4203) (xy 1.5331 2.4195)
+						(xy 1.5582 2.4102) (xy 1.5714 2.3809) (xy 1.5765 2.3201) (xy 1.5773 2.2163) (xy 1.5773 2.0124)
+						(xy 1.3861 2.0124) (xy 1.3551 2.0125) (xy 1.2542 2.0178) (xy 1.1944 2.0345) (xy 1.1751 2.0682)
+						(xy 1.0142 2.0682) (xy 0.5719 1.549) (xy 0.5126 1.4795) (xy 0.3814 1.3265) (xy 0.2629 1.1895)
+						(xy 0.1618 1.0738) (xy 0.0824 0.9842) (xy 0.0293 0.926) (xy 0.0068 0.9042) (xy -0.0037 0.9124)
+						(xy -0.0456 0.9556) (xy -0.1144 1.0308) (xy -0.2054 1.1321) (xy -0.3135 1.2541) (xy -0.4338 1.391)
+						(xy -0.5614 1.5371) (xy -0.6914 1.6868) (xy -0.8189 1.8345) (xy -0.9389 1.9744) (xy -1.0464 2.101)
+						(xy -1.1367 2.2084) (xy -1.2046 2.2912) (xy -1.2454 2.3436) (xy -1.2573 2.3659) (xy -1.2804 2.4388)
+						(xy -1.2968 2.5286) (xy -1.313 2.6651) (xy -1.4602 2.6651) (xy -1.4246 2.6578) (xy -1.378 2.6097)
+						(xy -1.3601 2.5223) (xy -1.3725 2.5028) (xy -1.4089 2.5245) (xy -1.4638 2.585) (xy -1.5271 2.6651)
+						(xy -1.6464 2.6651) (xy -1.5812 2.5881) (xy -1.4946 2.4853) (xy -1.4335 2.412) (xy -1.4028 2.3742)
+						(xy -1.396 2.3638) (xy -1.3841 2.3371) (xy -1.3726 2.2969) (xy -1.3611 2.2385) (xy -1.3553 2.1994)
+						(xy -1.2613 2.1994) (xy -1.256 2.1986) (xy -1.2248 2.1717) (xy -1.1773 2.1191) (xy -1.1724 2.1132)
+						(xy -1.1287 2.0618) (xy -1.056 1.9765) (xy -0.9594 1.8634) (xy -0.8443 1.7288) (xy -0.7159 1.5787)
+						(xy -0.5794 1.4193) (xy -0.058 0.8108) (xy 0.0575 0.8108) (xy 0.5777 1.4168) (xy 0.6197 1.4657)
+						(xy 0.7483 1.6131) (xy 0.864 1.743) (xy 0.9623 1.8504) (xy 1.0388 1.9306) (xy 1.0891 1.9789) (xy 1.1087 1.9904)
+						(xy 1.1163 1.9773) (xy 1.158 1.958) (xy 1.1786 1.9507) (xy 1.1975 1.9104) (xy 1.1975 1.9074) (xy 1.1947 1.8611)
+						(xy 1.1879 1.7679) (xy 1.1777 1.634) (xy 1.1645 1.4656) (xy 1.1487 1.269) (xy 1.1309 1.0504) (xy 1.1116 0.8158)
+						(xy 1.1075 0.767) (xy 1.0878 0.5367) (xy 1.0689 0.3246) (xy 1.0513 0.1368) (xy 1.0357 -0.0209)
+						(xy 1.0226 -0.1423) (xy 1.0127 -0.2214) (xy 1.0064 -0.2524) (xy 0.9862 -0.2397) (xy 0.9352 -0.1906)
+						(xy 0.8587 -0.11) (xy 0.7612 -0.0032) (xy 0.6477 0.1247) (xy 0.5229 0.2686) (xy 0.0575 0.8108)
+						(xy -0.058 0.8108) (xy -0.0574 0.8101) (xy -0.5464 0.2418) (xy -0.5587 0.2276) (xy -0.6859 0.0803)
+						(xy -0.8011 -0.052) (xy -0.8996 -0.1642) (xy -0.9767 -0.2508) (xy -1.0277 -0.3066) (xy -1.048 -0.3264)
+						(xy -1.0489 -0.3261) (xy -1.0577 -0.2982) (xy -1.0621 -0.238) (xy -1.0631 -0.2184) (xy -1.0682 -0.1449)
+						(xy -1.0775 -0.0268) (xy -1.0902 0.1298) (xy -1.106 0.3188) (xy -1.1243 0.5343) (xy -1.1446 0.7699)
+						(xy -1.1665 1.0198) (xy -1.1801 1.1759) (xy -1.2005 1.412) (xy -1.2186 1.6275) (xy -1.2342 1.8167)
+						(xy -1.2467 1.9741) (xy -1.2557 2.094) (xy -1.2607 2.171) (xy -1.2613 2.1994) (xy -1.3553 2.1994)
+						(xy -1.349 2.1575) (xy -1.3357 2.0493) (xy -1.3208 1.9095) (xy -1.3036 1.7335) (xy -1.2837 1.5168)
+						(xy -1.2605 1.255) (xy -1.2334 0.9434) (xy -1.2324 0.9308) (xy -1.2057 0.6186) (xy -1.1839 0.3562)
+						(xy -1.1665 0.1393) (xy -1.1536 -0.0363) (xy -1.1446 -0.1749) (xy -1.1395 -0.2807) (xy -1.138 -0.3579)
+						(xy -1.1397 -0.4109) (xy -1.1446 -0.4438) (xy -1.1523 -0.4608) (xy -1.1527 -0.4613) (xy -1.1581 -0.4677)
+						(xy -1.0394 -0.4677) (xy -0.5289 0.1265) (xy -0.4987 0.1617) (xy -0.3696 0.3109) (xy -0.2527 0.4446)
+						(xy -0.1527 0.5576) (xy -0.0741 0.6447) (xy -0.0216 0.7008) (xy 0.0002 0.7206) (xy 0.017 0.7079)
+						(xy 0.0648 0.6591) (xy 0.137 0.5797) (xy 0.2284 0.4762) (xy 0.3333 0.355) (xy 0.4464 0.2228) (xy 0.5621 0.0858)
+						(xy 0.675 -0.0494) (xy 0.7797 -0.1762) (xy 0.8706 -0.2883) (xy 0.9423 -0.3792) (xy 0.9893 -0.4423)
+						(xy 1.0062 -0.4713) (xy 1.0054 -0.4967) (xy 0.9874 -0.5587) (xy 0.9379 -0.5898) (xy 0.8465 -0.5983)
+						(xy 0.8011 -0.6004) (xy 0.6529 -0.6387) (xy 0.5295 -0.7201) (xy 0.4392 -0.8374) (xy 0.3904 -0.9837)
+						(xy 0.3828 -1.0311) (xy 0.5223 -1.0311) (xy 0.551 -0.9102) (xy 0.6226 -0.8164) (xy 0.7313 -0.7558)
+						(xy 0.8716 -0.7343) (xy 0.9377 -0.7391) (xy 1.0056 -0.7659) (xy 1.0769 -0.8268) (xy 1.1345 -0.8927)
+						(xy 1.1626 -0.9574) (xy 1.1694 -1.0453) (xy 1.1561 -1.1574) (xy 1.1012 -1.2693) (xy 1.0035 -1.3476)
+						(xy 0.9909 -1.3538) (xy 0.8686 -1.3843) (xy 0.7493 -1.368) (xy 0.6446 -1.311) (xy 0.5662 -1.2193)
+						(xy 0.5256 -1.099) (xy 0.5223 -1.0311) (xy 0.3828 -1.0311) (xy 0.3738 -1.0878) (xy -0.9747 -1.0878)
+						(xy -0.9893 -1.0131) (xy -0.9916 -0.9996) (xy -1.0011 -0.9254) (xy -1.0117 -0.8204) (xy -1.0216 -0.703)
+						(xy -1.0394 -0.4677) (xy -1.1581 -0.4677) (xy -1.1796 -0.4929) (xy -1.2376 -0.5606) (xy -1.3223 -0.6598)
+						(xy -1.4297 -0.7854) (xy -1.5555 -0.9327) (xy -1.6957 -1.0967) (xy -1.846 -1.2726) (xy -1.8585 -1.2872)
+						(xy -2.0058 -1.4609) (xy -2.1403 -1.6218) (xy -2.2582 -1.7651) (xy -2.3557 -1.886) (xy -2.4289 -1.98)
+						(xy -2.4742 -2.0422) (xy -2.4876 -2.0681) (xy -2.4829 -2.0746) (xy -2.4512 -2.0941) (xy -2.451 -2.094)
+						(xy -2.4282 -2.0727) (xy -2.3743 -2.0147) (xy -2.2934 -1.9246) (xy -2.1896 -1.8069) (xy -2.0669 -1.6663)
+						(xy -1.9293 -1.5073) (xy -1.7809 -1.3345) (xy -1.7746 -1.327) (xy -1.6267 -1.1553) (xy -1.4897 -0.9981)
+						(xy -1.3676 -0.86) (xy -1.2645 -0.7455) (xy -1.1844 -0.659) (xy -1.1314 -0.6051) (xy -1.1094 -0.5882)
+						(xy -1.1062 -0.5913) (xy -1.0931 -0.6329) (xy -1.0876 -0.7019) (xy -1.0857 -0.7672) (xy -1.0793 -0.8735)
+						(xy -1.0701 -0.9859) (xy -1.0657 -1.0318) (xy -1.0555 -1.11) (xy -1.0411 -1.151) (xy -1.0164 -1.1668)
+						(xy -0.9751 -1.1694) (xy -0.967 -1.1694) (xy -0.9272 -1.1732) (xy -0.9065 -1.1926) (xy -0.8987 -1.2405)
+						(xy -0.8975 -1.3299) (xy -0.8975 -1.4903) (xy -0.7751 -1.5) (xy -0.6527 -1.5098) (xy -0.6527 -1.1694)
+						(xy -0.1224 -1.1694) (xy -0.0524 -1.1695) (xy 0.1159 -1.1705) (xy 0.2387 -1.173) (xy 0.3227 -1.1777)
+						(xy 0.3744 -1.185) (xy 0.4006 -1.1953) (xy 0.4079 -1.2093) (xy 0.4183 -1.2437) (xy 0.4621 -1.309)
+						(xy 0.528 -1.3806) (xy 0.6024 -1.4444) (xy 0.6718 -1.4862) (xy 0.7422 -1.5092) (xy 0.8927 -1.5171)
+						(xy 1.0497 -1.4711) (xy 1.0668 -1.463) (xy 1.1867 -1.3754) (xy 1.2645 -1.2534) (xy 1.3 -1.0973)
+						(xy 1.3018 -1.0704) (xy 1.2925 -0.9273) (xy 1.244 -0.8107) (xy 1.1506 -0.7062) (xy 1.0833 -0.6314)
+						(xy 1.0656 -0.5662) (xy 1.0754 -0.5598) (xy 1.1018 -0.5758) (xy 1.1473 -0.6173) (xy 1.2146 -0.6868)
+						(xy 1.3062 -0.7872) (xy 1.4246 -0.9212) (xy 1.5726 -1.0916) (xy 1.7526 -1.3012) (xy 1.7816 -1.3351)
+						(xy 1.9316 -1.5096) (xy 2.07 -1.6695) (xy 2.193 -1.8104) (xy 2.2966 -1.9277) (xy 2.3768 -2.0171)
+						(xy 2.4297 -2.0741) (xy 2.4513 -2.0941) (xy 2.4696 -2.0893)
+					)
+					(stroke
+						(width 0.01)
+						(type default)
+					)
+					(fill
+						(type outline)
+					)
+				)
+			)
+			(embedded_fonts no)
+		)
+	)
+	(wire
+		(pts
+			(xy 115.57 109.22) (xy 132.08 109.22)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "02a58801-0683-47e7-a179-1adbdf2908a9")
+	)
+	(wire
+		(pts
+			(xy 115.57 83.82) (xy 121.92 83.82)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "14d7f4ef-ca51-4676-bef7-89eb41cc267d")
+	)
+	(wire
+		(pts
+			(xy 115.57 76.2) (xy 121.92 76.2)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "24c35499-e823-44b7-8236-8b3cbf9ea00a")
+	)
+	(wire
+		(pts
+			(xy 115.57 106.68) (xy 132.08 106.68)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "3d3cf170-35a6-42f9-ad44-b6314a4fd92b")
+	)
+	(wire
+		(pts
+			(xy 171.45 93.98) (xy 187.96 93.98)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "4650f44d-32b4-42b0-9103-9ebe1ba8e14b")
+	)
+	(wire
+		(pts
+			(xy 132.08 83.82) (xy 124.46 83.82)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "5bcc81f0-168a-4bef-8191-19570dfababa")
+	)
+	(wire
+		(pts
+			(xy 124.46 78.74) (xy 132.08 78.74)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "5fe3d1c7-fdc8-49b8-9815-bae7589eb60f")
+	)
+	(wire
+		(pts
+			(xy 115.57 91.44) (xy 132.08 91.44)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "751f62d7-a8e5-4048-866c-9717b26c7e2c")
+	)
+	(wire
+		(pts
+			(xy 121.92 76.2) (xy 124.46 78.74)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "82224047-eec9-446d-8b31-2de67ddd93cf")
+	)
+	(wire
+		(pts
+			(xy 124.46 86.36) (xy 132.08 86.36)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "8a7c977d-9af8-4a68-94e1-578274d73319")
+	)
+	(wire
+		(pts
+			(xy 171.45 96.52) (xy 187.96 96.52)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "9c115ce6-a0cb-4d25-a423-378077651bb5")
+	)
+	(wire
+		(pts
+			(xy 115.57 86.36) (xy 121.92 86.36)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "a293e852-8972-4782-9675-a65f5a14096a")
+	)
+	(wire
+		(pts
+			(xy 124.46 83.82) (xy 121.92 86.36)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "a90c4805-3ea8-4bb1-a85a-eeda0e2ec7f1")
+	)
+	(wire
+		(pts
+			(xy 115.57 99.06) (xy 132.08 99.06)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "b2c7b255-07dc-4b7b-893f-cdcc09e062fb")
+	)
+	(wire
+		(pts
+			(xy 132.08 76.2) (xy 124.46 76.2)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "bb0db900-3b11-4bae-8bc8-bbc9961021c5")
+	)
+	(wire
+		(pts
+			(xy 121.92 83.82) (xy 124.46 86.36)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "cdc662cc-5540-416d-a906-ebbedafe5238")
+	)
+	(wire
+		(pts
+			(xy 115.57 101.6) (xy 132.08 101.6)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "e193057f-cf7b-45a0-a3d3-08c8e478d075")
+	)
+	(wire
+		(pts
+			(xy 115.57 78.74) (xy 121.92 78.74)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "e612bf2c-82e8-421a-a303-e532f7d51a84")
+	)
+	(wire
+		(pts
+			(xy 115.57 93.98) (xy 132.08 93.98)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "ee82127e-ab7f-46fd-8f04-01c5981d92f6")
+	)
+	(wire
+		(pts
+			(xy 124.46 76.2) (xy 121.92 78.74)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "fc39b657-dd30-4421-88b9-4dc4ad68fa3f")
+	)
+	(symbol
+		(lib_id "Graphic:SYM_ESD_Small")
+		(at 215.9 175.26 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom no)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "198fb84a-0ab2-434e-996f-29979aa77276")
+		(property "Reference" "SYM1"
+			(at 215.9 171.704 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "SYM_ESD_Small"
+			(at 215.9 178.435 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "Symbol:ESD-Logo_6.6x6mm_SilkScreen"
+			(at 215.9 175.006 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 215.9 175.006 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" ""
+			(at 215.9 175.26 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Mfr. part number" ""
+			(at 215.9 175.26 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Sup_Ref" ""
+			(at 215.9 175.26 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(instances
+			(project "invertor"
+				(path "/bbbda9e5-bfe3-4c48-9a16-310282237854"
+					(reference "SYM1")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Mechanical:MountingHole")
+		(at 182.88 175.26 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "3b71d915-50a5-43c1-acca-731cde147431")
+		(property "Reference" "H2"
+			(at 185.42 174.625 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "MountingHole"
+			(at 185.42 177.165 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" "MountingHole:MountingHole_3.2mm_M3"
+			(at 182.88 175.26 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 182.88 175.26 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" ""
+			(at 182.88 175.26 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Mfr. part number" ""
+			(at 182.88 175.26 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(instances
+			(project "invertor"
+				(path "/bbbda9e5-bfe3-4c48-9a16-310282237854"
+					(reference "H2")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Mechanical:MountingHole")
+		(at 191.77 175.26 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "4ad317a9-5170-4a39-9242-0305e2f90d4f")
+		(property "Reference" "H4"
+			(at 194.31 174.625 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "MountingHole"
+			(at 194.31 177.165 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" "MountingHole:MountingHole_3.2mm_M3"
+			(at 191.77 175.26 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 191.77 175.26 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" ""
+			(at 191.77 175.26 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Mfr. part number" ""
+			(at 191.77 175.26 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(instances
+			(project "invertor"
+				(path "/bbbda9e5-bfe3-4c48-9a16-310282237854"
+					(reference "H4")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Mechanical:MountingHole")
+		(at 191.77 170.18 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "8c2b33ee-733a-43fc-928b-703c95c8250c")
+		(property "Reference" "H3"
+			(at 194.31 169.545 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "MountingHole"
+			(at 194.31 172.085 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" "MountingHole:MountingHole_3.2mm_M3"
+			(at 191.77 170.18 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 191.77 170.18 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" ""
+			(at 191.77 170.18 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Mfr. part number" ""
+			(at 191.77 170.18 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(instances
+			(project "invertor"
+				(path "/bbbda9e5-bfe3-4c48-9a16-310282237854"
+					(reference "H3")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Mechanical:MountingHole")
+		(at 182.88 170.18 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "c342d88d-6b8f-4181-8cb4-a29a266e8414")
+		(property "Reference" "H1"
+			(at 185.42 169.545 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "MountingHole"
+			(at 185.42 172.085 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" "MountingHole:MountingHole_3.2mm_M3"
+			(at 182.88 170.18 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 182.88 170.18 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" ""
+			(at 182.88 170.18 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Mfr. part number" ""
+			(at 182.88 170.18 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(instances
+			(project "invertor"
+				(path "/bbbda9e5-bfe3-4c48-9a16-310282237854"
+					(reference "H1")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "WEE-symbol:LOGO")
+		(at 229.87 175.26 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom no)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "d524b0e7-bfc0-4c2c-81a0-dce19569846c")
+		(property "Reference" "G2"
+			(at 229.87 168.4436 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "LOGO"
+			(at 229.87 182.0764 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "Symbol:WEEE-Logo_4.2x6mm_SilkScreen"
+			(at 229.87 175.26 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 229.87 175.26 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" ""
+			(at 229.87 175.26 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Mfr. part number" ""
+			(at 229.87 175.26 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Sup_Ref" ""
+			(at 229.87 175.26 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(instances
+			(project "invertor"
+				(path "/bbbda9e5-bfe3-4c48-9a16-310282237854"
+					(reference "G2")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "CE-symbol:LOGO")
+		(at 222.25 175.26 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom no)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "fb256e41-95a4-4738-a2c9-469f1406b86f")
+		(property "Reference" "G1"
+			(at 222.25 168.8677 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "LOGO"
+			(at 222.25 181.6523 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "Symbol:CE-Logo_8.5x6mm_SilkScreen"
+			(at 222.25 175.26 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 222.25 175.26 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" ""
+			(at 222.25 175.26 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Mfr. part number" ""
+			(at 222.25 175.26 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Sup_Ref" ""
+			(at 222.25 175.26 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(instances
+			(project "invertor"
+				(path "/bbbda9e5-bfe3-4c48-9a16-310282237854"
+					(reference "G1")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(sheet
+		(at 132.08 73.66)
+		(size 39.37 46.99)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "07294244-0487-4188-a144-c17f6f73691d")
+		(property "Sheetname" "ESP32"
+			(at 132.08 72.9484 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "ESP32.kicad_sch"
+			(at 132.08 121.2346 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(pin "RS485_1_DIR" output
+			(at 132.08 106.68 180)
+			(uuid "d293328b-4399-448b-bcb6-d31bba4a2a9b")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(pin "ESP32_TXD1" output
+			(at 132.08 78.74 180)
+			(uuid "ccf13b46-1c82-4b40-8cd5-847caff38b2f")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(pin "ESP32_RXD1" input
+			(at 132.08 76.2 180)
+			(uuid "48be7167-34b2-4b62-9ceb-4c77a123c4e8")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(pin "ESP32_TXD4" output
+			(at 132.08 101.6 180)
+			(uuid "f59670df-d796-4849-bcd2-ae38d1694dd7")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(pin "ESP32_TXD2" output
+			(at 132.08 86.36 180)
+			(uuid "0ef0f317-7a17-449e-9295-1b1344da0c23")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(pin "ESP32_RXD2" input
+			(at 132.08 83.82 180)
+			(uuid "5dd1973a-fd4a-4cae-b409-cc8c96d814e7")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(pin "ESP32_TXD3" output
+			(at 132.08 93.98 180)
+			(uuid "de660faa-2cb0-48b3-ae92-e732b22ab802")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(pin "RS485_2_DIR" output
+			(at 132.08 109.22 180)
+			(uuid "d69fe9d9-456f-4d57-85ea-055e98a3081f")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(pin "ESP32_RXD3" input
+			(at 132.08 91.44 180)
+			(uuid "4769ff0a-4ad8-480c-9cc5-8c02800f9aa1")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(pin "ESP32_RXD4" input
+			(at 132.08 99.06 180)
+			(uuid "43a8caa2-a50e-485f-953c-45459943faaa")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(pin "USB_DN" bidirectional
+			(at 171.45 96.52 0)
+			(uuid "d509efd9-ab3c-4ed8-95da-d594b707a612")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(pin "USB_DP" bidirectional
+			(at 171.45 93.98 0)
+			(uuid "f4603070-a293-42dd-a508-14b710f5c30c")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(instances
+			(project "invertor"
+				(path "/bbbda9e5-bfe3-4c48-9a16-310282237854"
+					(page "2")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 69.85 73.66)
+		(size 45.72 38.1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "7577440e-f97e-4701-b3b1-ee06ca227bf1")
+		(property "Sheetname" "interfaces"
+			(at 69.85 72.9484 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "interfaces.kicad_sch"
+			(at 69.85 112.3446 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(pin "CAN1_TXD" output
+			(at 115.57 78.74 0)
+			(uuid "5ff89512-4430-4e0e-ae61-8abba4591c06")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(pin "CAN1_RXD" input
+			(at 115.57 76.2 0)
+			(uuid "ac5db551-0b24-4cba-82c6-8cff238f5a8d")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(pin "RS485_1_DIR" input
+			(at 115.57 106.68 0)
+			(uuid "a57e76f0-b987-464f-929f-4ed1a34c719d")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(pin "RS485_2_DIR" input
+			(at 115.57 109.22 0)
+			(uuid "9da8a010-2b92-480f-84aa-d6a110b717af")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(pin "CAN2_RXD" input
+			(at 115.57 83.82 0)
+			(uuid "9088f7cc-8343-4f45-ba6a-21fb2d1e65ab")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(pin "CAN2_TXD" output
+			(at 115.57 86.36 0)
+			(uuid "901ab5c5-3d76-4372-a796-f7de978343a0")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(pin "RS485_2_TXD" input
+			(at 115.57 101.6 0)
+			(uuid "4f9107b1-85db-4f5a-9cf5-79041eeb5924")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(pin "RS485_2_RXD" output
+			(at 115.57 99.06 0)
+			(uuid "4f2a13ad-60ac-4b71-af56-29462aeea201")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(pin "RS485_1_TXD" input
+			(at 115.57 93.98 0)
+			(uuid "e183169a-ebc9-4d50-b725-c84beea5e8a3")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(pin "RS485_1_RXD" output
+			(at 115.57 91.44 0)
+			(uuid "798a2cb7-583a-4a47-8a87-cb71e48130e6")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(instances
+			(project "invertor"
+				(path "/bbbda9e5-bfe3-4c48-9a16-310282237854"
+					(page "4")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 187.96 73.66)
+		(size 48.26 29.21)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "90f87840-8cd5-458f-983b-1896f3f2a4d9")
+		(property "Sheetname" "USB_to_UART_Converter"
+			(at 187.96 72.9484 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "USB_to_UART_Converter.kicad_sch"
+			(at 187.96 103.4546 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(pin "USB_DN" bidirectional
+			(at 187.96 96.52 180)
+			(uuid "f9821d18-699d-4150-9917-fff7d0926978")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(pin "USB_DP" bidirectional
+			(at 187.96 93.98 180)
+			(uuid "ec65a75f-cb44-417e-b8a3-6a5182a56be2")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(instances
+			(project "invertor"
+				(path "/bbbda9e5-bfe3-4c48-9a16-310282237854"
+					(page "3")
+				)
+			)
+		)
+	)
+	(sheet_instances
+		(path "/"
+			(page "1")
+		)
+	)
+	(embedded_fonts no)
+)

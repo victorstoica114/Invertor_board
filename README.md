@@ -17,6 +17,12 @@ CAN protocol implementation backlog: [docs/can_protocols.md](docs/can_protocols.
 - Suggested IDF target command: `idf.py set-target esp32c6`
 - Current partition layout: single `7MB` factory app partition, no OTA
 
+## PCB and Schematic
+
+![Invertor main board PCB](Kicad%20project/Invertor_main_board/invertor.png)
+
+Board schematic: [Kicad project/Invertor_main_board/Schematic.pdf](Kicad%20project/Invertor_main_board/Schematic.pdf)
+
 ## Short Description
 
 Main goals:

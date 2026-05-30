@@ -1,0 +1,9 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP 1830870
+D PCB header, nominal cross section: 1.5 mm?, color: black, nominal current: 8 A, rated voltage (III/2): 160 V, contact surface: Tin, type of contact: Female connector, Number of potentials: 3, Number of rows: 1, Number of positions per row: 3, number of connections: 3, product range: IMCV 1,5/..-G-RN-THR, pitch: 3.5 mm, mounting: THR soldering, pin layout: Linear pinning, solder pin [P]: 1.9 mm, Stecksystem: MINI COMBICON, Locking: Snap-in locking, type of packaging: packed in cardboard
+K
+F http://www.phoenixcontact.com/gb/produkte/1830870
+$ENDCMP
+#
+#End Doc Library
