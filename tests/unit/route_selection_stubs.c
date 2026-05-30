@@ -9,6 +9,8 @@
 #include "modes/can_forward_sniffer.h"
 #include "protocols/china_tower_modbus/china_tower_modbus_bms_task.h"
 #include "protocols/common/battery_model.h"
+#include "protocols/daly_can/daly_can_bms_task.h"
+#include "protocols/daly_rs485/daly_rs485_bms_task.h"
 #include "protocols/growatt/growatt_bms_task.h"
 #include "protocols/growatt/growatt_inverter_task.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_bms_task.h"
@@ -29,6 +31,8 @@ int g_routeStubVoltronicBmsStartCount;
 int g_routeStubChinaTowerBmsStartCount;
 int g_routeStubWowBmsStartCount;
 int g_routeStubSeplosBmsStartCount;
+int g_routeStubDalyRs485BmsStartCount;
+int g_routeStubDalyCanBmsStartCount;
 int g_routeStubPylonInverterStartCount;
 int g_routeStubPylonBridgeEnableCount;
 int g_routeStubCanForwardStartCount;
@@ -41,6 +45,8 @@ void routeSelectionStubReset(void)
     g_routeStubChinaTowerBmsStartCount = 0;
     g_routeStubWowBmsStartCount = 0;
     g_routeStubSeplosBmsStartCount = 0;
+    g_routeStubDalyRs485BmsStartCount = 0;
+    g_routeStubDalyCanBmsStartCount = 0;
     g_routeStubPylonInverterStartCount = 0;
     g_routeStubPylonBridgeEnableCount = 0;
     g_routeStubCanForwardStartCount = 0;
@@ -181,6 +187,54 @@ bool seplosRs485BmsTaskGetLatestSnapshot(seplos_rs485_snapshot_t *outSnapshot)
     return false;
 }
 
+esp_err_t dalyRs485BmsTaskStart(QueueHandle_t outQueue)
+{
+    (void)outQueue;
+    g_routeStubDalyRs485BmsStartCount++;
+    return ESP_OK;
+}
+
+esp_err_t dalyRs485BmsTaskStop(void)
+{
+    return ESP_OK;
+}
+
+bool dalyRs485BmsTaskGetLatestPacket(bms_decoded_packet_t *outPacket)
+{
+    (void)outPacket;
+    return false;
+}
+
+bool dalyRs485BmsTaskGetLatestSnapshot(daly_rs485_snapshot_t *outSnapshot)
+{
+    (void)outSnapshot;
+    return false;
+}
+
+esp_err_t dalyCanBmsTaskStart(QueueHandle_t outQueue)
+{
+    (void)outQueue;
+    g_routeStubDalyCanBmsStartCount++;
+    return ESP_OK;
+}
+
+esp_err_t dalyCanBmsTaskStop(void)
+{
+    return ESP_OK;
+}
+
+bool dalyCanBmsTaskGetLatestPacket(bms_decoded_packet_t *outPacket)
+{
+    (void)outPacket;
+    return false;
+}
+
+bool dalyCanBmsTaskGetLatestSnapshot(daly_rs485_snapshot_t *outSnapshot)
+{
+    (void)outSnapshot;
+    return false;
+}
+
 esp_err_t growattInverterTaskStart(QueueHandle_t inQueue)
 {
     (void)inQueue;
@@ -249,6 +303,7 @@ bool pylonRs485BridgeSupportsRoute(const bridge_runtime_settings_t *settings)
             ((settings->bms_protocol == PROTOCOL_CAN_PYLON) ||
              (settings->bms_protocol == PROTOCOL_CAN_GROWATT) ||
              (settings->bms_protocol == PROTOCOL_CAN_DEYE) ||
+             (settings->bms_protocol == PROTOCOL_CAN_DALY) ||
              (settings->bms_protocol == PROTOCOL_CAN_JKBMS_250K)) &&
             bridgeProtocolIsRs485Pylon(settings->inverter_protocol));
 }

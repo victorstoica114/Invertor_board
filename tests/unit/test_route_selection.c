@@ -18,6 +18,8 @@ extern int g_routeStubVoltronicBmsStartCount;
 extern int g_routeStubChinaTowerBmsStartCount;
 extern int g_routeStubWowBmsStartCount;
 extern int g_routeStubSeplosBmsStartCount;
+extern int g_routeStubDalyRs485BmsStartCount;
+extern int g_routeStubDalyCanBmsStartCount;
 extern int g_routeStubPylonInverterStartCount;
 extern int g_routeStubPylonBridgeEnableCount;
 extern int g_routeStubCanForwardStartCount;
@@ -48,6 +50,7 @@ void test_protocol_id_to_string(void)
     const char *chinaTowerStr = protocolIdToStr(PROTOCOL_ID_CHINA_TOWER);
     const char *wowStr = protocolIdToStr(PROTOCOL_ID_WOW);
     const char *seplosStr = protocolIdToStr(PROTOCOL_ID_SEPLOS);
+    const char *dalyStr = protocolIdToStr(PROTOCOL_ID_DALY);
     const char *unknownStr = protocolIdToStr(99);
 
     TEST_ASSERT_EQUAL_STRING("GROWATT", growattStr);
@@ -59,6 +62,7 @@ void test_protocol_id_to_string(void)
     TEST_ASSERT_EQUAL_STRING("CHINA_TOWER_MODBUS", chinaTowerStr);
     TEST_ASSERT_EQUAL_STRING("WOW_MODBUS", wowStr);
     TEST_ASSERT_EQUAL_STRING("SEPLOS_RS485", seplosStr);
+    TEST_ASSERT_EQUAL_STRING("DALY", dalyStr);
     TEST_ASSERT_EQUAL_STRING("UNKNOWN", unknownStr);
 }
 
@@ -373,6 +377,29 @@ void test_route_seplos_19200_to_rs485_pylon_115200_starts_responder(void)
 }
 
 /**
+ * Test: Daly RS485 BMS source can feed a Pylon CAN inverter sender.
+ */
+void test_route_daly_rs485_to_can_pylon_starts_can_sender(void)
+{
+    bridge_runtime_settings_t settings = {0};
+
+    settings.mode = MODE_BRIDGE;
+    settings.bms_line = LINE_RS485;
+    settings.bms_protocol = PROTOCOL_RS485_DALY;
+    settings.bms_port = 1;
+    settings.inverter_line = LINE_CAN;
+    settings.inverter_protocol = PROTOCOL_CAN_PYLON;
+    settings.inverter_port = 2;
+
+    TEST_ASSERT_EQUAL(ESP_OK, orchestratorStartFromRuntime(&settings));
+    TEST_ASSERT_EQUAL(1, g_routeStubDalyRs485BmsStartCount);
+    TEST_ASSERT_EQUAL(0, g_routeStubDalyCanBmsStartCount);
+    TEST_ASSERT_EQUAL(1, g_routeStubPylonInverterStartCount);
+    TEST_ASSERT_EQUAL(0, g_routeStubPylonBridgeEnableCount);
+    TEST_ASSERT_EQUAL(0, g_routeStubCanForwardStartCount);
+}
+
+/**
  * Test: Configuration validation for JKBMS_RS485_NATIVE -> RS485_PYLON bridge
  */
 void test_route_jkbms_native_to_rs485_pylon_valid(void)
@@ -517,14 +544,18 @@ void test_protocol_constants_defined(void)
     TEST_ASSERT_EQUAL_UINT8(18, PROTOCOL_CAN_JKBMS_250K);
     TEST_ASSERT_EQUAL_UINT8(19, PROTOCOL_RS485_SEPLOS);
     TEST_ASSERT_EQUAL_UINT8(20, PROTOCOL_RS485_SEPLOS_19200);
-    TEST_ASSERT_EQUAL_UINT8(PROTOCOL_RS485_SEPLOS_19200, PROTOCOL_ID_MAX);
+    TEST_ASSERT_EQUAL_UINT8(21, PROTOCOL_RS485_DALY);
+    TEST_ASSERT_EQUAL_UINT8(22, PROTOCOL_CAN_DALY);
+    TEST_ASSERT_EQUAL_UINT8(PROTOCOL_CAN_DALY, PROTOCOL_ID_MAX);
     TEST_ASSERT_EQUAL_UINT32(9600u, bridgeProtocolRs485Baudrate(PROTOCOL_RS485_JKBMS));
     TEST_ASSERT_EQUAL_UINT32(115200u, bridgeProtocolRs485Baudrate(PROTOCOL_RS485_JKBMS_115200));
     TEST_ASSERT_EQUAL_UINT32(9600u, bridgeProtocolRs485Baudrate(PROTOCOL_RS485_PYLON));
     TEST_ASSERT_EQUAL_UINT32(115200u, bridgeProtocolRs485Baudrate(PROTOCOL_RS485_PYLON_115200));
     TEST_ASSERT_EQUAL_UINT32(9600u, bridgeProtocolRs485Baudrate(PROTOCOL_RS485_SEPLOS));
     TEST_ASSERT_EQUAL_UINT32(19200u, bridgeProtocolRs485Baudrate(PROTOCOL_RS485_SEPLOS_19200));
+    TEST_ASSERT_EQUAL_UINT32(9600u, bridgeProtocolRs485Baudrate(PROTOCOL_RS485_DALY));
     TEST_ASSERT_EQUAL_UINT32(250000u, bridgeProtocolCanBitrate(PROTOCOL_CAN_JKBMS_250K));
+    TEST_ASSERT_EQUAL_UINT32(250000u, bridgeProtocolCanBitrate(PROTOCOL_CAN_DALY));
     TEST_ASSERT_EQUAL_UINT32(500000u, bridgeProtocolCanBitrate(PROTOCOL_CAN_PYLON));
     TEST_ASSERT_TRUE(bridgeProtocolIsRs485JkbmsModbus(PROTOCOL_RS485_JKBMS_115200));
     TEST_ASSERT_TRUE(bridgeProtocolIsRs485Pylon(PROTOCOL_RS485_PYLON_115200));
@@ -588,6 +619,7 @@ int main(void)
     RUN_TEST(test_route_wow_rs485_to_rs485_pylon_starts_responder);
     RUN_TEST(test_route_seplos_rs485_to_rs485_pylon_starts_responder);
     RUN_TEST(test_route_seplos_19200_to_rs485_pylon_115200_starts_responder);
+    RUN_TEST(test_route_daly_rs485_to_can_pylon_starts_can_sender);
     RUN_TEST(test_route_jkbms_native_to_rs485_pylon_valid);
     RUN_TEST(test_route_jkbms_115200_to_rs485_pylon_starts_responder);
     RUN_TEST(test_route_deye_can_to_rs485_pylon_starts_responder);

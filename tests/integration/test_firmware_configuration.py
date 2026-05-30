@@ -110,6 +110,8 @@ def test_protocol_constants_in_config_h():
         'PROTOCOL_CAN_JKBMS_250K',
         'PROTOCOL_RS485_SEPLOS',
         'PROTOCOL_RS485_SEPLOS_19200',
+        'PROTOCOL_RS485_DALY',
+        'PROTOCOL_CAN_DALY',
     ]
 
     for protocol in expected_protocols:
@@ -181,6 +183,8 @@ def test_protocol_directories_exist():
         'china_tower_modbus',
         'wow_modbus',
         'seplos_rs485',
+        'daly_rs485',
+        'daly_can',
         'deye',
         'jkbms_can',
     ]

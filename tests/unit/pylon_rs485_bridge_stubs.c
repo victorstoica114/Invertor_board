@@ -36,6 +36,12 @@ void batteryModelGet(battery_model_t *out)
     }
 }
 
+void batteryModelGetWithStaleMs(battery_model_t *out, uint32_t staleMs)
+{
+    (void)staleMs;
+    batteryModelGet(out);
+}
+
 void batteryModelGetReal(battery_model_t *out)
 {
     batteryModelGet(out);
