@@ -32,6 +32,9 @@ The goal is practical maintenance:
 - `JKBMS_CAN_250K -> RS485_PYLON` synthetic responder route through the universal battery model.
 - CAN protocol backlog documentation under `docs/can_protocols.md`.
 - `CAN_DEYE -> RS485_PYLON` route support for JK app protocol `001 - Deye Low-voltage hybrid inverter CAN`.
+- Field-tested `JKBMS Pylon CAN -> EASUN Pylon CAN` direct forward path for split CAN ports (`CAN1 -> CAN2`, `500 kbit/s`).
+- Runtime `Fake Inverter Data` override for Pylon CAN forward mode, including outgoing `0x355` SOC/SOH edits.
+- Optional EASUN/Pylon 24V diagnostic CAN sender for isolated inverter-side tests, disabled by default.
 - `DALY_RS485` BMS poller/decoder for the Daly proprietary RS485 protocol, including pack telemetry, cell data where exposed, temperatures, MOS/balance state, and failure/status bits.
 - `RS485_DALY -> RS485_PYLON` bridge-mode route for Pylon-compatible inverter responders.
 - Experimental `DALY_CAN` BMS poller/decoder for the Daly proprietary CAN protocol.
@@ -77,6 +80,8 @@ The goal is practical maintenance:
 - RS485 UART initialization now derives baud rate per physical RS485 port from the selected runtime protocol, allowing mixed routes such as `JKBMS_MODBUS_115200 -> RS485_PYLON`.
 - CAN initialization now derives bitrate per physical CAN port from the selected runtime protocol, with `JKBMS_CAN_250K` and `DALY_CAN` using `250 kbit/s` and existing CAN profiles remaining at `500 kbit/s`.
 - `CAN_DEYE` now updates the universal battery model directly from live CAN frames instead of waiting for the periodic diagnostic snapshot.
+- Direct Pylon CAN forward mode can now apply runtime fake inverter data before transmitting frames to the inverter.
+- The optional Pylon CAN `16S->8S` scaler remains available behind `CAN_FORWARD_PYLON_16S_TO_8S_ENABLE`, but is disabled by default after the EASUN field test accepted direct JKBMS values.
 - Daly RS485 source freshness is kept at `10s`, matching the desired inverter fail-safe behavior when the BMS disappears.
 - Daly CAN documentation now records the 2026-05-30 no-ACK field result so future debugging starts at wiring/BMS CAN enablement instead of repeating protocol-level tests.
 
@@ -115,8 +120,11 @@ Behavior kept in code:
 ### Operational Notes
 
 - Seplos RS485 requires a fail-safe bias network on the Seplos-facing bus. Without bias, the idle A/B state can float and the bridge may capture noise-like bytes even though the same BMS communicates with an inverter that provides proper bias.
+- EASUN Pylon CAN is validated on split CAN ports after repairing the inverter CAN transceiver: JKBMS on `CAN1`, EASUN on `CAN2`, direct Pylon CAN forward at `500 kbit/s`.
+- EASUN emits repeated `0x305 [00 00 00 00 00 00 00 00]` frames when its CAN hardware is healthy.
 - Daly CAN is implemented but not field-validated: the tested BMS did not ACK `250 kbit/s` extended requests on CAN1 or CAN2, including both the datasheet-style DLC-8 reserved request and the public Linux CAN DLC-0 request form.
 - `Fake Inverter Data` now works as an inverter-facing override for Pylon RS485 passthrough routes as well as synthetic translator routes; remember it is runtime-only and must be reapplied after reset or flash.
+- `Fake Inverter Data` also works for Pylon CAN forward mode; fake `SOC=0%` was field-confirmed to influence EASUN behavior, and resulting inverter-side CAN no-ACK/TX failures can be expected if the inverter stops or sleeps.
 - `Fake Inverter Data` remains useful as a field diagnostic tool when validating inverter-side protocol behavior independently of live BMS decoding.
 - For future `JKBMS -> Pylon` work, compare synthetic `0x63` semantics first before chasing pack-voltage formatting.
 - The ESP32-C6-WROOM-1-N8 build now leaves roughly `86%` of the `7MB` app partition free.

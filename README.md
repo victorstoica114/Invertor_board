@@ -55,8 +55,10 @@ Implemented / available:
 - `CAN_PYLON -> RS485_PYLON` synthetic responder/bridge, including the `RS485_PYLON_115200` variant
 - `JKBMS_CAN_250K -> RS485_PYLON` synthetic responder/bridge for JK app profile `000 - JK BMS CAN Protocol (250K) V2.0`
 - `CAN_DEYE -> RS485_PYLON` synthetic responder/bridge for JK app profile `001 - Deye Low-voltage hybrid inverter CAN`
+- `CAN_PYLON -> CAN_PYLON` direct forward mode for split CAN ports, field-tested as `JKBMS Pylon CAN on CAN1 -> EASUN Pylon CAN on CAN2`
 - CAN snapshot decoders for Growatt-like, Pylon, Deye, and JK BMS CAN frame sets
 - web UI + API for runtime config and telemetry
+- runtime `Fake Inverter Data` override for inverter-facing synthetic routes, Pylon RS485 passthrough, and Pylon CAN forward frames
 
 Partially implemented / scaffold:
 
@@ -64,6 +66,7 @@ Partially implemented / scaffold:
 - `CAN_SOFAR`, `CAN_SMA`, `CAN_VICTRON` have protocol IDs and register-map headers, but no dedicated full task pipeline yet
 - `CAN_DEYE` has active CAN decode path, but is not currently in the dedicated `CAN -> RS485_GROWATT` special-route selector
 - `DALY_CAN` has a native poller and `RS485_PYLON` synthetic responder route, but the field BMS tested on 2026-05-30 did not ACK CAN traffic on either CAN port
+- optional EASUN/Pylon 24V diagnostic CAN sender exists for isolated inverter tests, but is disabled by default (`EASUN_PYLON_24V_DIAG_SENDER_ENABLE=0`)
 
 Current bridge-mode route matrix:
 
@@ -91,6 +94,8 @@ Modes are selected from runtime settings (`mode`):
 - this is the main production mode
 - `MODE_FORWARD = 2`
 - direct forward tasks (`CAN1->CAN2`, `RS485_1->RS485_2`) with optional decode logging
+- field-tested CAN forward case: `JKBMS Pylon CAN -> EASUN Pylon CAN`, with JKBMS on `CAN1`, EASUN on `CAN2`, both at `500 kbit/s`
+- when runtime `Fake Inverter Data` is enabled, Pylon CAN forward modifies outgoing inverter-facing frames before transmit (`0x351`, `0x355`, `0x356`, `0x35C`, and `0x373` when present)
 - `MODE_SNIFFER = 1`
 - passive sniff/decode tasks on both CAN + both RS485 ports
 
@@ -118,6 +123,58 @@ Bridge mode route selection is done in `orchestratorStartFromRuntime(...)`:
 13. fallback generic orchestrator route (`protocol_id_t` based)
 
 ## Integration Notes
+
+### Field Status: EASUN Pylon CAN
+
+As of the 2026-05-30 field session, the EASUN inverter CAN path is validated as
+a split-port forward route.
+
+Bench setup that worked:
+
+- JKBMS is configured for `PYLON CAN` and connected to `CAN1`.
+- EASUN inverter is configured for `PYLON CAN` and connected to `CAN2`.
+- Both CAN ports use the normal Pylon bitrate, `500 kbit/s`.
+- The active firmware mode is forward mode: `CAN1 -> CAN2`.
+- Current field config uses `BMS_protocol=PROTOCOL_CAN_PYLON`,
+  `Inverter_protocol=PROTOCOL_CAN_PYLON`, `BMS_PORT=1`, `Inverter_PORT=2`.
+
+Observed frames:
+
+- JKBMS emits normal Pylon frames such as `0x351`, `0x355`, `0x356`, `0x359`,
+  `0x35C`, `0x35E`, `0x370`, and `0x371`.
+- `0x35E` identifies the source as `JK-BMS`.
+- EASUN emits repeated `0x305 [00 00 00 00 00 00 00 00]` frames when its CAN
+  hardware is healthy.
+
+Important hardware finding:
+
+- The initial "EASUN is silent/dead" symptom was caused by the inverter CAN
+  transceiver hardware, not by the Pylon CAN firmware path.
+- After the inverter CAN transceiver was repaired, EASUN traffic was visible and
+  the direct forward route was accepted.
+
+Current forwarding rule:
+
+- The firmware forwards the JKBMS Pylon CAN data directly.
+- No voltage division/scaling is active in the field config
+  (`CAN_FORWARD_PYLON_16S_TO_8S_ENABLE=0`), even though EASUN is a 24V inverter.
+- The optional `16S->8S` scaler remains behind the compile-time macro if a
+  future inverter test proves it is needed.
+- Do not clamp live forwarded voltage/current/SOC limits unless the inverter
+  rejects the direct JKBMS values; these values can be adjusted on the JKBMS side.
+
+Fake-data behavior:
+
+- Web `Fake Inverter Data` now affects Pylon CAN forward mode, not only
+  synthetic bridge/responders.
+- In forward mode, fake data edits outgoing Pylon CAN frames before transmission
+  to the inverter. The most important frame for EASUN behavior is `0x355`
+  (`SOC`/`SOH`).
+- Setting fake `SOC=0%` was field-confirmed to influence EASUN behavior.
+- If fake `SOC=0%` makes EASUN stop/sleep, CAN TX failures or no-ACK counters on
+  the inverter-facing bus can be expected during that test.
+- Fake data is runtime-only. Reboot, reset, or flashing clears it and it must be
+  reapplied from the web UI or `/api/fake_bms`.
 
 ### Known Field Issue: Seplos RS485
 
@@ -495,6 +552,10 @@ Implemented endpoints:
 - saves runtime settings to NVS and applies them
 - `GET /api/logs`
 - text decoded logs snapshot
+- `GET /api/fake_bms`
+- JSON runtime fake inverter data model
+- `POST /api/fake_bms`
+- enables/disables runtime fake inverter data and updates override values
 
 Runtime settings are persisted in NVS namespace `bridge_cfg`.
 
@@ -539,6 +600,7 @@ Known local setup:
 - Ninja: `C:\Espressif\tools\ninja\1.12.1\ninja.EXE`
 - ESP32-C6 serial port used during field tests: `COM11`
 - web UI used during field tests: `http://192.168.141.151/`
+- opening the serial monitor can reset the board; runtime-only fake inverter data must be reapplied after reset/flash
 
 Fast incremental build from a Codex/PowerShell shell:
 
@@ -566,6 +628,36 @@ Serial monitor options:
 
 ```powershell
 & 'C:\Espressif\tools\python\v6.0.1\venv\Scripts\python.exe' 'C:\esp\v6.0.1\esp-idf\tools\idf_monitor.py' -p COM11 -b 115200 --toolchain-prefix riscv32-esp-elf- --target esp32c6 'C:\Users\Admin\Documents\test-CAN+RS485\build\project-name.elf'
+```
+
+Quick fake-SOC API test from PowerShell:
+
+```powershell
+$payload = @{
+  enabled = $true
+  pack_voltage_v = 57.16
+  pack_current_a = 0
+  soc_pct = 0
+  soh_pct = 100
+  cycles = 0
+  charge_voltage_limit_v = 57.6
+  charge_current_limit_a = 100
+  discharge_current_limit_a = 100
+  cell_max_v = 3.58
+  cell_min_v = 3.57
+  cell_max_idx = 1
+  cell_min_idx = 1
+  temp_mos_c = 25
+  temp_t1_c = 25
+  temp_t2_c = 25
+  temp_t4_c = 25
+  temp_t5_c = 25
+  charge_enabled = $true
+  discharge_enabled = $true
+  balance_enabled = $false
+  protocol_state = 192
+} | ConvertTo-Json
+Invoke-RestMethod -Uri 'http://192.168.141.151/api/fake_bms' -Method Post -Body $payload -ContentType 'application/json'
 ```
 
 For a short non-interactive log capture that closes the port automatically:
