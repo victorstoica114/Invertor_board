@@ -50,6 +50,7 @@ Implemented / available:
 - `RS485_CHINA_TOWER -> RS485_PYLON` translator/responder, intended for JK UART profile `008 - China tower shared battery cabinet V2.0`
 - `RS485_WOW -> RS485_PYLON` translator/responder, intended for JK UART profile `009 - WOW_RS485_Modbus_V1.3`
 - `RS485_DALY -> RS485_PYLON` translator/responder
+- `RS485_DALY -> CAN_PYLON` translator/sender, field-tested as Daly RS485 on `RS485_1` to EASUN Pylon CAN on `CAN2`
 - experimental `DALY_CAN -> RS485_PYLON` translator/responder
 - `RS485_PYLON <-> RS485_PYLON` bridge/responder, including the `RS485_PYLON_115200` variant
 - `CAN_PYLON -> RS485_PYLON` synthetic responder/bridge, including the `RS485_PYLON_115200` variant
@@ -62,7 +63,7 @@ Implemented / available:
 
 Partially implemented / scaffold:
 
-- generic `PROTOCOL_ID_PYLON` orchestrator tasks (`pylon_bms_task.c`, `pylon_inverter_task.c`) are scaffold placeholders
+- generic `PROTOCOL_ID_PYLON` BMS task (`pylon_bms_task.c`) remains a scaffold placeholder; the inverter side has an active `CAN_PYLON` sender and RS485 Pylon routes are handled by the dedicated bridge/responder
 - `CAN_SOFAR`, `CAN_SMA`, `CAN_VICTRON` have protocol IDs and register-map headers, but no dedicated full task pipeline yet
 - `CAN_DEYE` has active CAN decode path, but is not currently in the dedicated `CAN -> RS485_GROWATT` special-route selector
 - `DALY_CAN` has a native poller and `RS485_PYLON` synthetic responder route, but the field BMS tested on 2026-05-30 did not ACK CAN traffic on either CAN port
@@ -81,6 +82,7 @@ Current bridge-mode route matrix:
 | RS485_CHINA_TOWER -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=CHINA_TOWER_MODBUS`, `inv_protocol=RS485_PYLON` | Active; covers JK UART profile `008` |
 | RS485_WOW -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=WOW_MODBUS`, `inv_protocol=RS485_PYLON` | Active initial implementation; covers JK UART profile `009` with PACE-compatible map |
 | RS485_DALY -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=DALY_RS485`, `inv_protocol=RS485_PYLON` | Active |
+| RS485_DALY -> CAN_PYLON translator | `bms_line=RS485`, `inv_line=CAN`, `bms_protocol=DALY_RS485`, `inv_protocol=CAN_PYLON` | Active; field-tested with EASUN 24V |
 | DALY_CAN -> RS485_PYLON translator | `bms_line=CAN`, `inv_line=RS485`, `bms_protocol=DALY_CAN`, `inv_protocol=RS485_PYLON` | Experimental; protocol task implemented, live CAN link not validated |
 | Pylon RS485 bridge | `RS485_PYLON<->RS485_PYLON`, `CAN_PYLON->RS485_PYLON`, `CAN_DEYE->RS485_PYLON`, or `JKBMS_CAN_250K->RS485_PYLON`, with `RS485_PYLON_115200` accepted on RS485 sides | Active |
 | Generic orchestrator route | any other valid combination | Active, depends on protocol task maturity |
@@ -175,6 +177,42 @@ Fake-data behavior:
   the inverter-facing bus can be expected during that test.
 - Fake data is runtime-only. Reboot, reset, or flashing clears it and it must be
   reapplied from the web UI or `/api/fake_bms`.
+
+### Field Status: Daly RS485 to EASUN Pylon CAN
+
+As of the 2026-05-30 field session, the Daly 24V pack can drive the EASUN
+inverter through the bridge:
+
+- BMS side: Daly proprietary RS485 on `RS485_1`.
+- Inverter side: EASUN configured for `PYLON CAN` on `CAN2`.
+- Firmware route: `MODE_BRIDGE`, `PROTOCOL_RS485_DALY -> PROTOCOL_CAN_PYLON`.
+- Current `config.h` defaults are set for this bench route because
+  `RUNTIME_SETTINGS_FORCE_DEFAULTS=1` makes boot ignore stored NVS settings.
+
+Validated live values:
+
+- Daly RS485 decode: 8 cells, pack voltage around `28.29..28.31 V`,
+  `SOC=99.2%`, current `0.0 A`, charge/discharge enabled, no alarms.
+- Pylon CAN sender on `CAN2`: `SOC=99%`, pack around `28.29 V`, status `0xC0`.
+- EASUN leaves fault when the bridge is transmitting fresh Daly-derived Pylon
+  CAN frames.
+
+Important interpretation:
+
+- A previous `58 V` Pylon CAN snapshot on `CAN1` was not Daly data. It came from
+  the old `CAN_PYLON -> CAN_PYLON` forward setup and should not be used to infer
+  Daly CAN behavior.
+- Daly remains proven here as an RS485 source. Daly proprietary CAN is still
+  experimental/no-ACK on the tested hardware.
+
+Disconnect behavior:
+
+- The Pylon CAN sender must not keep EASUN alive with stale data.
+- When Daly disappears, `DALY_RS485_SOURCE_STALE_MS` is `10000` ms. After that,
+  the sender stops transmitting and logs `Pylon CAN inverter sender has no fresh
+  BMS model yet`.
+- This was field-tested by disconnecting the BMS; TX stopped instead of
+  replaying the last valid Daly packet.
 
 ### Known Field Issue: Seplos RS485
 
@@ -601,6 +639,7 @@ Known local setup:
 - ESP32-C6 serial port used during field tests: `COM11`
 - web UI used during field tests: `http://192.168.141.151/`
 - opening the serial monitor can reset the board; runtime-only fake inverter data must be reapplied after reset/flash
+- `RUNTIME_SETTINGS_FORCE_DEFAULTS=1` in `main/config.h`, so POSTed runtime settings can appear accepted but boot still uses compile-time defaults after reset/flash
 
 Fast incremental build from a Codex/PowerShell shell:
 

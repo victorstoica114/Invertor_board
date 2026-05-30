@@ -99,7 +99,7 @@
 #define WEB_TELEMETRY_STALE_MS 10000u
 
 /* --- Global working mode --- */
-#define ACTIVE_WORKING_MODE 1 /* 0=bridge, 1=forward, 2=sniffer */
+#define ACTIVE_WORKING_MODE 0 /* 0=bridge, 1=forward, 2=sniffer */
 
 /* --- Active protocol selection --- */
 #define ACTIVE_BMS_PROTOCOL      0 /* 0=Growatt, 1=Pylon */
@@ -188,9 +188,9 @@ static inline uint32_t bridgeProtocolCanBitrate(uint8_t protocol)
     return bridgeProtocolIsCanJkbms250k(protocol) ? CAN_JKBMS_250K_BITRATE : CAN_DEFAULT_BITRATE;
 }
 
-#define BMS_line LINE_CAN
+#define BMS_line LINE_RS485
 #define Inverter_line LINE_CAN
-#define BMS_protocol PROTOCOL_CAN_PYLON
+#define BMS_protocol PROTOCOL_RS485_DALY
 #define Inverter_protocol PROTOCOL_CAN_PYLON
 #define BMS_PORT 1
 #define Inverter_PORT 2
