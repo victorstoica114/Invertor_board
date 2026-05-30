@@ -36,6 +36,7 @@ idf_component_register(
         "protocols/wow_modbus/wow_modbus_bms_task.c"
         "protocols/seplos_rs485/seplos_rs485_protocol.c"
         "protocols/seplos_rs485/seplos_rs485_bms_task.c"
+        "protocols/daly_can/daly_can_bms_task.c"
         "protocols/daly_rs485/daly_rs485_bms_task.c"
         "protocols/rs485_growatt/rs485_growatt_bridge.c"
         "protocols/rs485_growatt/rs485_growatt_registers_map.c"

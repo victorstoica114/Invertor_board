@@ -136,7 +136,8 @@
 #define PROTOCOL_RS485_SEPLOS 19
 #define PROTOCOL_RS485_SEPLOS_19200 20
 #define PROTOCOL_RS485_DALY 21
-#define PROTOCOL_ID_MAX PROTOCOL_RS485_DALY
+#define PROTOCOL_CAN_DALY 22
+#define PROTOCOL_ID_MAX PROTOCOL_CAN_DALY
 
 static inline uint8_t bridgeProtocolCanonical(uint8_t protocol)
 {
@@ -180,12 +181,15 @@ static inline bool bridgeProtocolIsCanJkbms250k(uint8_t protocol)
 
 static inline uint32_t bridgeProtocolCanBitrate(uint8_t protocol)
 {
+    if (protocol == PROTOCOL_CAN_DALY) {
+        return CAN_JKBMS_250K_BITRATE;
+    }
     return bridgeProtocolIsCanJkbms250k(protocol) ? CAN_JKBMS_250K_BITRATE : CAN_DEFAULT_BITRATE;
 }
 
-#define BMS_line LINE_RS485
+#define BMS_line LINE_CAN
 #define Inverter_line LINE_RS485
-#define BMS_protocol PROTOCOL_RS485_DALY
+#define BMS_protocol PROTOCOL_CAN_DALY
 #define Inverter_protocol PROTOCOL_RS485_PYLON
 #define BMS_PORT 1
 #define Inverter_PORT 2
@@ -271,6 +275,16 @@ static inline uint32_t bridgeProtocolCanBitrate(uint8_t protocol)
 #define DALY_RS485_SOURCE_STALE_MS         10000
 #define DALY_RS485_TASK_STACK              6144
 #define DALY_RS485_TASK_PRIORITY           10
+
+/* --- Daly CAN proprietary protocol task --- */
+#define DALY_CAN_BMS_ID                    1u
+#define DALY_CAN_QUERY_PERIOD_MS           120
+#define DALY_CAN_RESPONSE_TIMEOUT_MS       220
+#define DALY_CAN_TX_TIMEOUT_MS             50
+#define DALY_CAN_PUBLISH_PERIOD_MS         500
+#define DALY_CAN_SOURCE_STALE_MS           10000
+#define DALY_CAN_TASK_STACK                6144
+#define DALY_CAN_TASK_PRIORITY             10
 
 /* --- Pylon placeholders --- */
 #define PYLON_BMS_TASK_STACK           3072

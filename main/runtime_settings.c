@@ -71,7 +71,8 @@ static bool validateSettings(const bridge_runtime_settings_t *s)
         (s->bms_protocol != PROTOCOL_CAN_SOFAR) &&
         (s->bms_protocol != PROTOCOL_CAN_SMA) &&
         (s->bms_protocol != PROTOCOL_CAN_VICTRON) &&
-        (s->bms_protocol != PROTOCOL_CAN_JKBMS_250K)) {
+        (s->bms_protocol != PROTOCOL_CAN_JKBMS_250K) &&
+        (s->bms_protocol != PROTOCOL_CAN_DALY)) {
         return false;
     }
     if ((s->inverter_line == LINE_CAN) &&

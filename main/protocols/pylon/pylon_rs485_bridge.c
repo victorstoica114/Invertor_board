@@ -101,6 +101,7 @@ static const char *protocolToStrLocal(uint8_t protocol)
         case PROTOCOL_RS485_SEPLOS: return "SEPLOS_RS485";
         case PROTOCOL_RS485_SEPLOS_19200: return "SEPLOS_RS485_19200";
         case PROTOCOL_RS485_DALY: return "DALY_RS485";
+        case PROTOCOL_CAN_DALY: return "DALY_CAN";
         default: return "UNKNOWN";
     }
 }
@@ -135,7 +136,8 @@ static bool pylonCanSyntheticSourceModeEnabled(const bridge_runtime_settings_t *
            (settings->inverter_line == LINE_RS485) &&
            ((settings->bms_protocol == PROTOCOL_CAN_JKBMS_250K) ||
             (settings->bms_protocol == PROTOCOL_CAN_GROWATT) ||
-            (settings->bms_protocol == PROTOCOL_CAN_DEYE)) &&
+            (settings->bms_protocol == PROTOCOL_CAN_DEYE) ||
+            (settings->bms_protocol == PROTOCOL_CAN_DALY)) &&
            bridgeProtocolIsRs485Pylon(settings->inverter_protocol);
 }
 
@@ -174,13 +176,19 @@ static bool pylonSourceUsesNativePayloadEncoding(const bridge_runtime_settings_t
             (settings->bms_protocol == PROTOCOL_RS485_GROWATT) ||
             (settings->bms_protocol == PROTOCOL_RS485_VOLTRONIC) ||
             (settings->bms_protocol == PROTOCOL_RS485_DALY) ||
+            (settings->bms_protocol == PROTOCOL_CAN_DALY) ||
             (settings->bms_protocol == PROTOCOL_CAN_DEYE));
 }
 
 static uint32_t pylonSyntheticModelStaleMs(const bridge_runtime_settings_t *settings)
 {
-    if (settings != NULL && settings->bms_protocol == PROTOCOL_RS485_DALY) {
-        return DALY_RS485_SOURCE_STALE_MS;
+    if (settings != NULL) {
+        if (settings->bms_protocol == PROTOCOL_RS485_DALY) {
+            return DALY_RS485_SOURCE_STALE_MS;
+        }
+        if (settings->bms_protocol == PROTOCOL_CAN_DALY) {
+            return DALY_CAN_SOURCE_STALE_MS;
+        }
     }
     return BRIDGE_SOURCE_STALE_MS;
 }

@@ -32,6 +32,10 @@ The goal is practical maintenance:
 - `JKBMS_CAN_250K -> RS485_PYLON` synthetic responder route through the universal battery model.
 - CAN protocol backlog documentation under `docs/can_protocols.md`.
 - `CAN_DEYE -> RS485_PYLON` route support for JK app protocol `001 - Deye Low-voltage hybrid inverter CAN`.
+- `DALY_RS485` BMS poller/decoder for the Daly proprietary RS485 protocol, including pack telemetry, cell data where exposed, temperatures, MOS/balance state, and failure/status bits.
+- `RS485_DALY -> RS485_PYLON` bridge-mode route for Pylon-compatible inverter responders.
+- Experimental `DALY_CAN` BMS poller/decoder for the Daly proprietary CAN protocol.
+- Experimental `DALY_CAN -> RS485_PYLON` bridge-mode route through the shared battery model and Pylon synthetic responder.
 - Selectable `115200` RS485 variants for `JKBMS_MODBUS` and `RS485_PYLON`, reusing the same decoders/responders as the existing `9600` variants.
 - GitLab CI pipeline for automatic ESP32-C6 builds and host-side test execution on push/merge request.
 - Separate CI suites for sanity, unit, integration, and firmware-build validation, with JUnit artifacts and coverage reports.
@@ -71,8 +75,10 @@ The goal is practical maintenance:
 - Web/API telemetry and route-selection tests now cover the `WOW_MODBUS -> RS485_PYLON` path.
 - `WOW_MODBUS` has been live-validated with the BMS set to JK UART profile `009`, with the inverter accepting the translated Pylon responder data.
 - RS485 UART initialization now derives baud rate per physical RS485 port from the selected runtime protocol, allowing mixed routes such as `JKBMS_MODBUS_115200 -> RS485_PYLON`.
-- CAN initialization now derives bitrate per physical CAN port from the selected runtime protocol, with `JKBMS_CAN_250K` using `250 kbit/s` and existing CAN profiles remaining at `500 kbit/s`.
+- CAN initialization now derives bitrate per physical CAN port from the selected runtime protocol, with `JKBMS_CAN_250K` and `DALY_CAN` using `250 kbit/s` and existing CAN profiles remaining at `500 kbit/s`.
 - `CAN_DEYE` now updates the universal battery model directly from live CAN frames instead of waiting for the periodic diagnostic snapshot.
+- Daly RS485 source freshness is kept at `10s`, matching the desired inverter fail-safe behavior when the BMS disappears.
+- Daly CAN documentation now records the 2026-05-30 no-ACK field result so future debugging starts at wiring/BMS CAN enablement instead of repeating protocol-level tests.
 
 ### Fixed
 
@@ -109,6 +115,7 @@ Behavior kept in code:
 ### Operational Notes
 
 - Seplos RS485 requires a fail-safe bias network on the Seplos-facing bus. Without bias, the idle A/B state can float and the bridge may capture noise-like bytes even though the same BMS communicates with an inverter that provides proper bias.
+- Daly CAN is implemented but not field-validated: the tested BMS did not ACK `250 kbit/s` extended requests on CAN1 or CAN2, including both the datasheet-style DLC-8 reserved request and the public Linux CAN DLC-0 request form.
 - `Fake Inverter Data` now works as an inverter-facing override for Pylon RS485 passthrough routes as well as synthetic translator routes; remember it is runtime-only and must be reapplied after reset or flash.
 - `Fake Inverter Data` remains useful as a field diagnostic tool when validating inverter-side protocol behavior independently of live BMS decoding.
 - For future `JKBMS -> Pylon` work, compare synthetic `0x63` semantics first before chasing pack-voltage formatting.
@@ -136,6 +143,32 @@ Remaining note:
 ### Runtime mode hot-switching is not a supported workflow
 
 - changing major bridge/sniffer/forward mode combinations should still be treated as a restart/reboot operation
+
+### Daly CAN no-ACK on field hardware
+
+The `DALY_CAN` task is implemented from the Daly CAN datasheet and public
+Linux CAN examples, but the 2026-05-30 bench BMS did not ACK requests.
+
+Tested combinations:
+
+- `CAN1` and `CAN2` at `250 kbit/s`
+- extended SOC request ID `0x18900140` for `BMS_ID=1`
+- datasheet-style request with 8 reserved data bytes
+- public-thread request style with DLC 0
+
+Observed result:
+
+- no valid Daly CAN frames were received
+- TWAI counters showed the no-ACK pattern: `txErr=128`, increasing `txFail`,
+  `rxErr=0`, and `rxMiss=0`
+
+Current recommendation:
+
+- treat Daly CAN as experimental until a USB-CAN/direct inverter capture proves
+  the BMS ACKs/responds on the same CAN pair
+- check CAN-H/CAN-L, common ground, termination, BMS CAN enable/profile, and
+  whether the connected Daly port is the direct CAN port or a separate Daly
+  interface-board path
 
 ### Some protocol implementations are still scaffold/partial
 

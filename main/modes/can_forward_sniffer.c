@@ -82,6 +82,7 @@ static const char *canProtocolLabel(int protocol)
         case PROTOCOL_CAN_SMA: return "SMA";
         case PROTOCOL_CAN_VICTRON: return "VICTRON";
         case PROTOCOL_CAN_JKBMS_250K: return "JKBMS_CAN_250K";
+        case PROTOCOL_CAN_DALY: return "DALY_CAN";
         case PROTOCOL_CAN_GROWATT: return "GROWATT";
         default: return "CAN";
     }
@@ -205,6 +206,9 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
     const bool bmsCanJkbms250k = (settings != NULL) &&
                                  (settings->bms_line == LINE_CAN) &&
                                  (settings->bms_protocol == PROTOCOL_CAN_JKBMS_250K);
+    const bool bmsCanDaly = (settings != NULL) &&
+                            (settings->bms_line == LINE_CAN) &&
+                            (settings->bms_protocol == PROTOCOL_CAN_DALY);
     const bool bmsCanGrowatt = (settings != NULL) &&
                                (settings->bms_line == LINE_CAN) &&
                                (settings->bms_protocol == PROTOCOL_CAN_GROWATT);
@@ -252,7 +256,7 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
         bmsToInv.applyExcludeList = CAN_EXCLUDE_LIST_ENABLE;
         bmsToInv.forwardEnabled = canForwardEnabled;
         bmsToInv.rawLogEnabled = CAN_DECODER_SHOW_RAW_FRAMES &&
-                                 (bmsCanPylon || bmsCanDeye || bmsCanGoodwe || bmsCanSofar || bmsCanSma || bmsCanVictron || bmsCanJkbms250k);
+                                 (bmsCanPylon || bmsCanDeye || bmsCanGoodwe || bmsCanSofar || bmsCanSma || bmsCanVictron || bmsCanJkbms250k || bmsCanDaly);
         bmsToInv.rawLogLabel = canProtocolLabel(settings->bms_protocol);
 
         invToBms.rxName = canNameByPort(settings->inverter_port);
@@ -292,7 +296,7 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
         bmsSniff.applyExcludeList = false;
         bmsSniff.forwardEnabled = false;
         bmsSniff.rawLogEnabled = CAN_DECODER_SHOW_RAW_FRAMES &&
-                                 (bmsCanPylon || bmsCanDeye || bmsCanGoodwe || bmsCanSofar || bmsCanSma || bmsCanVictron || bmsCanJkbms250k);
+                                 (bmsCanPylon || bmsCanDeye || bmsCanGoodwe || bmsCanSofar || bmsCanSma || bmsCanVictron || bmsCanJkbms250k || bmsCanDaly);
         bmsSniff.rawLogLabel = canProtocolLabel(settings->bms_protocol);
         const uint32_t bmsSniffStack = bmsCanGrowatt ? 8192u : 4096u;
         if (createCanTask(canBridgeTask, "can_bms_sniff", bmsSniffStack, &bmsSniff, 10, &s_canTaskA)) {
@@ -324,6 +328,10 @@ void canForwardSnifferStart(const bridge_runtime_settings_t *settings)
                      settings->bms_port);
         } else if (bmsCanJkbms250k) {
             ESP_LOGI(EXAMPLE_TAG, "JK BMS CAN 250K diagnostic logging enabled on BMS side (%s[P%d])",
+                     bmsSniff.rxName,
+                     settings->bms_port);
+        } else if (bmsCanDaly) {
+            ESP_LOGI(EXAMPLE_TAG, "Daly CAN diagnostic logging enabled on BMS side (%s[P%d])",
                      bmsSniff.rxName,
                      settings->bms_port);
         }

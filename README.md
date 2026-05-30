@@ -29,7 +29,7 @@ Main goals:
 
 ## Current Capabilities (High Level)
 
-Implemented and actively used:
+Implemented / available:
 
 - `RS485_GROWATT` BMS polling/decoding (`Modbus`) + queue publish, including JK UART profile `006` cell voltages and Growatt warning/error bits
 - `JKBMS_MODBUS` BMS polling/decoding (`Modbus`) + rich snapshot, with `9600` and `115200` RS485 variants
@@ -38,6 +38,8 @@ Implemented and actively used:
 - `VOLTRONIC_MODBUS` BMS polling/decoding for JK UART profile `007 - Voltronic_Inverter_and_BMS_485` + rich snapshot
 - `CHINA_TOWER_MODBUS` BMS polling/decoding for JK UART profile `008 - China tower shared battery cabinet V2.0` + pack/cell/temperature snapshot
 - `WOW_MODBUS` BMS polling/decoding for JK UART profile `009 - WOW_RS485_Modbus_V1.3` + PACE-compatible pack/cell/temperature snapshot
+- `DALY_RS485` BMS polling/decoding for the Daly proprietary RS485 protocol + rich snapshot
+- experimental `DALY_CAN` BMS polling/decoding for the Daly proprietary CAN protocol
 - `GROWATT` inverter CAN sender (publishes frame `0x322`)
 - `CAN_GROWATT | CAN_PYLON | CAN_GOODWE | CAN_SOFAR | CAN_SMA | CAN_VICTRON -> RS485_GROWATT` translator (`main/protocols/rs485_growatt/rs485_growatt_bridge.c`)
 - `RS485_JKBMS -> RS485_GROWATT` translator (`JKBMS_MODBUS`, `JKBMS_MODBUS_115200`, and `JKBMS_RS485_NATIVE`)
@@ -47,6 +49,8 @@ Implemented and actively used:
 - `RS485_VOLTRONIC -> RS485_PYLON` translator/responder, intended for JK UART profile `007 - Voltronic_Inverter_and_BMS_485`
 - `RS485_CHINA_TOWER -> RS485_PYLON` translator/responder, intended for JK UART profile `008 - China tower shared battery cabinet V2.0`
 - `RS485_WOW -> RS485_PYLON` translator/responder, intended for JK UART profile `009 - WOW_RS485_Modbus_V1.3`
+- `RS485_DALY -> RS485_PYLON` translator/responder
+- experimental `DALY_CAN -> RS485_PYLON` translator/responder
 - `RS485_PYLON <-> RS485_PYLON` bridge/responder, including the `RS485_PYLON_115200` variant
 - `CAN_PYLON -> RS485_PYLON` synthetic responder/bridge, including the `RS485_PYLON_115200` variant
 - `JKBMS_CAN_250K -> RS485_PYLON` synthetic responder/bridge for JK app profile `000 - JK BMS CAN Protocol (250K) V2.0`
@@ -59,6 +63,7 @@ Partially implemented / scaffold:
 - generic `PROTOCOL_ID_PYLON` orchestrator tasks (`pylon_bms_task.c`, `pylon_inverter_task.c`) are scaffold placeholders
 - `CAN_SOFAR`, `CAN_SMA`, `CAN_VICTRON` have protocol IDs and register-map headers, but no dedicated full task pipeline yet
 - `CAN_DEYE` has active CAN decode path, but is not currently in the dedicated `CAN -> RS485_GROWATT` special-route selector
+- `DALY_CAN` has a native poller and `RS485_PYLON` synthetic responder route, but the field BMS tested on 2026-05-30 did not ACK CAN traffic on either CAN port
 
 Current bridge-mode route matrix:
 
@@ -72,6 +77,8 @@ Current bridge-mode route matrix:
 | RS485_VOLTRONIC -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=VOLTRONIC_MODBUS`, `inv_protocol=RS485_PYLON` | Active; covers JK UART profile `007` |
 | RS485_CHINA_TOWER -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=CHINA_TOWER_MODBUS`, `inv_protocol=RS485_PYLON` | Active; covers JK UART profile `008` |
 | RS485_WOW -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=WOW_MODBUS`, `inv_protocol=RS485_PYLON` | Active initial implementation; covers JK UART profile `009` with PACE-compatible map |
+| RS485_DALY -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=DALY_RS485`, `inv_protocol=RS485_PYLON` | Active |
+| DALY_CAN -> RS485_PYLON translator | `bms_line=CAN`, `inv_line=RS485`, `bms_protocol=DALY_CAN`, `inv_protocol=RS485_PYLON` | Experimental; protocol task implemented, live CAN link not validated |
 | Pylon RS485 bridge | `RS485_PYLON<->RS485_PYLON`, `CAN_PYLON->RS485_PYLON`, `CAN_DEYE->RS485_PYLON`, or `JKBMS_CAN_250K->RS485_PYLON`, with `RS485_PYLON_115200` accepted on RS485 sides | Active |
 | Generic orchestrator route | any other valid combination | Active, depends on protocol task maturity |
 
@@ -104,8 +111,11 @@ Bridge mode route selection is done in `orchestratorStartFromRuntime(...)`:
 6. `RS485_VOLTRONIC -> RS485_PYLON` translator route
 7. `RS485_CHINA_TOWER -> RS485_PYLON` translator route
 8. `RS485_WOW -> RS485_PYLON` translator route
-9. `Pylon RS485 bridge` route (`RS485_PYLON<->RS485_PYLON` or `CAN_PYLON->RS485_PYLON`)
-10. fallback generic orchestrator route (`protocol_id_t` based)
+9. `RS485_SEPLOS -> RS485_PYLON` translator route
+10. `RS485_DALY -> RS485_PYLON` translator route
+11. `DALY_CAN -> RS485_PYLON` translator route
+12. `Pylon RS485 bridge` route (`RS485_PYLON<->RS485_PYLON` or `CAN_PYLON->RS485_PYLON`)
+13. fallback generic orchestrator route (`protocol_id_t` based)
 
 ## Integration Notes
 
@@ -152,6 +162,44 @@ Hardware requirement / diagnostic recommendation:
 - If Seplos appears to work when connected directly to the inverter but not via
   the bridge, check RS485 bias before changing protocol code, baud rate, UART
   inversion, or direction-control settings.
+
+### Experimental Field Status: Daly CAN
+
+As of the 2026-05-30 field session, `DALY_CAN` is implemented as a native CAN
+poller, but it is not live-validated with the tested Daly BMS.
+
+Protocol assumptions currently used by the firmware:
+
+- CAN bitrate is `250 kbit/s`.
+- The request identifier is extended CAN ID `0x18{DataID}{BMS_ID}40`.
+- The tested hardware uses `BMS_ID = 1`, so the SOC/current/voltage request is
+  `0x18900140`.
+- The expected response for that request is `0x18904001`.
+- Requests use 8 reserved data bytes, matching
+  `datasheets/daly-can-communications-protocol-v1-0-pr_69416dce77488f5846f10633ac80e389.pdf`.
+
+Additional compatibility test already tried:
+
+- A DLC-0 request was tested because the public `dbus-serialbattery`
+  discussion #561 shows examples such as `cansend can0 18950140#`.
+
+Observed on the bench:
+
+- `CAN1` and `CAN2` were both tested at `250 kbit/s`.
+- The request ID was logged as `0x18900140`.
+- No valid Daly CAN frames were received.
+- TWAI status showed a repeated no-ACK pattern: `txErr=128`, increasing
+  `txFail`/bus error count, `rxErr=0`, and `rxMiss=0`.
+
+Current interpretation:
+
+- The firmware-side protocol framing matches the available Daly CAN datasheet
+  and the public Linux CAN examples.
+- The remaining failure looks below the decoder/protocol layer: CAN wiring,
+  termination/common ground, BMS CAN enable/profile, direct BMS CAN port versus
+  Daly interface board, or a Daly unit whose labelled CAN port is not active.
+- Do not spend more protocol-debug time on Daly CAN until a USB-CAN or inverter
+  capture proves that the BMS ACKs/responds on the tested CAN pair.
 
 ### `JKBMS_MODBUS -> RS485_PYLON`
 
@@ -207,13 +255,18 @@ Defined in `main/config.h`:
 - `PROTOCOL_RS485_JKBMS_115200 = 16`
 - `PROTOCOL_RS485_PYLON_115200 = 17`
 - `PROTOCOL_CAN_JKBMS_250K = 18`
+- `PROTOCOL_RS485_SEPLOS = 19`
+- `PROTOCOL_RS485_SEPLOS_19200 = 20`
+- `PROTOCOL_RS485_DALY = 21`
+- `PROTOCOL_CAN_DALY = 22`
 
 Baud-rate / bitrate detail:
 
 - `PROTOCOL_RS485_JKBMS` and `PROTOCOL_RS485_PYLON` use `9600`
 - `PROTOCOL_RS485_JKBMS_115200` and `PROTOCOL_RS485_PYLON_115200` use `115200`
 - the `115200` variants reuse the same protocol decoders/responders; only the selected RS485 port baud changes
-- `PROTOCOL_CAN_JKBMS_250K` reinitializes the selected CAN port at `250 kbit/s`; other CAN profiles currently default to `500 kbit/s`
+- `PROTOCOL_RS485_SEPLOS_19200` uses `19200`; `PROTOCOL_RS485_SEPLOS` and `PROTOCOL_RS485_DALY` use `9600`
+- `PROTOCOL_CAN_JKBMS_250K` and `PROTOCOL_CAN_DALY` reinitialize the selected CAN port at `250 kbit/s`; other CAN profiles currently default to `500 kbit/s`
 
 ## Folder Structure (AI-Oriented)
 
@@ -319,6 +372,20 @@ These are useful for reference/history, but are not the primary active implement
 - supports `RS485_WOW -> RS485_PYLON` bridge-mode translation through the shared synthetic Pylon responder path
 - web/API telemetry includes pack values, all cell voltages, PACE-style temperature labels, warning/protection/fault/status fields, and raw diagnostics when the source exposes them
 - field validation on a BMS configured to JK UART profile `009` confirmed stable pack, cell, temperature, and Pylon-responder behavior; alert naming remains conservative until more fault-state captures are available
+
+`main/protocols/daly_rs485/`
+
+- active Daly proprietary RS485 poller + decoder at `9600`
+- decodes pack voltage/current/power, `SOC`, `SOH`, cycles, capacity, cell extremes, per-cell voltages where exposed, temperature sensors, MOS state, balance state, and failure/status bits
+- supports `RS485_DALY -> RS485_PYLON` bridge-mode translation through the shared synthetic Pylon responder path
+- field validation confirmed that telemetry remains available after the PC Daly application is stopped, and stale-source timeout is `10s`
+
+`main/protocols/daly_can/`
+
+- experimental Daly proprietary CAN poller + decoder at `250 kbit/s`
+- uses extended request IDs in the Daly format `0x18{DataID}{BMS_ID}40`, with `BMS_ID=1` on the field hardware
+- uses the same Daly snapshot/model path as `DALY_RS485`, so successful CAN telemetry can feed `DALY_CAN -> RS485_PYLON`
+- not live-validated yet: the 2026-05-30 field BMS did not ACK either DLC-8 datasheet requests or DLC-0 Linux CAN example requests on CAN1/CAN2
 
 `main/protocols/pylon/`
 
