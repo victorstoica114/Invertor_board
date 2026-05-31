@@ -46,6 +46,7 @@ The goal is practical maintenance:
 - Host-side regression tests for `JKBMS_MODBUS` source freshness and Modbus decoder cache timestamps.
 - Public `main/secrets.example.h` template for Wi-Fi credentials, with local `main/secrets.h` ignored by Git.
 - Custom `8MB` single-app partition table for ESP32-C6-WROOM-1-N8 modules.
+- PulseView/libsigrokdecode `Pylon RS485` protocol decoder under `tools/sigrok/decoders/pylon_rs485`, plus parser regression tests using LA2016 field-captured Pylon frames.
 
 ### Changed
 

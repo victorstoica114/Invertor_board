@@ -603,6 +603,15 @@ Implemented endpoints:
 
 Runtime settings are persisted in NVS namespace `bridge_cfg`.
 
+## Logic Analyzer Tools
+
+Optional PulseView/libsigrokdecode helpers live under `tools/sigrok/`.
+
+- `tools/sigrok/decoders/pylon_rs485/` decodes Pylon-compatible RS485 ASCII frames stacked above the built-in `uart` decoder.
+- Typical analyzer settings are `9600` baud, `8N1`, LSB-first; line inversion depends on whether the probe is on TTL RX/TX or on the RS485 A/B pair.
+- The decoder validates Pylon length/checksum fields and decodes common `0x61`, `0x62`, and `0x63` payloads, including the important `0x63` status byte (`0xC0` = charge/discharge enabled, balance off).
+- See `tools/sigrok/README.md` for installation and PulseView usage.
+
 ## Build and Run
 
 Use ESP-IDF **v6.0.1** and target `esp32c6`.
