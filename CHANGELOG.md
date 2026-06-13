@@ -49,6 +49,7 @@ The goal is practical maintenance:
 - Public `main/secrets.example.h` template for Wi-Fi credentials, with local `main/secrets.h` ignored by Git.
 - Custom `8MB` single-app partition table for ESP32-C6-WROOM-1-N8 modules.
 - PulseView/libsigrokdecode `Pylon RS485` protocol decoder under `tools/sigrok/decoders/pylon_rs485`, plus parser regression tests using LA2016 field-captured Pylon frames.
+- PulseView/libsigrokdecode `Pylon CAN` protocol decoder under `tools/sigrok/decoders/pylon_can`, including Pylon/JK CAN IDs, raw CANH/CANL input modes for LA2016 captures, install/launcher scripts, and host regression tests.
 
 ### Changed
 
@@ -65,6 +66,7 @@ The goal is practical maintenance:
 - Python CI dependencies are installed into an isolated local virtual environment when possible, with cache reuse for faster repeat runs.
 - Firmware CI sources ESP-IDF from the local `gitlab-runner` installation and installs missing `cmake`/`ninja` tools into the ESP-IDF Python environment when needed.
 - README build, test, coverage, and GitLab runner instructions were refreshed for the ESP-IDF 6.0.1 workflow.
+- Sigrok/PulseView documentation now includes a persistent combined decoder installation flow so built-in decoders such as `CAN` stay visible alongside `Pylon CAN` and `Pylon RS485`.
 - Local VS Code ESP-IDF settings were removed from version control and ignored because they contain machine-specific paths.
 - Flash size is configured for `8MB`, and the app partition was expanded from `1MB` to `7MB`.
 - `bms_decoded_packet_t` now carries richer decoded telemetry for protocols that expose per-cell voltages, per-sensor temperatures, warning/protection/fault masks, status flags, and balance flags.
