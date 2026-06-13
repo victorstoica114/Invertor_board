@@ -298,6 +298,11 @@ bool pylonRs485BridgeSupportsRoute(const bridge_runtime_settings_t *settings)
             (settings->inverter_line == LINE_RS485) &&
             bridgeProtocolIsRs485Pylon(settings->bms_protocol) &&
             bridgeProtocolIsRs485Pylon(settings->inverter_protocol)) ||
+           ((settings->mode == MODE_BRIDGE) &&
+            (settings->bms_line == LINE_RS485) &&
+            (settings->inverter_line == LINE_CAN) &&
+            bridgeProtocolIsRs485Pylon(settings->bms_protocol) &&
+            (settings->inverter_protocol == PROTOCOL_CAN_PYLON)) ||
            ((settings->bms_line == LINE_CAN) &&
             (settings->inverter_line == LINE_RS485) &&
             ((settings->bms_protocol == PROTOCOL_CAN_PYLON) ||

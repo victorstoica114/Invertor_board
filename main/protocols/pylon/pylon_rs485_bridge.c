@@ -52,9 +52,11 @@ typedef struct {
 } pylonProbeTaskCtx_t;
 
 static pylon_rs485_cache_t s_pylonCache = {
+    .valid42 = false,
     .valid61 = false,
     .valid62 = true,
     .valid63 = false,
+    .info42 = {0},
     .info61 = {0},
     .info62 = "00000000",
     .info63 = {0},
@@ -63,6 +65,7 @@ static pylon_rs485_cache_t s_pylonCache = {
 static pylon_rs485_summary_t s_pylonSummary = {0};
 static pylonProbePending_t s_probePending = {0};
 static pylonForwardPending_t s_forwardPending = {0};
+static uint8_t s_probePreferredAdr = 0;
 static TaskHandle_t s_pylonBmsTask = NULL;
 static TaskHandle_t s_pylonInvTask = NULL;
 static TaskHandle_t s_pylonProbeTaskHandle = NULL;
@@ -74,6 +77,14 @@ static int64_t s_lastCacheBuildDiagUs = 0;
 
 static void telemetryFromSummary(void);
 static void maybeRefreshSyntheticCacheFromUniversal(void);
+static bool pylonSummaryCellStats(uint16_t *minMv,
+                                  uint16_t *maxMv,
+                                  uint8_t *minIdx,
+                                  uint8_t *maxIdx,
+                                  uint32_t *sumMv,
+                                  uint8_t *counted);
+static void updateDecodedLogSnapshot(void);
+static void updateSummary42(void);
 static void updateSummary61(void);
 static void updateSummary63(void);
 
@@ -150,6 +161,16 @@ static bool pylonRs485PassthroughModeEnabled(const bridge_runtime_settings_t *se
            bridgeProtocolIsRs485Pylon(settings->inverter_protocol);
 }
 
+static bool pylonRs485ToCanModeEnabled(const bridge_runtime_settings_t *settings)
+{
+    return (settings != NULL) &&
+           (settings->mode == MODE_BRIDGE) &&
+           (settings->bms_line == LINE_RS485) &&
+           (settings->inverter_line == LINE_CAN) &&
+           bridgeProtocolIsRs485Pylon(settings->bms_protocol) &&
+           (settings->inverter_protocol == PROTOCOL_CAN_PYLON);
+}
+
 static bool pylonSyntheticSourceModeEnabled(const bridge_runtime_settings_t *settings)
 {
     return (settings != NULL) &&
@@ -189,6 +210,10 @@ static uint32_t pylonSyntheticModelStaleMs(const bridge_runtime_settings_t *sett
         if (settings->bms_protocol == PROTOCOL_CAN_DALY) {
             return DALY_CAN_SOURCE_STALE_MS;
         }
+        if ((settings->bms_line == LINE_RS485) &&
+            bridgeProtocolIsRs485Pylon(settings->bms_protocol)) {
+            return PYLON_RS485_SOURCE_STALE_MS;
+        }
     }
     return BRIDGE_SOURCE_STALE_MS;
 }
@@ -201,6 +226,76 @@ static void pylonGetBatteryModelForSettings(const bridge_runtime_settings_t *set
     }
 
     batteryModelGetWithStaleMs(model, pylonSyntheticModelStaleMs(settings));
+}
+
+static float pylonSummaryPackVoltageV(void)
+{
+    const float centiVoltValue = (float)s_pylonSummary.pack_voltage_cv / 100.0f;
+    const float milliVoltValue = (float)s_pylonSummary.raw_word0 / 1000.0f;
+    const float avgCellV =
+        ((float)s_pylonSummary.max_cell_mv + (float)s_pylonSummary.min_cell_mv) / 2000.0f;
+
+    if (avgCellV > 1.5f && milliVoltValue > 0.0f) {
+        const float cellsFromCentiVolt = centiVoltValue / avgCellV;
+        const float cellsFromMilliVolt = milliVoltValue / avgCellV;
+        if (cellsFromCentiVolt > 32.0f &&
+            cellsFromMilliVolt >= 4.0f &&
+            cellsFromMilliVolt <= 32.0f) {
+            return milliVoltValue;
+        }
+    }
+
+    return centiVoltValue;
+}
+
+static void batteryModelFromSummary(universal_battery_model_t *model)
+{
+    const uint8_t status = (s_pylonSummary.status_63 != 0u)
+                               ? s_pylonSummary.status_63
+                               : 0xC0u;
+
+    if (model == NULL) {
+        return;
+    }
+
+    memset(model, 0, sizeof(*model));
+    model->valid = s_pylonSummary.valid;
+    model->updatedMs = (uint32_t)(esp_timer_get_time() / 1000LL);
+    model->packVoltageV = pylonSummaryPackVoltageV();
+    model->packCurrentA = s_pylonSummary.current_a;
+    model->socPct = (s_pylonSummary.soc_pct > 100u) ? 100u : s_pylonSummary.soc_pct;
+    model->sohPct = (s_pylonSummary.soh_pct > 100u) ? 100u : s_pylonSummary.soh_pct;
+    if (model->sohPct == 0u) {
+        model->sohPct = 100u;
+    }
+    model->cycleCount = s_pylonSummary.cycles;
+    model->cellMaxV = (float)s_pylonSummary.max_cell_mv / 1000.0f;
+    model->cellMinV = (float)s_pylonSummary.min_cell_mv / 1000.0f;
+    model->cellMaxIdx = s_pylonSummary.max_cell_idx;
+    model->cellMinIdx = s_pylonSummary.min_cell_idx;
+    model->cellDeltaV = model->cellMaxV - model->cellMinV;
+    if (s_pylonSummary.cell_count > 0u) {
+        uint16_t minMv = 0u;
+        uint16_t maxMv = 0u;
+        uint8_t minIdx = 0u;
+        uint8_t maxIdx = 0u;
+        if (pylonSummaryCellStats(&minMv, &maxMv, &minIdx, &maxIdx, NULL, NULL)) {
+            model->cellMaxV = (float)maxMv / 1000.0f;
+            model->cellMinV = (float)minMv / 1000.0f;
+            model->cellMaxIdx = maxIdx;
+            model->cellMinIdx = minIdx;
+            model->cellDeltaV = model->cellMaxV - model->cellMinV;
+        }
+    }
+    model->temperaturesC[0] = (float)s_pylonSummary.temp_mos_c10 / 10.0f;
+    model->temperaturesC[1] = (float)s_pylonSummary.temp_t1_c10 / 10.0f;
+    model->temperaturesC[2] = (float)s_pylonSummary.temp_t2_c10 / 10.0f;
+    model->temperaturesC[3] = (float)s_pylonSummary.temp_t4_c10 / 10.0f;
+    model->temperaturesC[4] = (float)s_pylonSummary.temp_t5_c10 / 10.0f;
+    model->protocolState = status;
+    model->chargeEnabled = (status & 0x80u) != 0u;
+    model->dischargeEnabled = (status & 0x40u) != 0u;
+    model->balanceEnabled = (status & 0x20u) != 0u;
 }
 
 static bool pylonShouldPublishDecodedLogSnapshot(const bridge_runtime_settings_t *settings)
@@ -297,8 +392,11 @@ static bool pylonBmsSourceFresh(const bridge_runtime_settings_t *settings)
     }
 
     if (settings->bms_line == LINE_RS485) {
+        const uint32_t staleMs = bridgeProtocolIsRs485Pylon(settings->bms_protocol)
+                                     ? PYLON_RS485_SOURCE_STALE_MS
+                                     : BRIDGE_SOURCE_STALE_MS;
         return (s_lastPylonBmsTrafficUs != 0) &&
-               ((nowUs - s_lastPylonBmsTrafficUs) <= ((int64_t)BRIDGE_SOURCE_STALE_MS * 1000LL));
+               ((nowUs - s_lastPylonBmsTrafficUs) <= ((int64_t)staleMs * 1000LL));
     }
 
     return false;
@@ -537,6 +635,57 @@ static uint16_t be16(const uint8_t *p)
 static int16_t be16s(const uint8_t *p)
 {
     return (int16_t)be16(p);
+}
+
+static bool pylonCellVoltageMvValid(uint16_t mv)
+{
+    return mv >= 1500u && mv <= 5000u;
+}
+
+static bool pylonSummaryCellStats(uint16_t *minMv,
+                                  uint16_t *maxMv,
+                                  uint8_t *minIdx,
+                                  uint8_t *maxIdx,
+                                  uint32_t *sumMv,
+                                  uint8_t *counted)
+{
+    uint16_t localMin = UINT16_MAX;
+    uint16_t localMax = 0u;
+    uint8_t localMinIdx = 0u;
+    uint8_t localMaxIdx = 0u;
+    uint32_t localSum = 0u;
+    uint8_t localCounted = 0u;
+
+    for (uint8_t i = 0u;
+         i < s_pylonSummary.cell_count && i < PYLON_RS485_MAX_CELLS;
+         i++) {
+        uint16_t mv = s_pylonSummary.cell_mv[i];
+        if (!pylonCellVoltageMvValid(mv)) {
+            continue;
+        }
+        localSum += mv;
+        localCounted++;
+        if (mv < localMin) {
+            localMin = mv;
+            localMinIdx = (uint8_t)(i + 1u);
+        }
+        if (mv > localMax) {
+            localMax = mv;
+            localMaxIdx = (uint8_t)(i + 1u);
+        }
+    }
+
+    if (localCounted == 0u) {
+        return false;
+    }
+
+    if (minMv != NULL) *minMv = localMin;
+    if (maxMv != NULL) *maxMv = localMax;
+    if (minIdx != NULL) *minIdx = localMinIdx;
+    if (maxIdx != NULL) *maxIdx = localMaxIdx;
+    if (sumMv != NULL) *sumMv = localSum;
+    if (counted != NULL) *counted = localCounted;
+    return true;
 }
 
 static bool modelTempValid(float tempC)
@@ -898,6 +1047,41 @@ void pylonRs485BridgeRefreshSyntheticCacheForTest(void)
 {
     maybeRefreshSyntheticCacheFromUniversal();
 }
+
+bool pylonRs485BridgeCacheInfoForTest(uint8_t cid2, const char *infoAscii)
+{
+    if (infoAscii == NULL) {
+        return false;
+    }
+
+    switch (cid2) {
+        case 0x42:
+            snprintf(s_pylonCache.info42, sizeof(s_pylonCache.info42), "%s", infoAscii);
+            s_pylonCache.valid42 = true;
+            updateSummary42();
+            telemetryFromSummary();
+            return true;
+        case 0x61:
+            snprintf(s_pylonCache.info61, sizeof(s_pylonCache.info61), "%s", infoAscii);
+            s_pylonCache.valid61 = true;
+            updateSummary61();
+            telemetryFromSummary();
+            return true;
+        case 0x62:
+            snprintf(s_pylonCache.info62, sizeof(s_pylonCache.info62), "%s", infoAscii);
+            s_pylonCache.valid62 = true;
+            updateDecodedLogSnapshot();
+            return true;
+        case 0x63:
+            snprintf(s_pylonCache.info63, sizeof(s_pylonCache.info63), "%s", infoAscii);
+            s_pylonCache.valid63 = true;
+            updateSummary63();
+            telemetryFromSummary();
+            return true;
+        default:
+            return false;
+    }
+}
 #endif
 
 static void telemetryFromSummary(void)
@@ -928,7 +1112,14 @@ static void telemetryFromSummary(void)
         }
     }
 
-    if (preferModelTelemetry) {
+    if ((settings.bms_line == LINE_RS485) &&
+        bridgeProtocolIsRs485Pylon(settings.bms_protocol)) {
+        batteryModelFromSummary(&model);
+        if (model.valid) {
+            batteryModelSet(&model);
+            useModelTelemetry = true;
+        }
+    } else if (preferModelTelemetry) {
         pylonGetBatteryModelForSettings(&settings, &model);
         useModelTelemetry = model.valid;
     }
@@ -952,6 +1143,33 @@ static void telemetryFromSummary(void)
     snap.cellMaxIdx = useModelTelemetry ? model.cellMaxIdx : s_pylonSummary.max_cell_idx;
     snap.cellMinIdx = useModelTelemetry ? model.cellMinIdx : s_pylonSummary.min_cell_idx;
     snap.deltaV = useModelTelemetry ? model.cellDeltaV : (snap.cellMaxV - snap.cellMinV);
+    if (s_pylonSummary.cell_count > 0u) {
+        uint16_t minMv = 0u;
+        uint16_t maxMv = 0u;
+        uint8_t minIdx = 0u;
+        uint8_t maxIdx = 0u;
+        uint32_t sumMv = 0u;
+        uint8_t counted = 0u;
+        snap.cellCount = s_pylonSummary.cell_count;
+        if (snap.cellCount > PYLON_RS485_MAX_CELLS) {
+            snap.cellCount = PYLON_RS485_MAX_CELLS;
+        }
+        if (snap.cellCount > 32u) {
+            snap.cellCount = 32u;
+        }
+        for (uint8_t i = 0u; i < snap.cellCount; i++) {
+            snap.cellVoltagesV[i] = (float)s_pylonSummary.cell_mv[i] / 1000.0f;
+        }
+        if (pylonSummaryCellStats(&minMv, &maxMv, &minIdx, &maxIdx, &sumMv, &counted)) {
+            snap.cellMinV = (float)minMv / 1000.0f;
+            snap.cellMaxV = (float)maxMv / 1000.0f;
+            snap.cellMinIdx = minIdx;
+            snap.cellMaxIdx = maxIdx;
+            snap.deltaV = (float)(maxMv - minMv) / 1000.0f;
+            snap.cellDiffV = snap.deltaV;
+            snap.cellAvgV = ((float)sumMv / (float)counted) / 1000.0f;
+        }
+    }
     if (useModelTelemetry) {
         if (modelTempValid(model.temperaturesC[0])) {
             snap.tempMosC = model.temperaturesC[0];
@@ -999,11 +1217,44 @@ static void updateDecodedLogSnapshot(void)
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
     int64_t nowS = esp_timer_get_time() / 1000000LL;
+    char cellList[384] = {0};
+    size_t cellPos = 0u;
+    uint16_t minMv = 0u;
+    uint16_t maxMv = 0u;
+    uint8_t minIdx = 0u;
+    uint8_t maxIdx = 0u;
+    uint32_t sumMv = 0u;
+    uint8_t counted = 0u;
+    bool haveCells = pylonSummaryCellStats(&minMv, &maxMv, &minIdx, &maxIdx, &sumMv, &counted);
+
+    for (uint8_t i = 0u;
+         i < s_pylonSummary.cell_count && i < PYLON_RS485_MAX_CELLS && cellPos < sizeof(cellList);
+         i++) {
+        int written = snprintf(&cellList[cellPos],
+                               sizeof(cellList) - cellPos,
+                               "%s#%u=%.3fV",
+                               (i == 0u) ? "" : " ",
+                               (unsigned)(i + 1u),
+                               (double)s_pylonSummary.cell_mv[i] / 1000.0);
+        if (written <= 0) {
+            break;
+        }
+        if ((size_t)written >= sizeof(cellList) - cellPos) {
+            cellPos = sizeof(cellList) - 1u;
+            break;
+        }
+        cellPos += (size_t)written;
+    }
 
     snprintf(s_pylonDecodedLog,
              sizeof(s_pylonDecodedLog),
              "BMS Decoded Logs\n"
              "Updated: %lld s uptime\n\n"
+             "Pylon 0x42\n"
+             "  valid : %s\n"
+             "  cells : count=%u max=%.3fV#%02u min=%.3fV#%02u avg=%.3fV\n"
+             "  list  : %s\n"
+             "  raw   : [%s]\n\n"
              "Pylon 0x61\n"
              "  valid : %s\n"
              "  pack  : I~=%.2fA  SOC~=%u%%  SOH?~=%u%%  cycles~=%u  w0=0x%04X\n"
@@ -1018,6 +1269,15 @@ static void updateDecodedLogSnapshot(void)
              "  status: 0x%02X\n"
              "  raw   : [%s]\n",
              (long long)nowS,
+             s_pylonCache.valid42 ? "YES" : "NO",
+             (unsigned)s_pylonSummary.cell_count,
+             haveCells ? (double)maxMv / 1000.0 : 0.0,
+             (unsigned)maxIdx,
+             haveCells ? (double)minMv / 1000.0 : 0.0,
+             (unsigned)minIdx,
+             haveCells && counted > 0u ? (double)((float)sumMv / (float)counted) / 1000.0 : 0.0,
+             (cellList[0] != '\0') ? cellList : "-",
+             s_pylonCache.valid42 ? s_pylonCache.info42 : "",
              s_pylonCache.valid61 ? "YES" : "NO",
              (double)s_pylonSummary.current_a,
              (unsigned)s_pylonSummary.soc_pct,
@@ -1206,6 +1466,146 @@ static void logDecodedPylon(const char *ifName, const uint8_t *frame, int len)
     }
 }
 
+static bool pylonParseInfo42SimpleCells(const uint8_t *bytes, int n, uint8_t startPos)
+{
+    uint8_t cellCount = 0u;
+    uint8_t totalCells = 0u;
+    size_t pos = startPos;
+
+    if (bytes == NULL || n <= 0 || pos >= (size_t)n) {
+        return false;
+    }
+
+    cellCount = bytes[pos++];
+    if (cellCount == 0u || cellCount > PYLON_RS485_MAX_CELLS ||
+        pos + ((size_t)cellCount * 2u) > (size_t)n) {
+        return false;
+    }
+
+    memset(s_pylonSummary.cell_mv, 0, sizeof(s_pylonSummary.cell_mv));
+    for (uint8_t i = 0u; i < cellCount; i++) {
+        uint16_t mv = be16(&bytes[pos]);
+        pos += 2u;
+        if (!pylonCellVoltageMvValid(mv)) {
+            return false;
+        }
+        s_pylonSummary.cell_mv[totalCells++] = mv;
+    }
+    s_pylonSummary.cell_count = totalCells;
+    return totalCells > 0u;
+}
+
+static bool pylonParseInfo42PackCells(const uint8_t *bytes, int n)
+{
+    uint8_t packCount = 0u;
+    uint8_t totalCells = 0u;
+    size_t pos = 0u;
+
+    if (bytes == NULL || n < 2) {
+        return false;
+    }
+
+    packCount = bytes[pos++];
+    if (packCount == 0u || packCount > 16u) {
+        return false;
+    }
+
+    memset(s_pylonSummary.cell_mv, 0, sizeof(s_pylonSummary.cell_mv));
+    for (uint8_t pack = 0u; pack < packCount && pos < (size_t)n; pack++) {
+        uint8_t cellCount = bytes[pos++];
+        if (cellCount == 0u || cellCount > PYLON_RS485_MAX_CELLS ||
+            pos + ((size_t)cellCount * 2u) > (size_t)n) {
+            return false;
+        }
+
+        for (uint8_t i = 0u; i < cellCount; i++) {
+            uint16_t mv = be16(&bytes[pos]);
+            pos += 2u;
+            if (!pylonCellVoltageMvValid(mv)) {
+                return false;
+            }
+            if (totalCells < PYLON_RS485_MAX_CELLS) {
+                s_pylonSummary.cell_mv[totalCells++] = mv;
+            }
+        }
+
+        if (pos >= (size_t)n) {
+            break;
+        }
+
+        uint8_t tempCount = bytes[pos++];
+        if (tempCount > 16u || pos + ((size_t)tempCount * 2u) > (size_t)n) {
+            return false;
+        }
+        pos += (size_t)tempCount * 2u;
+
+        /*
+         * The remaining per-pack 0x42 fields are pack current, pack voltage,
+         * capacities, cycle count, and compatibility bytes. They are not needed
+         * for per-cell telemetry and some BMS variants trim this tail, so keep
+         * parsing tolerant after the cells and temperatures.
+         */
+        if (pack + 1u < packCount) {
+            if (pos + 12u > (size_t)n) {
+                return false;
+            }
+            pos += 12u;
+        }
+    }
+
+    s_pylonSummary.cell_count = totalCells;
+    return totalCells > 0u;
+}
+
+static void updateSummary42(void)
+{
+    uint8_t bytes[160];
+    int n = parseHexAsciiPayload(s_pylonCache.info42, bytes, (int)sizeof(bytes));
+    uint16_t minMv = 0u;
+    uint16_t maxMv = 0u;
+    uint8_t minIdx = 0u;
+    uint8_t maxIdx = 0u;
+    uint32_t sumMv = 0u;
+    uint8_t counted = 0u;
+    bool parsed = false;
+
+    if (!s_pylonCache.valid42 || n < 3) {
+        return;
+    }
+
+    parsed = pylonParseInfo42PackCells(bytes, n);
+    if (!parsed) {
+        parsed = pylonParseInfo42SimpleCells(bytes, n, 0u);
+    }
+    if (!parsed) {
+        ESP_LOGW(EXAMPLE_TAG, "RS485 PYLON 0x42 parse failed: bytes=%d raw=[%s]", n, s_pylonCache.info42);
+        s_pylonSummary.cell_count = 0u;
+        return;
+    }
+
+    if (pylonSummaryCellStats(&minMv, &maxMv, &minIdx, &maxIdx, &sumMv, &counted)) {
+        s_pylonSummary.min_cell_mv = minMv;
+        s_pylonSummary.max_cell_mv = maxMv;
+        s_pylonSummary.min_cell_idx = minIdx;
+        s_pylonSummary.max_cell_idx = maxIdx;
+    }
+
+    if (pylonDiagLogsEnabled()) {
+        ESP_LOGI(EXAMPLE_TAG, "RS485 PYLON 0x42");
+        ESP_LOGI(EXAMPLE_TAG,
+                 "  cells: count=%u max=%.3fV#%02u min=%.3fV#%02u avg=%.3fV",
+                 (unsigned)s_pylonSummary.cell_count,
+                 (double)maxMv / 1000.0,
+                 (unsigned)maxIdx,
+                 (double)minMv / 1000.0,
+                 (unsigned)minIdx,
+                 (counted > 0u) ? (double)((float)sumMv / (float)counted) / 1000.0 : 0.0);
+        ESP_LOGI(EXAMPLE_TAG, "  raw  : [%s]", s_pylonCache.info42);
+    }
+
+    updateDecodedLogSnapshot();
+}
+
 static void updateSummary61(void)
 {
     uint8_t bytes[80];
@@ -1231,6 +1631,14 @@ static void updateSummary61(void)
     s_pylonSummary.temp_t2_c10 = (int16_t)(be16(&bytes[25]) - 2731);
     s_pylonSummary.temp_t4_c10 = (int16_t)(be16(&bytes[29]) - 2731);
     s_pylonSummary.temp_t5_c10 = (int16_t)(be16(&bytes[31]) - 2731);
+    {
+        const float packVoltageV = pylonSummaryPackVoltageV();
+        uint32_t packCv = (uint32_t)(packVoltageV * 100.0f + 0.5f);
+        if (packCv > UINT16_MAX) {
+            packCv = UINT16_MAX;
+        }
+        s_pylonSummary.pack_voltage_cv = (uint16_t)packCv;
+    }
 
     if (pylonDiagLogsEnabled()) {
         ESP_LOGI(EXAMPLE_TAG, "RS485 PYLON 0x61");
@@ -1289,6 +1697,14 @@ static void cacheResponse(uint8_t requestedCid2, const uint8_t *frame, int len)
     if (payloadLen <= 0) return;
 
     switch (requestedCid2) {
+        case 0x42:
+            if (payloadLen >= (int)sizeof(s_pylonCache.info42)) payloadLen = (int)sizeof(s_pylonCache.info42) - 1;
+            memcpy(s_pylonCache.info42, payload, (size_t)payloadLen);
+            s_pylonCache.info42[payloadLen] = '\0';
+            s_pylonCache.valid42 = true;
+            updateSummary42();
+            telemetryFromSummary();
+            break;
         case 0x61:
             if (payloadLen >= (int)sizeof(s_pylonCache.info61)) payloadLen = (int)sizeof(s_pylonCache.info61) - 1;
             memcpy(s_pylonCache.info61, payload, (size_t)payloadLen);
@@ -1331,7 +1747,7 @@ static bool buildCachedResponse(const uint8_t *request,
 {
     uint8_t ver = 0, adr = 0, cid1 = 0, cid2 = 0;
     const char *infoAscii = NULL;
-    char body[192];
+    char body[384];
     uint16_t checksum;
     uint16_t lengthField;
     bridge_runtime_settings_t settings = runtimeSettingsGet();
@@ -1353,6 +1769,13 @@ static bool buildCachedResponse(const uint8_t *request,
     }
 
     switch (cid2) {
+        case 0x42:
+            if (!s_pylonCache.valid42) {
+                ESP_LOGW(EXAMPLE_TAG, "RS485 PYLON FAKE BMS skip: missing cache 0x42");
+                return false;
+            }
+            infoAscii = s_pylonCache.info42;
+            break;
         case 0x61:
             if (!s_pylonCache.valid61) {
                 ESP_LOGW(EXAMPLE_TAG, "RS485 PYLON FAKE BMS skip: missing cache 0x61");
@@ -1403,7 +1826,7 @@ static bool buildCachedResponse(const uint8_t *request,
 
 static void sendCachedResponse(const pylonRs485BridgeCtx_t *ctx, const uint8_t *request, int requestLen)
 {
-    uint8_t response[224];
+    uint8_t response[448];
     uint8_t cid2 = 0;
     uint8_t adr = 0;
     int outLen = 0;
@@ -1435,8 +1858,18 @@ static bool maybeHandleProbeResponse(const pylonRs485BridgeCtx_t *ctx, const uin
     if (!s_probePending.active) return false;
     if (!parsePylonHeader(frame, len, &ver, &adr, &cid1, &code)) return false;
     if (cid1 != 0x46) return false;
-    if (adr != s_probePending.adr) return false;
-    if (code != 0x00 && code != 0x90 && code != 0x91) return false;
+    if (adr != s_probePending.adr) {
+        if (!(s_probePending.cid2 == 0x42u && code == 0x04u)) {
+            return false;
+        }
+    }
+    if (code != 0x00 &&
+        code != s_probePending.cid2 &&
+        code != 0x04 &&
+        code != 0x90 &&
+        code != 0x91) {
+        return false;
+    }
 
     if (pylonDiagLogsEnabled()) {
         ESP_LOGI(EXAMPLE_TAG,
@@ -1448,7 +1881,22 @@ static bool maybeHandleProbeResponse(const pylonRs485BridgeCtx_t *ctx, const uin
                  (unsigned)code,
                  len);
     }
+    if (code == 0x04u || code == 0x90u || code == 0x91u) {
+        if (pylonDiagLogsEnabled()) {
+            ESP_LOGW(EXAMPLE_TAG,
+                     "RS485 PYLON PROBE rejected on %s: reqCid2=0x%02X respCode=0x%02X addr=0x%02X",
+                     ctx->rxName,
+                     (unsigned)s_probePending.cid2,
+                     (unsigned)code,
+                     (unsigned)adr);
+        }
+        s_probePending.active = false;
+        return true;
+    }
     cacheResponse(s_probePending.cid2, frame, len);
+    if (s_probePending.cid2 != 0x42u) {
+        s_probePreferredAdr = adr;
+    }
     if (pylonDiagLogsEnabled()) {
         ESP_LOGI(EXAMPLE_TAG,
                  "RS485 PYLON CACHE update from %s: reqCid2=0x%02X respAddr=0x%02X len=%d",
@@ -1489,7 +1937,7 @@ static void maybeHandleForwardDecode(const pylonRs485BridgeCtx_t *ctx,
     if (!parsePylonHeader(frame, len, &ver, &adr, &cid1, &code)) return;
     if (cid1 != 0x46) return;
 
-    if (ctx->isInverterSide && (code == 0x61 || code == 0x62 || code == 0x63)) {
+    if (ctx->isInverterSide && (code == 0x42 || code == 0x61 || code == 0x62 || code == 0x63)) {
         s_forwardPending.valid = true;
         s_forwardPending.cid2 = code;
         s_forwardPending.reqAdr = adr;
@@ -1521,7 +1969,7 @@ static void maybeHandlePassivePylonDecode(const pylonRs485BridgeCtx_t *ctx,
         return;
     }
 
-    if (code == 0x61 || code == 0x62 || code == 0x63) {
+    if (code == 0x42 || code == 0x61 || code == 0x62 || code == 0x63) {
         s_forwardPending.valid = true;
         s_forwardPending.cid2 = code;
         s_forwardPending.reqAdr = adr;
@@ -1726,18 +2174,25 @@ static void pylonBridgeTask(void *pv)
 static void pylonProbeTask(void *pv)
 {
     static const uint8_t addresses[] = {0x02, 0x12, 0x22, 0x32, 0x42};
-    static const uint8_t cid2Seq[] = {0x61, 0x63, 0x62};
+    static const uint8_t cid2Seq[] = {0x61, 0x42, 0x63, 0x62};
+    static const char *cellInfoPayloads[] = {"FF", "00", "01", NULL};
     pylonProbeTaskCtx_t *ctx = (pylonProbeTaskCtx_t *)pv;
     size_t addrIdx = 0;
+    size_t cellInfoAddrIdx = 0;
+    size_t cellInfoPayloadIdx = 0;
     size_t cidIdx = 0;
+    int64_t cellInfoRetryAfterUs = 0;
     uint8_t frame[32];
     int frameLen = 0;
 
     while (1) {
-        uint8_t adr = addresses[addrIdx];
         uint8_t cid2 = cid2Seq[cidIdx];
         int64_t nowUs = esp_timer_get_time();
         bridge_runtime_settings_t settings = runtimeSettingsGet();
+        bool discoverCellInfoAddr = (cid2 == 0x42u) && !s_pylonCache.valid42;
+        uint8_t adr = discoverCellInfoAddr
+                          ? addresses[cellInfoAddrIdx]
+                          : ((s_probePreferredAdr != 0u) ? s_probePreferredAdr : addresses[addrIdx]);
 
         if (pylonProbeShouldWaitForQuiet(settings.mode,
                                          nowUs,
@@ -1747,7 +2202,25 @@ static void pylonProbeTask(void *pv)
             continue;
         }
 
-        if (pylonBuildEmptyRequest(0x20, adr, cid2, frame, sizeof(frame), &frameLen)) {
+        if (discoverCellInfoAddr &&
+            cellInfoRetryAfterUs != 0 &&
+            nowUs < cellInfoRetryAfterUs) {
+            cidIdx = (cidIdx + 1u) % (sizeof(cid2Seq) / sizeof(cid2Seq[0]));
+            vTaskDelay(pdMS_TO_TICKS(800));
+            continue;
+        }
+
+        bool built = (cid2 == 0x42u)
+                         ? pylonBuildRequest(0x20,
+                                             adr,
+                                             cid2,
+                                             cellInfoPayloads[cellInfoPayloadIdx],
+                                             frame,
+                                             sizeof(frame),
+                                             &frameLen)
+                         : pylonBuildEmptyRequest(0x20, adr, cid2, frame, sizeof(frame), &frameLen);
+
+        if (built) {
             s_probePending.active = true;
             s_probePending.adr = adr;
             s_probePending.cid2 = cid2;
@@ -1763,9 +2236,27 @@ static void pylonProbeTask(void *pv)
             forwardFrame("PYLON_PROBE", ctx->probeName, ctx->probeUart, ctx->probeDirPin, frame, frameLen);
         }
 
-        addrIdx = (addrIdx + 1u) % (sizeof(addresses) / sizeof(addresses[0]));
-        if (addrIdx == 0u) {
+        if (discoverCellInfoAddr) {
+            cellInfoPayloadIdx =
+                (cellInfoPayloadIdx + 1u) % (sizeof(cellInfoPayloads) / sizeof(cellInfoPayloads[0]));
+            if (cellInfoPayloadIdx == 0u) {
+                cellInfoAddrIdx = (cellInfoAddrIdx + 1u) % (sizeof(addresses) / sizeof(addresses[0]));
+                if (cellInfoAddrIdx == 0u && !s_pylonCache.valid42) {
+                    cellInfoRetryAfterUs = nowUs + 60000000LL;
+                    if (pylonDiagLogsEnabled()) {
+                        ESP_LOGW(EXAMPLE_TAG,
+                                 "RS485 PYLON 0x42 cell-info scan found no supported response; retrying in 60s");
+                    }
+                }
+            }
             cidIdx = (cidIdx + 1u) % (sizeof(cid2Seq) / sizeof(cid2Seq[0]));
+        } else if (s_probePreferredAdr != 0u) {
+            cidIdx = (cidIdx + 1u) % (sizeof(cid2Seq) / sizeof(cid2Seq[0]));
+        } else {
+            addrIdx = (addrIdx + 1u) % (sizeof(addresses) / sizeof(addresses[0]));
+            if (addrIdx == 0u) {
+                cidIdx = (cidIdx + 1u) % (sizeof(cid2Seq) / sizeof(cid2Seq[0]));
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(800));
     }
@@ -1781,6 +2272,7 @@ bool pylonRs485BridgeSupportsRoute(const bridge_runtime_settings_t *settings)
             (settings->inverter_line == LINE_RS485) &&
             bridgeProtocolIsRs485Pylon(settings->bms_protocol) &&
             bridgeProtocolIsRs485Pylon(settings->inverter_protocol)) ||
+           pylonRs485ToCanModeEnabled(settings) ||
            pylonCanToRs485ModeEnabled(settings) ||
            pylonCanSyntheticSourceModeEnabled(settings);
 }
@@ -1794,6 +2286,8 @@ bool pylonRs485BridgeHandlesCurrentConfig(void)
 void pylonRs485BridgeEnable(void)
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
+    const bool rs485Passthrough = pylonRs485PassthroughModeEnabled(&settings);
+    const bool rs485ToCan = pylonRs485ToCanModeEnabled(&settings);
     static pylonRs485BridgeCtx_t bmsCtx;
     static pylonRs485BridgeCtx_t inverterCtx;
     static pylonProbeTaskCtx_t probeCtx;
@@ -1802,6 +2296,7 @@ void pylonRs485BridgeEnable(void)
     memset(&s_pylonSummary, 0, sizeof(s_pylonSummary));
     memset(&s_probePending, 0, sizeof(s_probePending));
     memset(&s_forwardPending, 0, sizeof(s_forwardPending));
+    s_probePreferredAdr = 0;
     s_lastPylonBmsTrafficUs = 0;
     s_lastPylonInverterTrafficUs = 0;
     snprintf(s_pylonCache.info62, sizeof(s_pylonCache.info62), "00000000");
@@ -1839,12 +2334,14 @@ void pylonRs485BridgeEnable(void)
 #endif
     (void)uart_set_line_inverse(inverterCtx.rxUart, UART_SIGNAL_INV_DISABLE);
 
-    if (pylonRs485PassthroughModeEnabled(&settings)) {
+    if (rs485Passthrough || rs485ToCan) {
         xTaskCreate(pylonBridgeTask, "pylon_bms_rx", 6144, &bmsCtx, 9, &s_pylonBmsTask);
     }
-    xTaskCreate(pylonBridgeTask, "pylon_inv_rx", 6144, &inverterCtx, 9, &s_pylonInvTask);
+    if (settings.inverter_line == LINE_RS485) {
+        xTaskCreate(pylonBridgeTask, "pylon_inv_rx", 6144, &inverterCtx, 9, &s_pylonInvTask);
+    }
 
-    if (pylonRs485PassthroughModeEnabled(&settings) && pylonProbeModeEnabled(settings.mode)) {
+    if ((rs485Passthrough || rs485ToCan) && pylonProbeModeEnabled(settings.mode)) {
         probeCtx.probeName = bmsCtx.rxName;
         probeCtx.probeUart = bmsCtx.rxUart;
         probeCtx.probeDirPin = bmsCtx.rxDirPin;
@@ -1858,6 +2355,8 @@ void pylonRs485BridgeEnable(void)
         if (settings.mode != MODE_BRIDGE) {
             ESP_LOGW(EXAMPLE_TAG, "Pylon CAN->RS485 translation requires Mode=bridge; forward will not answer inverter requests");
         }
+    } else if (rs485ToCan) {
+        ESP_LOGI(EXAMPLE_TAG, "Pylon RS485->CAN translator armed (BMS=RS485_PYLON inverter=CAN_PYLON)");
     } else if (pylonSyntheticSourceModeEnabled(&settings)) {
         ESP_LOGI(EXAMPLE_TAG,
                  "Pylon synthetic responder armed (BMS protocol=%s inverter=RS485_PYLON)",

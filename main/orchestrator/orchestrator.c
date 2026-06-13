@@ -1043,12 +1043,36 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
             return ESP_ERR_INVALID_STATE;
         }
 
-        canDecoderResetCaches();
-        pylonRs485BridgeEnable();
-        canForwardSnifferStart(settings);
-        g_orchestratorCtx.canRs485TranslatorActive = true;
+        memset(&g_orchestratorCtx, 0, sizeof(g_orchestratorCtx));
         g_orchestratorCtx.bmsProtocol = protocolIdFromUiProtocol(settings->bms_protocol);
         g_orchestratorCtx.inverterProtocol = protocolIdFromUiProtocol(settings->inverter_protocol);
+
+        canDecoderResetCaches();
+        pylonRs485BridgeEnable();
+
+        if ((settings->inverter_line == LINE_CAN) &&
+            (settings->inverter_protocol == PROTOCOL_CAN_PYLON)) {
+            g_orchestratorCtx.inverterQueue =
+                xQueueCreate(ORCHESTRATOR_INVERTER_QUEUE_LEN, sizeof(bms_decoded_packet_t));
+            if (g_orchestratorCtx.inverterQueue == NULL) {
+                pylonRs485BridgeStop();
+                orchestratorReset(&g_orchestratorCtx);
+                return ESP_ERR_NO_MEM;
+            }
+
+            esp_err_t err = pylonInverterTaskStart(g_orchestratorCtx.inverterQueue);
+            if (err != ESP_OK) {
+                ESP_LOGW(EXAMPLE_TAG,
+                         "Pylon CAN inverter task failed for RS485_PYLON->CAN_PYLON route (err=0x%x)",
+                         (unsigned)err);
+                pylonRs485BridgeStop();
+                orchestratorReset(&g_orchestratorCtx);
+                return err;
+            }
+        }
+
+        canForwardSnifferStart(settings);
+        g_orchestratorCtx.canRs485TranslatorActive = true;
         ESP_LOGI(EXAMPLE_TAG,
                  "Orchestrator started Pylon RS485 bridge route: BMS(line=%u prot=%u port=%u) -> Inverter(line=%u prot=%u port=%u)",
                  (unsigned)settings->bms_line,

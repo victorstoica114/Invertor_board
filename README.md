@@ -57,6 +57,7 @@ Implemented / available:
 - `RS485_WOW -> RS485_PYLON` translator/responder, intended for JK UART profile `009 - WOW_RS485_Modbus_V1.3`
 - `RS485_DALY -> RS485_PYLON` translator/responder
 - `RS485_DALY -> CAN_PYLON` translator/sender, field-tested as Daly RS485 on `RS485_1` to EASUN Pylon CAN on `CAN2`
+- `RS485_PYLON -> CAN_PYLON` translator/sender, field-tested as JK Pylon RS485 on `RS485_1` to Pylon CAN inverter output on `CAN2`
 - experimental `DALY_CAN -> RS485_PYLON` translator/responder
 - `RS485_PYLON <-> RS485_PYLON` bridge/responder, including the `RS485_PYLON_115200` variant
 - `CAN_PYLON -> RS485_PYLON` synthetic responder/bridge, including the `RS485_PYLON_115200` variant
@@ -89,8 +90,9 @@ Current bridge-mode route matrix:
 | RS485_WOW -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=WOW_MODBUS`, `inv_protocol=RS485_PYLON` | Active initial implementation; covers JK UART profile `009` with PACE-compatible map |
 | RS485_DALY -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=DALY_RS485`, `inv_protocol=RS485_PYLON` | Active |
 | RS485_DALY -> CAN_PYLON translator | `bms_line=RS485`, `inv_line=CAN`, `bms_protocol=DALY_RS485`, `inv_protocol=CAN_PYLON` | Active; field-tested with EASUN 24V |
+| RS485_PYLON -> CAN_PYLON translator | `bms_line=RS485`, `inv_line=CAN`, `bms_protocol in {RS485_PYLON,RS485_PYLON_115200}`, `inv_protocol=CAN_PYLON` | Active; field-tested with JK Pylon RS485 at 9600 |
 | DALY_CAN -> RS485_PYLON translator | `bms_line=CAN`, `inv_line=RS485`, `bms_protocol=DALY_CAN`, `inv_protocol=RS485_PYLON` | Experimental; protocol task implemented, live CAN link not validated |
-| Pylon RS485 bridge | `RS485_PYLON<->RS485_PYLON`, `CAN_PYLON->RS485_PYLON`, `CAN_DEYE->RS485_PYLON`, or `JKBMS_CAN_250K->RS485_PYLON`, with `RS485_PYLON_115200` accepted on RS485 sides | Active |
+| Pylon RS485 bridge | `RS485_PYLON<->RS485_PYLON`, `RS485_PYLON->CAN_PYLON`, `CAN_PYLON->RS485_PYLON`, `CAN_DEYE->RS485_PYLON`, or `JKBMS_CAN_250K->RS485_PYLON`, with `RS485_PYLON_115200` accepted on RS485 sides | Active |
 | Generic orchestrator route | any other valid combination | Active, depends on protocol task maturity |
 
 ## Runtime Modes
@@ -127,7 +129,7 @@ Bridge mode route selection is done in `orchestratorStartFromRuntime(...)`:
 9. `RS485_SEPLOS -> RS485_PYLON` translator route
 10. `RS485_DALY -> RS485_PYLON` translator route
 11. `DALY_CAN -> RS485_PYLON` translator route
-12. `Pylon RS485 bridge` route (`RS485_PYLON<->RS485_PYLON` or `CAN_PYLON->RS485_PYLON`)
+12. `Pylon RS485 bridge` route (`RS485_PYLON<->RS485_PYLON`, `RS485_PYLON->CAN_PYLON`, or `CAN_PYLON->RS485_PYLON`)
 13. fallback generic orchestrator route (`protocol_id_t` based)
 
 ## Integration Notes
@@ -184,6 +186,51 @@ Fake-data behavior:
 - Fake data is runtime-only. Reboot, reset, or flashing clears it and it must be
   reapplied from the web UI or `/api/fake_bms`.
 
+### Field Status: JK Pylon RS485 to EASUN Pylon CAN
+
+As of the 2026-06-03 field session, a JK BMS configured for `PYLON RS485`
+can feed a Pylon CAN inverter path through the bridge.
+
+Bench setup that worked:
+
+- JK BMS is configured for `PYLON RS485` at `9600 bps` and connected to
+  `RS485_1`.
+- Inverter side is configured as `CAN_PYLON` on `CAN2`.
+- Firmware route: `MODE_BRIDGE`, `PROTOCOL_RS485_PYLON -> PROTOCOL_CAN_PYLON`.
+- Current `config.h` defaults are set for this bench route because
+  `RUNTIME_SETTINGS_FORCE_DEFAULTS=1` makes boot ignore stored NVS settings.
+
+Validated live values:
+
+- `/api/settings` after reboot reported `bms_line=RS485`,
+  `bms_protocol=RS485_PYLON`, `bms_port=1`, `inverter_line=CAN`,
+  `inverter_protocol=CAN_PYLON`, `inverter_port=2`.
+- `/api/telemetry` reported fresh `RS485_1` / `RS485_PYLON` data with
+  `SOC=100%`, pack voltage around `57.14..57.15 V`, cell max/min around
+  `3.573/3.571 V`, and Pylon status `0xC0`.
+- Serial logs showed valid `0x61` and `0x63` Pylon RS485 responses with
+  `chk=OK`, followed by `Pylon CAN inverter TX on CAN2`.
+- The firmware can parse Pylon `0x42` cell-information responses and publish
+  the full per-cell voltage list when a BMS exposes that frame. The tested JK
+  `PYLON RS485` profile did not expose it: `0x42` with `FF`, `00`, `01`, or an
+  empty payload was rejected on the live `0x02` address with response code
+  `0x04`; the other tested Pylon pack addresses did not answer. For this JK
+  profile the UI/API therefore shows only the `0x61` cell max/min values, not
+  `cells_v[]`.
+
+Implementation details that matter:
+
+- The active Pylon RS485 probe discovers the live BMS response address
+  (`0x02` on the tested JK setup) and then keeps using that address instead of
+  cycling slowly through every candidate address.
+- JK-style Pylon RS485 `0x61` responses can encode the first voltage word as a
+  raw millivolt-like pack value. The firmware normalizes that value before web
+  telemetry and Pylon CAN transmission, so `0xDF34` becomes about `57.14 V`,
+  not `571.4 V`.
+- `PYLON_RS485_SOURCE_STALE_MS` is `10000` ms. If the RS485 source disappears,
+  the Pylon CAN sender stops after this freshness window instead of replaying
+  stale data.
+
 ### Field Status: Daly RS485 to EASUN Pylon CAN
 
 As of the 2026-05-30 field session, the Daly 24V pack can drive the EASUN
@@ -192,8 +239,8 @@ inverter through the bridge:
 - BMS side: Daly proprietary RS485 on `RS485_1`.
 - Inverter side: EASUN configured for `PYLON CAN` on `CAN2`.
 - Firmware route: `MODE_BRIDGE`, `PROTOCOL_RS485_DALY -> PROTOCOL_CAN_PYLON`.
-- Current `config.h` defaults are set for this bench route because
-  `RUNTIME_SETTINGS_FORCE_DEFAULTS=1` makes boot ignore stored NVS settings.
+- This remains a validated historical bench route; current `config.h` defaults
+  are now set to the JK Pylon RS485 to Pylon CAN route above.
 
 Validated live values:
 
@@ -490,9 +537,15 @@ These are useful for reference/history, but are not the primary active implement
 
 `main/protocols/pylon/`
 
-- `pylon_rs485_bridge.c`: active bridge/responder for Pylon RS485 routes
+- `pylon_rs485_bridge.c`: active bridge/responder for Pylon RS485 routes,
+  including active BMS-side probing/parsing, optional Pylon `0x42`
+  cell-information decoding when the source exposes it, and
+  `RS485_PYLON -> CAN_PYLON` model publication
 - `pylon_can_protocol.c`: active CAN snapshot decode for Pylon frames
-- `pylon_bms_task.c`, `pylon_inverter_task.c`: scaffold tasks (placeholder logs)
+- `pylon_inverter_task.c`: active Pylon CAN sender from the shared battery
+  model for routes such as `DALY_RS485 -> CAN_PYLON` and
+  `RS485_PYLON -> CAN_PYLON`
+- `pylon_bms_task.c`: scaffold placeholder for future dedicated Pylon BMS task
 - `pylon_registers_map.h`: canonical register map header
 
 `main/protocols/deye/`

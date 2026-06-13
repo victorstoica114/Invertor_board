@@ -46,6 +46,9 @@ static uint32_t bridgeTelemetryStaleMs(uint8_t bmsProtocol)
     if (bmsProtocol == PROTOCOL_CAN_DALY) {
         return DALY_CAN_SOURCE_STALE_MS;
     }
+    if (bridgeProtocolIsRs485Pylon(bmsProtocol)) {
+        return PYLON_RS485_SOURCE_STALE_MS;
+    }
     return WEB_TELEMETRY_STALE_MS;
 }
 

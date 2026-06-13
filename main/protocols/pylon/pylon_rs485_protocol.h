@@ -3,10 +3,14 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#define PYLON_RS485_MAX_CELLS 32u
+
 typedef struct {
+    bool valid42;
     bool valid61;
     bool valid62;
     bool valid63;
+    char info42[256];
     char info61[128];
     char info62[32];
     char info63[64];
@@ -24,6 +28,8 @@ typedef struct {
     uint16_t min_cell_mv;
     uint8_t max_cell_idx;
     uint8_t min_cell_idx;
+    uint8_t cell_count;
+    uint16_t cell_mv[PYLON_RS485_MAX_CELLS];
     int16_t temp_mos_c10;
     int16_t temp_t1_c10;
     int16_t temp_t2_c10;

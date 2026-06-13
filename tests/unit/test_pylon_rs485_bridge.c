@@ -49,6 +49,17 @@ static void configureNativeCanRoute(uint8_t bmsProtocol)
     g_pylonBridgeTestSettings.inverter_port = 2u;
 }
 
+static void configurePylonRs485ToCanRoute(void)
+{
+    g_pylonBridgeTestSettings.mode = MODE_BRIDGE;
+    g_pylonBridgeTestSettings.bms_line = LINE_RS485;
+    g_pylonBridgeTestSettings.inverter_line = LINE_CAN;
+    g_pylonBridgeTestSettings.bms_protocol = PROTOCOL_RS485_PYLON;
+    g_pylonBridgeTestSettings.inverter_protocol = PROTOCOL_CAN_PYLON;
+    g_pylonBridgeTestSettings.bms_port = 1u;
+    g_pylonBridgeTestSettings.inverter_port = 2u;
+}
+
 static void setValidModel(void)
 {
     memset(&g_pylonBridgeTestModel, 0, sizeof(g_pylonBridgeTestModel));
@@ -206,6 +217,37 @@ void test_pylon_native_source_still_publishes_pylon_decoded_log(void)
     TEST_ASSERT_TRUE(strstr(g_pylonBridgeLastDecodedLog, "Pylon 0x61") != NULL);
 }
 
+void test_pylon_info42_cell_information_updates_all_cell_telemetry(void)
+{
+    const char *info61 =
+        "DF360000640000000064640DF400010DF2000B"
+        "0BD90BDC00040BD700030BC30BC300000BC300000BC30BC300000BC30000";
+    const char *info42 =
+        "0110"
+        "0DF40DF30DF30DF30DF30DF30DF30DF3"
+        "0DF30DF30DF20DF30DF30DF30DF30DF3"
+        "02"
+        "0BD90BDC"
+        "0000DF360000000000000000";
+
+    configurePylonRs485ToCanRoute();
+
+    TEST_ASSERT_TRUE(pylonRs485BridgeCacheInfoForTest(0x61u, info61));
+    TEST_ASSERT_TRUE(pylonRs485BridgeCacheInfoForTest(0x42u, info42));
+
+    TEST_ASSERT_TRUE(g_pylonBridgeLastTelemetry.valid);
+    TEST_ASSERT_EQUAL_UINT8(16u, g_pylonBridgeLastTelemetry.cellCount);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 3.572f, g_pylonBridgeLastTelemetry.cellVoltagesV[0]);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 3.570f, g_pylonBridgeLastTelemetry.cellVoltagesV[10]);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 3.572f, g_pylonBridgeLastTelemetry.cellMaxV);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 3.570f, g_pylonBridgeLastTelemetry.cellMinV);
+    TEST_ASSERT_EQUAL_UINT8(1u, g_pylonBridgeLastTelemetry.cellMaxIdx);
+    TEST_ASSERT_EQUAL_UINT8(11u, g_pylonBridgeLastTelemetry.cellMinIdx);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.002f, g_pylonBridgeLastTelemetry.cellDiffV);
+    TEST_ASSERT_TRUE(strstr(g_pylonBridgeLastDecodedLog, "Pylon 0x42") != NULL);
+    TEST_ASSERT_TRUE(strstr(g_pylonBridgeLastDecodedLog, "#11=3.570V") != NULL);
+}
+
 void test_pylon_synthetic_61_generic_sources_project_percentages_only(void)
 {
     char info61[128] = {0};
@@ -258,9 +300,17 @@ void test_pylon_route_supports_115200_variants(void)
 
     TEST_ASSERT_TRUE(pylonRs485BridgeSupportsRoute(&settings));
 
+    settings.inverter_line = LINE_CAN;
+    settings.inverter_protocol = PROTOCOL_CAN_PYLON;
+    settings.bms_line = LINE_RS485;
+    settings.bms_protocol = PROTOCOL_RS485_PYLON;
+
+    TEST_ASSERT_TRUE(pylonRs485BridgeSupportsRoute(&settings));
+
+    settings.inverter_line = LINE_RS485;
+    settings.inverter_protocol = PROTOCOL_RS485_PYLON_115200;
     settings.bms_line = LINE_CAN;
     settings.bms_protocol = PROTOCOL_CAN_PYLON;
-    settings.inverter_protocol = PROTOCOL_RS485_PYLON_115200;
 
     TEST_ASSERT_TRUE(pylonRs485BridgeSupportsRoute(&settings));
 
@@ -311,6 +361,7 @@ int main(void)
     RUN_TEST(test_pylon_synthetic_deye_route_does_not_overwrite_source_decoded_log);
     RUN_TEST(test_pylon_synthetic_jkbms_can_route_does_not_overwrite_source_telemetry);
     RUN_TEST(test_pylon_native_source_still_publishes_pylon_decoded_log);
+    RUN_TEST(test_pylon_info42_cell_information_updates_all_cell_telemetry);
     RUN_TEST(test_pylon_synthetic_61_generic_sources_project_percentages_only);
     RUN_TEST(test_pylon_synthetic_61_native_can_sources_project_pack_voltage_and_current);
     RUN_TEST(test_pylon_synthetic_payloads_reject_missing_model);

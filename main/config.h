@@ -95,6 +95,10 @@
 /* Source freshness window for fail-safe (stop answering if source is stale). */
 #define BRIDGE_SOURCE_STALE_MS 2000u
 
+/* Pylon RS485 active probe cycles through a few commands/addresses. Keep the
+ * source alive between valid 0x61/0x63 replies while still failing safe. */
+#define PYLON_RS485_SOURCE_STALE_MS 10000u
+
 /* Telemetry cache max age before UI hides stale values. */
 #define WEB_TELEMETRY_STALE_MS 10000u
 
@@ -190,7 +194,7 @@ static inline uint32_t bridgeProtocolCanBitrate(uint8_t protocol)
 
 #define BMS_line LINE_RS485
 #define Inverter_line LINE_CAN
-#define BMS_protocol PROTOCOL_RS485_DALY
+#define BMS_protocol PROTOCOL_RS485_PYLON
 #define Inverter_protocol PROTOCOL_CAN_PYLON
 #define BMS_PORT 1
 #define Inverter_PORT 2

@@ -38,6 +38,8 @@ The goal is practical maintenance:
 - `DALY_RS485` BMS poller/decoder for the Daly proprietary RS485 protocol, including pack telemetry, cell data where exposed, temperatures, MOS/balance state, and failure/status bits.
 - `RS485_DALY -> RS485_PYLON` bridge-mode route for Pylon-compatible inverter responders.
 - `RS485_DALY -> CAN_PYLON` bridge-mode route, field-tested with Daly RS485 on `RS485_1` feeding EASUN Pylon CAN on `CAN2`.
+- `RS485_PYLON -> CAN_PYLON` bridge-mode route, field-tested with JK Pylon RS485 on `RS485_1` feeding Pylon CAN output on `CAN2`.
+- Pylon RS485 `0x42` cell-information parser and host regression coverage, so BMS variants that expose that frame can populate the web/API `cells_v[]` list.
 - Experimental `DALY_CAN` BMS poller/decoder for the Daly proprietary CAN protocol.
 - Experimental `DALY_CAN -> RS485_PYLON` bridge-mode route through the shared battery model and Pylon synthetic responder.
 - Selectable `115200` RS485 variants for `JKBMS_MODBUS` and `RS485_PYLON`, reusing the same decoders/responders as the existing `9600` variants.
@@ -85,8 +87,13 @@ The goal is practical maintenance:
 - Direct Pylon CAN forward mode can now apply runtime fake inverter data before transmitting frames to the inverter.
 - The optional Pylon CAN `16S->8S` scaler remains available behind `CAN_FORWARD_PYLON_16S_TO_8S_ENABLE`, but is disabled by default after the EASUN field test accepted direct JKBMS values.
 - `pylon_inverter_task` now acts as a real Pylon CAN sender when the inverter side is `CAN_PYLON`, using the shared battery model produced by sources such as `DALY_RS485`.
-- The current compile-time default route is `MODE_BRIDGE`, `DALY_RS485` on `RS485_1` to `CAN_PYLON` on `CAN2`, because `RUNTIME_SETTINGS_FORCE_DEFAULTS=1` makes boot use `config.h` defaults.
+- RS485 Pylon summary frames now publish the shared battery model so native Pylon RS485 sources can feed inverter-facing Pylon CAN frames.
+- Pylon RS485 active probing now caches the discovered response address, avoiding long stale gaps after a JK BMS answers on address `0x02`.
+- JK-like Pylon RS485 pack-voltage scaling is normalized from the raw millivolt-like `0x61` word to the real low-voltage pack value before telemetry and CAN transmission.
+- Pylon RS485 active probing now tries common `0x42` cell-information payload variants and backs off after a full unsupported scan to avoid noisy retries on BMS profiles that reject the command.
+- The current compile-time default route is `MODE_BRIDGE`, `RS485_PYLON` on `RS485_1` to `CAN_PYLON` on `CAN2`, because `RUNTIME_SETTINGS_FORCE_DEFAULTS=1` makes boot use `config.h` defaults.
 - Daly RS485 source freshness is kept at `10s`, matching the desired inverter fail-safe behavior when the BMS disappears.
+- Pylon RS485 source freshness is kept at `10s`, so the Pylon CAN sender stops after the active-probe freshness window if the JK/Pylon RS485 source disappears.
 - Daly CAN documentation now records the 2026-05-30 no-ACK field result so future debugging starts at wiring/BMS CAN enablement instead of repeating protocol-level tests.
 
 ### Fixed
@@ -128,6 +135,8 @@ Behavior kept in code:
 - EASUN Pylon CAN is validated on split CAN ports after repairing the inverter CAN transceiver: JKBMS on `CAN1`, EASUN on `CAN2`, direct Pylon CAN forward at `500 kbit/s`.
 - EASUN emits repeated `0x305 [00 00 00 00 00 00 00 00]` frames when its CAN hardware is healthy.
 - EASUN also accepts Daly-derived Pylon CAN from the bridge: Daly RS485 decoded around `28.3 V`, `SOC=99%`, 8 cells, charge/discharge enabled, then sent on `CAN2` as Pylon CAN with status `0xC0`.
+- JK Pylon RS485 also feeds Pylon CAN through the bridge: JK on `RS485_1` at `9600 bps`, `SOC=100%`, pack around `57.14 V`, status `0xC0`, then sent on `CAN2` as Pylon CAN.
+- The tested JK `PYLON RS485` profile does not expose full per-cell voltages through Pylon `0x42`: `FF`, `00`, `01`, and empty-payload requests were rejected on address `0x02` with response code `0x04`, while other candidate pack addresses did not answer. Only `0x61` cell min/max are available in that profile.
 - A `58 V` Pylon CAN snapshot on `CAN1` during this investigation was from the old CAN forward route, not the 24V Daly pack.
 - Daly CAN is implemented but not field-validated: the tested BMS did not ACK `250 kbit/s` extended requests on CAN1 or CAN2, including both the datasheet-style DLC-8 reserved request and the public Linux CAN DLC-0 request form.
 - `Fake Inverter Data` now works as an inverter-facing override for Pylon RS485 passthrough routes as well as synthetic translator routes; remember it is runtime-only and must be reapplied after reset or flash.
