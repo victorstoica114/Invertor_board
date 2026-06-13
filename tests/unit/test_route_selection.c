@@ -417,6 +417,24 @@ void test_route_pylon_rs485_to_can_pylon_starts_probe_and_can_sender(void)
     TEST_ASSERT_EQUAL(1, g_routeStubCanForwardStartCount);
 }
 
+void test_route_can_pylon_to_can_pylon_starts_direct_forward(void)
+{
+    bridge_runtime_settings_t settings = {0};
+
+    settings.mode = MODE_BRIDGE;
+    settings.bms_line = LINE_CAN;
+    settings.bms_protocol = PROTOCOL_CAN_PYLON;
+    settings.bms_port = 1;
+    settings.inverter_line = LINE_CAN;
+    settings.inverter_protocol = PROTOCOL_CAN_PYLON;
+    settings.inverter_port = 2;
+
+    TEST_ASSERT_EQUAL(ESP_OK, orchestratorStartFromRuntime(&settings));
+    TEST_ASSERT_EQUAL(1, g_routeStubCanForwardStartCount);
+    TEST_ASSERT_EQUAL(0, g_routeStubPylonBridgeEnableCount);
+    TEST_ASSERT_EQUAL(0, g_routeStubPylonInverterStartCount);
+}
+
 /**
  * Test: Configuration validation for JKBMS_RS485_NATIVE -> RS485_PYLON bridge
  */
@@ -639,6 +657,7 @@ int main(void)
     RUN_TEST(test_route_seplos_19200_to_rs485_pylon_115200_starts_responder);
     RUN_TEST(test_route_daly_rs485_to_can_pylon_starts_can_sender);
     RUN_TEST(test_route_pylon_rs485_to_can_pylon_starts_probe_and_can_sender);
+    RUN_TEST(test_route_can_pylon_to_can_pylon_starts_direct_forward);
     RUN_TEST(test_route_jkbms_native_to_rs485_pylon_valid);
     RUN_TEST(test_route_jkbms_115200_to_rs485_pylon_starts_responder);
     RUN_TEST(test_route_deye_can_to_rs485_pylon_starts_responder);

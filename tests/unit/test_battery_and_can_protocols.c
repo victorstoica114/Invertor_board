@@ -190,6 +190,68 @@ void test_pylon_can_decode_snapshot_populates_snapshot_and_model(void)
     TEST_ASSERT_TRUE(model.balanceEnabled);
 }
 
+void test_pylon_can_decode_jk_extension_cell_extremes(void)
+{
+    pylon_can_frame_t cache[PYLON_CAN_CACHE_COUNT] = {0};
+    uint8_t f351[8] = {0};
+    uint8_t f355[4] = {0};
+    uint8_t f356[6] = {0};
+    uint8_t f370[8] = {0};
+    uint8_t f371[8] = {0};
+
+    write_le16(&f351[0], 670u);
+    write_le16(&f351[2], 380u);
+    write_le16(&f351[4], 1900u);
+    write_le16(&f351[6], 454u);
+
+    write_le16(&f355[0], 100u);
+    write_le16(&f355[2], 100u);
+
+    write_le16(&f356[0], 5714u);
+    write_le16s(&f356[2], 0);
+    write_le16(&f356[4], 233u);
+
+    write_le16(&f370[PYLON_CAN_370_OFF_TEMP_MAX_RAW], 23u);
+    write_le16(&f370[PYLON_CAN_370_OFF_TEMP_MIN_RAW], 23u);
+    write_le16(&f370[PYLON_CAN_370_OFF_CELL_MAX_MV], 3573u);
+    write_le16(&f370[PYLON_CAN_370_OFF_CELL_MIN_MV], 3571u);
+
+    write_le16(&f371[PYLON_CAN_371_OFF_TEMP_MAX_SENS], 4u);
+    write_le16(&f371[PYLON_CAN_371_OFF_TEMP_MIN_SENS], 1u);
+    write_le16(&f371[PYLON_CAN_371_OFF_CELL_MAX_IDX], 1u);
+    write_le16(&f371[PYLON_CAN_371_OFF_CELL_MIN_IDX], 11u);
+
+    set_cache_frame(cache, PYLON_CAN_CACHE_COUNT, PYLON_CAN_ID_LIMITS_351, f351, sizeof(f351));
+    set_cache_frame(cache, PYLON_CAN_CACHE_COUNT, PYLON_CAN_ID_SOC_SOH_355, f355, sizeof(f355));
+    set_cache_frame(cache, PYLON_CAN_CACHE_COUNT, PYLON_CAN_ID_PACK_356, f356, sizeof(f356));
+    set_cache_frame(cache, PYLON_CAN_CACHE_COUNT, PYLON_CAN_ID_JK_EXT_CELL_370, f370, sizeof(f370));
+    set_cache_frame(cache, PYLON_CAN_CACHE_COUNT, PYLON_CAN_ID_JK_EXT_INDEX_371, f371, sizeof(f371));
+
+    pylonCanDecodeSnapshot("CAN1", cache, PYLON_CAN_CACHE_COUNT);
+
+    TEST_ASSERT_TRUE(g_snapshotSet);
+    TEST_ASSERT_TRUE(g_logSet);
+    TEST_ASSERT_TRUE(g_lastSnapshot.valid);
+    assert_float_within(0.001f, 3.573f, g_lastSnapshot.cellMaxV);
+    assert_float_within(0.001f, 3.571f, g_lastSnapshot.cellMinV);
+    assert_float_within(0.001f, 0.002f, g_lastSnapshot.deltaV);
+    assert_float_within(0.001f, 0.002f, g_lastSnapshot.cellDiffV);
+    TEST_ASSERT_EQUAL_UINT8(1u, g_lastSnapshot.cellMaxIdx);
+    TEST_ASSERT_EQUAL_UINT8(11u, g_lastSnapshot.cellMinIdx);
+    assert_float_within(0.01f, 23.0f, g_lastSnapshot.tempT1C);
+    assert_float_within(0.01f, 23.0f, g_lastSnapshot.tempT2C);
+    TEST_ASSERT_TRUE(strstr(g_lastLog, "0x370=[17 00 17 00 F5 0D F3 0D]") != NULL);
+    TEST_ASSERT_TRUE(strstr(g_lastLog, "max=3.573V#1") != NULL);
+
+    battery_model_t model = {0};
+    batteryModelGetReal(&model);
+    TEST_ASSERT_TRUE(model.valid);
+    TEST_ASSERT_EQUAL_UINT8(1u, model.cellMaxIdx);
+    TEST_ASSERT_EQUAL_UINT8(11u, model.cellMinIdx);
+    assert_float_within(0.001f, 3.573f, model.cellMaxV);
+    assert_float_within(0.001f, 3.571f, model.cellMinV);
+}
+
 void test_deye_can_decode_snapshot_populates_snapshot_and_model(void)
 {
     pylon_can_frame_t cache[PYLON_CAN_CACHE_COUNT] = {0};
@@ -542,6 +604,7 @@ int main(void)
 
     RUN_TEST(test_pylon_can_any_valid_handles_empty_cache);
     RUN_TEST(test_pylon_can_decode_snapshot_populates_snapshot_and_model);
+    RUN_TEST(test_pylon_can_decode_jk_extension_cell_extremes);
     RUN_TEST(test_deye_can_decode_snapshot_populates_snapshot_and_model);
     RUN_TEST(test_jkbms_can_250k_decode_snapshot_populates_snapshot_and_model);
     RUN_TEST(test_jkbms_can_250k_extended_temperatures_override_summary);

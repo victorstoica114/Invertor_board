@@ -453,6 +453,19 @@ static bool isCanDalyToRsPylonRoute(const bridge_runtime_settings_t *settings)
            bridgeProtocolIsRs485Pylon(settings->inverter_protocol);
 }
 
+static bool isCanDirectPassthroughRoute(const bridge_runtime_settings_t *settings)
+{
+    if (settings == NULL) {
+        return false;
+    }
+
+    return (settings->mode == MODE_BRIDGE) &&
+           (settings->bms_line == LINE_CAN) &&
+           (settings->inverter_line == LINE_CAN) &&
+           (settings->bms_port != settings->inverter_port) &&
+           (settings->bms_protocol == settings->inverter_protocol);
+}
+
 static void clearTransportBuffers(void)
 {
     uint8_t sink[64];
@@ -608,9 +621,10 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
     const bool rsSeplosToRsPylon = isRsSeplosToRsPylonRoute(settings);
     const bool rsDalyToRsPylon = isRsDalyToRsPylonRoute(settings);
     const bool canDalyToRsPylon = isCanDalyToRsPylonRoute(settings);
+    const bool canDirectPassthrough = isCanDirectPassthroughRoute(settings);
     const bool pylonRs485Route = pylonRs485BridgeSupportsRoute(settings);
     ESP_LOGI(EXAMPLE_TAG,
-             "Orchestrator runtime start: bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) canToRsGrowatt=%s rsJkbmsToRsGrowatt=%s rsJkbmsToRsPylon=%s rsGrowattToRsPylon=%s rsPaceToRsPylon=%s rsVoltronicToRsPylon=%s rsChinaTowerToRsPylon=%s rsWowToRsPylon=%s rsSeplosToRsPylon=%s rsDalyToRsPylon=%s canDalyToRsPylon=%s pylonRs485=%s",
+             "Orchestrator runtime start: bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) canToRsGrowatt=%s rsJkbmsToRsGrowatt=%s rsJkbmsToRsPylon=%s rsGrowattToRsPylon=%s rsPaceToRsPylon=%s rsVoltronicToRsPylon=%s rsChinaTowerToRsPylon=%s rsWowToRsPylon=%s rsSeplosToRsPylon=%s rsDalyToRsPylon=%s canDalyToRsPylon=%s canDirect=%s pylonRs485=%s",
              (unsigned)settings->bms_line,
              (unsigned)settings->bms_protocol,
              (unsigned)settings->bms_port,
@@ -628,6 +642,7 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
              rsSeplosToRsPylon ? "YES" : "NO",
              rsDalyToRsPylon ? "YES" : "NO",
              canDalyToRsPylon ? "YES" : "NO",
+             canDirectPassthrough ? "YES" : "NO",
              pylonRs485Route ? "YES" : "NO");
 
     if (canToRsGrowatt) {
@@ -1034,6 +1049,28 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
                  (unsigned)settings->bms_port,
                  rsNameByPort(settings->inverter_port),
                  (unsigned)settings->inverter_port);
+        return ESP_OK;
+    }
+
+    if (canDirectPassthrough) {
+        if (g_orchestratorTaskHandle != NULL || g_orchestratorCtx.canRs485TranslatorActive) {
+            ESP_LOGW(EXAMPLE_TAG, "Orchestrator already running");
+            return ESP_ERR_INVALID_STATE;
+        }
+
+        memset(&g_orchestratorCtx, 0, sizeof(g_orchestratorCtx));
+        g_orchestratorCtx.bmsProtocol = protocolIdFromUiProtocol(settings->bms_protocol);
+        g_orchestratorCtx.inverterProtocol = protocolIdFromUiProtocol(settings->inverter_protocol);
+
+        canDecoderResetCaches();
+        canForwardSnifferStart(settings);
+        g_orchestratorCtx.canRs485TranslatorActive = true;
+        ESP_LOGI(EXAMPLE_TAG,
+                 "Orchestrator started CAN direct passthrough route: BMS(CAN%u prot=%u) -> Inverter(CAN%u prot=%u)",
+                 (unsigned)settings->bms_port,
+                 (unsigned)settings->bms_protocol,
+                 (unsigned)settings->inverter_port,
+                 (unsigned)settings->inverter_protocol);
         return ESP_OK;
     }
 

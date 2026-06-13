@@ -19,6 +19,8 @@
 #define PYLON_CAN_ID_VENDOR_INFO_35A    0x35Au
 #define PYLON_CAN_ID_STATUS_35C         0x35Cu
 #define PYLON_CAN_ID_ASCII_ID_35E       0x35Eu
+#define PYLON_CAN_ID_JK_EXT_CELL_370    0x370u
+#define PYLON_CAN_ID_JK_EXT_INDEX_371   0x371u
 #define PYLON_CAN_ID_MISC_372           0x372u
 #define PYLON_CAN_ID_CELL_TEMP_373      0x373u
 #define PYLON_CAN_ID_ASCII_374          0x374u
@@ -51,6 +53,21 @@
 #define PYLON_CAN_373_OFF_CELL_MAX_MV   2u
 #define PYLON_CAN_373_OFF_TEMP1_DECIC   4u
 #define PYLON_CAN_373_OFF_TEMP2_DECIC   6u
+
+/*
+ * Optional JK/Pylon extension observed on JK-BMS CAN Pylon profile.
+ * 0x370 uses raw degrees C for small temperature values and mV for cell
+ * extremes. 0x371 carries the related sensor/cell indices.
+ */
+#define PYLON_CAN_370_OFF_TEMP_MAX_RAW  0u
+#define PYLON_CAN_370_OFF_TEMP_MIN_RAW  2u
+#define PYLON_CAN_370_OFF_CELL_MAX_MV   4u
+#define PYLON_CAN_370_OFF_CELL_MIN_MV   6u
+
+#define PYLON_CAN_371_OFF_TEMP_MAX_SENS 0u
+#define PYLON_CAN_371_OFF_TEMP_MIN_SENS 2u
+#define PYLON_CAN_371_OFF_CELL_MAX_IDX  4u
+#define PYLON_CAN_371_OFF_CELL_MIN_IDX  6u
 
 /* Optional/placeholder Modbus map kept for future Pylon RS485 extensions. */
 #include "pylon_register_map.h"

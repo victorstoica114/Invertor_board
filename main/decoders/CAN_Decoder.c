@@ -45,6 +45,20 @@ static inline uint16_t can_le16(const uint8_t *p);
 static inline int16_t can_le16s(const uint8_t *p);
 static void canUpdateUniversalModelFromGrowattCache(const char *ifname);
 
+static bool canPylonCellExtremesValid(uint16_t cellMinMv, uint16_t cellMaxMv)
+{
+    return cellMinMv >= 1500u &&
+           cellMinMv <= 5000u &&
+           cellMaxMv >= 1500u &&
+           cellMaxMv <= 5000u &&
+           cellMaxMv >= cellMinMv;
+}
+
+static float canPylonDecodeTempRaw(uint16_t raw)
+{
+    return (raw <= 200u) ? (float)raw : ((float)raw / 10.0f);
+}
+
 static float canCorrectPylonPackVoltage(float rawPackVoltageV, float chargeVoltageLimitV)
 {
     if (rawPackVoltageV > 0.0f &&
@@ -195,11 +209,38 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
     }
 
     if (!deyeProtocol && canPylonGetFrameById(local, 0x373u, &f373) && f373->dlc >= 8u) {
-        model.cellMinV = (float)can_le16(&f373->data[0]) / 1000.0f;
-        model.cellMaxV = (float)can_le16(&f373->data[2]) / 1000.0f;
-        model.cellDeltaV = model.cellMaxV - model.cellMinV;
+        uint16_t cellMinMv = can_le16(&f373->data[PYLON_CAN_373_OFF_CELL_MIN_MV]);
+        uint16_t cellMaxMv = can_le16(&f373->data[PYLON_CAN_373_OFF_CELL_MAX_MV]);
+        if (canPylonCellExtremesValid(cellMinMv, cellMaxMv)) {
+            model.cellMinV = (float)cellMinMv / 1000.0f;
+            model.cellMaxV = (float)cellMaxMv / 1000.0f;
+            model.cellDeltaV = model.cellMaxV - model.cellMinV;
+        }
         model.temperaturesC[1] = (float)can_le16(&f373->data[4]) / 10.0f;
         model.temperaturesC[2] = (float)can_le16(&f373->data[6]) / 10.0f;
+    }
+
+    if (!deyeProtocol && canPylonGetFrameById(local, PYLON_CAN_ID_JK_EXT_CELL_370, &f370) && f370->dlc >= 8u) {
+        uint16_t cellMaxMv = can_le16(&f370->data[PYLON_CAN_370_OFF_CELL_MAX_MV]);
+        uint16_t cellMinMv = can_le16(&f370->data[PYLON_CAN_370_OFF_CELL_MIN_MV]);
+        if (canPylonCellExtremesValid(cellMinMv, cellMaxMv)) {
+            model.temperaturesC[1] = canPylonDecodeTempRaw(can_le16(&f370->data[PYLON_CAN_370_OFF_TEMP_MAX_RAW]));
+            model.temperaturesC[2] = canPylonDecodeTempRaw(can_le16(&f370->data[PYLON_CAN_370_OFF_TEMP_MIN_RAW]));
+            model.cellMaxV = (float)cellMaxMv / 1000.0f;
+            model.cellMinV = (float)cellMinMv / 1000.0f;
+            model.cellDeltaV = model.cellMaxV - model.cellMinV;
+        }
+    }
+
+    if (!deyeProtocol && canPylonGetFrameById(local, PYLON_CAN_ID_JK_EXT_INDEX_371, &f371) && f371->dlc >= 8u) {
+        uint16_t cellMaxIdx = can_le16(&f371->data[PYLON_CAN_371_OFF_CELL_MAX_IDX]);
+        uint16_t cellMinIdx = can_le16(&f371->data[PYLON_CAN_371_OFF_CELL_MIN_IDX]);
+        if (cellMaxIdx >= 1u && cellMaxIdx <= 32u) {
+            model.cellMaxIdx = (uint8_t)cellMaxIdx;
+        }
+        if (cellMinIdx >= 1u && cellMinIdx <= 32u) {
+            model.cellMinIdx = (uint8_t)cellMinIdx;
+        }
     }
 
     if (deyeProtocol && canPylonGetFrameById(local, DEYE_CAN_ID_TEMP_CELL_370, &f370) && f370->dlc >= 8u) {

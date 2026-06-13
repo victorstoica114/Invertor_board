@@ -39,6 +39,20 @@ static inline int16_t pylonCanLe16s(const uint8_t *p)
     return (int16_t)pylonCanLe16(p);
 }
 
+static bool pylonCanCellExtremesValid(uint16_t cellMinMv, uint16_t cellMaxMv)
+{
+    return cellMinMv >= 1500u &&
+           cellMinMv <= 5000u &&
+           cellMaxMv >= 1500u &&
+           cellMaxMv <= 5000u &&
+           cellMaxMv >= cellMinMv;
+}
+
+static float pylonCanDecodeTempRaw(uint16_t raw)
+{
+    return (raw <= 200u) ? (float)raw : ((float)raw / 10.0f);
+}
+
 static float pylonCanCorrectPackVoltage(float rawPackVoltageV, float chargeVoltageLimitV)
 {
     if (rawPackVoltageV > 0.0f &&
@@ -121,6 +135,8 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
     const pylon_can_frame_t *f35A = pylonCanFrameById(cache, count, 0x35Au);
     const pylon_can_frame_t *f35C = pylonCanFrameById(cache, count, 0x35Cu);
     const pylon_can_frame_t *f35E = pylonCanFrameById(cache, count, 0x35Eu);
+    const pylon_can_frame_t *f370 = pylonCanFrameById(cache, count, PYLON_CAN_ID_JK_EXT_CELL_370);
+    const pylon_can_frame_t *f371 = pylonCanFrameById(cache, count, PYLON_CAN_ID_JK_EXT_INDEX_371);
     const pylon_can_frame_t *f372 = pylonCanFrameById(cache, count, 0x372u);
     const pylon_can_frame_t *f373 = pylonCanFrameById(cache, count, 0x373u);
     const pylon_can_frame_t *f374 = pylonCanFrameById(cache, count, 0x374u);
@@ -132,6 +148,8 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
     char raw359[32] = {0};
     char raw35A[32] = {0};
     char raw35C[32] = {0};
+    char raw370[32] = {0};
+    char raw371[32] = {0};
     char raw372[32] = {0};
     char raw373[32] = {0};
     char raw379[32] = {0};
@@ -152,8 +170,11 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
     float cellMaxTentative = 0.0f;
     float tempMinTentative = 0.0f;
     float tempMaxTentative = 0.0f;
+    bool haveCellExtremes = false;
     uint16_t soc = 0;
     uint16_t soh = 0;
+    uint8_t cellMaxIdx = 0u;
+    uint8_t cellMinIdx = 0u;
     uint8_t moduleCount = 0;
     uint8_t status35C = 0;
     universal_battery_model_t model = {0};
@@ -194,11 +215,43 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
         formatCanData(f372->data, f372->dlc, raw372, sizeof(raw372));
     }
     if (f373 && f373->dlc >= 8u) {
-        cellMinTentative = (float)pylonCanLe16(&f373->data[0]) / 1000.0f;
-        cellMaxTentative = (float)pylonCanLe16(&f373->data[2]) / 1000.0f;
+        uint16_t cellMinMv = pylonCanLe16(&f373->data[PYLON_CAN_373_OFF_CELL_MIN_MV]);
+        uint16_t cellMaxMv = pylonCanLe16(&f373->data[PYLON_CAN_373_OFF_CELL_MAX_MV]);
         tempMinTentative = (float)pylonCanLe16(&f373->data[4]) / 10.0f;
         tempMaxTentative = (float)pylonCanLe16(&f373->data[6]) / 10.0f;
         formatCanData(f373->data, f373->dlc, raw373, sizeof(raw373));
+        if (pylonCanCellExtremesValid(cellMinMv, cellMaxMv)) {
+            cellMinTentative = (float)cellMinMv / 1000.0f;
+            cellMaxTentative = (float)cellMaxMv / 1000.0f;
+            haveCellExtremes = true;
+        }
+    }
+    if (f370) {
+        formatCanData(f370->data, f370->dlc, raw370, sizeof(raw370));
+    }
+    if (f371) {
+        formatCanData(f371->data, f371->dlc, raw371, sizeof(raw371));
+    }
+    if (!haveCellExtremes && f370 && f370->dlc >= 8u) {
+        uint16_t cellMaxMv = pylonCanLe16(&f370->data[PYLON_CAN_370_OFF_CELL_MAX_MV]);
+        uint16_t cellMinMv = pylonCanLe16(&f370->data[PYLON_CAN_370_OFF_CELL_MIN_MV]);
+        if (pylonCanCellExtremesValid(cellMinMv, cellMaxMv)) {
+            cellMaxTentative = (float)cellMaxMv / 1000.0f;
+            cellMinTentative = (float)cellMinMv / 1000.0f;
+            tempMaxTentative = pylonCanDecodeTempRaw(pylonCanLe16(&f370->data[PYLON_CAN_370_OFF_TEMP_MAX_RAW]));
+            tempMinTentative = pylonCanDecodeTempRaw(pylonCanLe16(&f370->data[PYLON_CAN_370_OFF_TEMP_MIN_RAW]));
+            haveCellExtremes = true;
+        }
+    }
+    if (haveCellExtremes && f371 && f371->dlc >= 8u) {
+        uint16_t rawMaxIdx = pylonCanLe16(&f371->data[PYLON_CAN_371_OFF_CELL_MAX_IDX]);
+        uint16_t rawMinIdx = pylonCanLe16(&f371->data[PYLON_CAN_371_OFF_CELL_MIN_IDX]);
+        if (rawMaxIdx >= 1u && rawMaxIdx <= 32u) {
+            cellMaxIdx = (uint8_t)rawMaxIdx;
+        }
+        if (rawMinIdx >= 1u && rawMinIdx <= 32u) {
+            cellMinIdx = (uint8_t)rawMinIdx;
+        }
     }
     if (f374) formatCanAscii(f374->data, f374->dlc, ascii374, sizeof(ascii374));
     if (f375) formatCanAscii(f375->data, f375->dlc, ascii375, sizeof(ascii375));
@@ -216,12 +269,15 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
     snap.sohPct = (soh <= 100u) ? (uint8_t)soh : 0u;
     if (cellMaxTentative > 0.0f) {
         snap.cellMaxV = cellMaxTentative;
+        snap.cellMaxIdx = cellMaxIdx;
     }
     if (cellMinTentative > 0.0f) {
         snap.cellMinV = cellMinTentative;
+        snap.cellMinIdx = cellMinIdx;
     }
     if (cellMaxTentative > 0.0f && cellMinTentative > 0.0f) {
         snap.deltaV = cellMaxTentative - cellMinTentative;
+        snap.cellDiffV = snap.deltaV;
     }
     snap.tempMosC = avgTemp;
     snap.tempT1C = tempMinTentative;
@@ -246,8 +302,8 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
     model.dischargeCurrentLimitA = dischargeCurrentLimit;
     model.cellMaxV = cellMaxTentative;
     model.cellMinV = cellMinTentative;
-    model.cellMaxIdx = 0u;
-    model.cellMinIdx = 0u;
+    model.cellMaxIdx = cellMaxIdx;
+    model.cellMinIdx = cellMinIdx;
     model.cellDeltaV = (cellMaxTentative > 0.0f && cellMinTentative > 0.0f) ? (cellMaxTentative - cellMinTentative) : 0.0f;
     model.temperaturesC[0] = avgTemp;
     model.temperaturesC[1] = tempMinTentative;
@@ -268,8 +324,8 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
              "  pack  : V=%.2fV  rawV=%.2fV  I=%.1fA  avgT=%.1fC  SOC=%u%%  SOH=%u%%\n"
              "  limits: chgV=%.1fV  chgI=%.1fA  disI=%.1fA  lowV?=%.1fV\n"
              "  info? : modules=%u  0x359=[%s]  0x35A=[%s]  0x35C=[%s]\n"
-             "  ext?  : 0x372=[%s]  0x373=[%s]\n"
-             "  cells?: min=%.3fV  max=%.3fV  dV=%.3fV  tMin?=%.1fC  tMax?=%.1fC\n"
+             "  ext?  : 0x370=[%s]  0x371=[%s]  0x372=[%s]  0x373=[%s]\n"
+             "  cells?: max=%.3fV#%u  min=%.3fV#%u  dV=%.3fV  tMin?=%.1fC  tMax?=%.1fC\n"
              "  text  : 0x35E='%s'  0x374='%s'  0x375='%s'  0x376='%s'  0x377='%s'\n"
              "  misc? : 0x379=[%s]\n"
              "  undecoded/tentative: 0x359,0x35A,0x35C,0x372,0x373,0x374-0x377,0x379",
@@ -289,10 +345,14 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
              raw359[0] ? raw359 : "-",
              raw35A[0] ? raw35A : "-",
              raw35C[0] ? raw35C : "-",
+             raw370[0] ? raw370 : "-",
+             raw371[0] ? raw371 : "-",
              raw372[0] ? raw372 : "-",
              raw373[0] ? raw373 : "-",
-             (double)cellMinTentative,
              (double)cellMaxTentative,
+             (unsigned)cellMaxIdx,
+             (double)cellMinTentative,
+             (unsigned)cellMinIdx,
              (double)((cellMaxTentative > 0.0f && cellMinTentative > 0.0f) ? (cellMaxTentative - cellMinTentative) : 0.0f),
              (double)tempMinTentative,
              (double)tempMaxTentative,
@@ -323,9 +383,11 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
              (double)dischargeCurrentLimit,
              (double)lowerDischargeVoltTentative);
     ESP_LOGI(TAG,
-             "  cells?: min=%.3fV max=%.3fV dV=%.3fV tMin?=%.1fC tMax?=%.1fC",
-             (double)cellMinTentative,
+             "  cells?: max=%.3fV#%u min=%.3fV#%u dV=%.3fV tMin?=%.1fC tMax?=%.1fC",
              (double)cellMaxTentative,
+             (unsigned)cellMaxIdx,
+             (double)cellMinTentative,
+             (unsigned)cellMinIdx,
              (double)((cellMaxTentative > 0.0f && cellMinTentative > 0.0f) ? (cellMaxTentative - cellMinTentative) : 0.0f),
              (double)tempMinTentative,
              (double)tempMaxTentative);
