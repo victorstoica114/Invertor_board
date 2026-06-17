@@ -51,6 +51,14 @@ typedef struct {
     gpio_num_t probeDirPin;
 } pylonProbeTaskCtx_t;
 
+#if PYLON_RS485_ACTIVE_INVERTER_PUSH_ENABLE
+typedef struct {
+    const char *txName;
+    uart_port_t txUart;
+    gpio_num_t txDirPin;
+} pylonPushTaskCtx_t;
+#endif
+
 static pylon_rs485_cache_t s_pylonCache = {
     .valid42 = false,
     .valid61 = false,
@@ -69,11 +77,16 @@ static uint8_t s_probePreferredAdr = 0;
 static TaskHandle_t s_pylonBmsTask = NULL;
 static TaskHandle_t s_pylonInvTask = NULL;
 static TaskHandle_t s_pylonProbeTaskHandle = NULL;
+#if PYLON_RS485_ACTIVE_INVERTER_PUSH_ENABLE
+static TaskHandle_t s_pylonPushTaskHandle = NULL;
+#endif
 static char s_pylonDecodedLog[2048];
 static int64_t s_lastPylonBmsTrafficUs = 0;
 static int64_t s_lastPylonInverterTrafficUs = 0;
 static int64_t s_lastCanSourceDiagUs = 0;
 static int64_t s_lastCacheBuildDiagUs = 0;
+
+#define PYLON_RS485_BRIDGE_TASK_STACK_BYTES 12288u
 
 static void telemetryFromSummary(void);
 static void maybeRefreshSyntheticCacheFromUniversal(void);
@@ -87,6 +100,14 @@ static void updateDecodedLogSnapshot(void);
 static void updateSummary42(void);
 static void updateSummary61(void);
 static void updateSummary63(void);
+static bool buildPylonCachedResponseFrame(uint8_t ver,
+                                          uint8_t adr,
+                                          uint8_t cid2,
+                                          uint8_t *response,
+                                          int responseSize,
+                                          int *outLen,
+                                          uint8_t *outCid2,
+                                          uint8_t *outAdr);
 
 static const char *protocolToStrLocal(uint8_t protocol)
 {
@@ -155,10 +176,17 @@ static bool pylonCanSyntheticSourceModeEnabled(const bridge_runtime_settings_t *
 static bool pylonRs485PassthroughModeEnabled(const bridge_runtime_settings_t *settings)
 {
     return (settings != NULL) &&
+           (settings->mode == MODE_BRIDGE) &&
            (settings->bms_line == LINE_RS485) &&
            (settings->inverter_line == LINE_RS485) &&
            bridgeProtocolIsRs485Pylon(settings->bms_protocol) &&
            bridgeProtocolIsRs485Pylon(settings->inverter_protocol);
+}
+
+static bool pylonRs485CachedResponderModeEnabled(const bridge_runtime_settings_t *settings)
+{
+    (void)settings;
+    return false;
 }
 
 static bool pylonRs485ToCanModeEnabled(const bridge_runtime_settings_t *settings)
@@ -171,12 +199,23 @@ static bool pylonRs485ToCanModeEnabled(const bridge_runtime_settings_t *settings
            (settings->inverter_protocol == PROTOCOL_CAN_PYLON);
 }
 
+static bool pylonRs485SourceOnlyModeEnabled(const bridge_runtime_settings_t *settings)
+{
+    return (settings != NULL) &&
+           (settings->mode == MODE_BRIDGE) &&
+           (settings->bms_line == LINE_RS485) &&
+           (settings->inverter_line == LINE_RS485) &&
+           bridgeProtocolIsRs485Pylon(settings->bms_protocol) &&
+           (settings->inverter_protocol == PROTOCOL_RS485_GROWATT);
+}
+
 static bool pylonSyntheticSourceModeEnabled(const bridge_runtime_settings_t *settings)
 {
     return (settings != NULL) &&
            (settings->mode == MODE_BRIDGE) &&
            (settings->inverter_line == LINE_RS485) &&
            bridgeProtocolIsRs485Pylon(settings->inverter_protocol) &&
+           !pylonRs485CachedResponderModeEnabled(settings) &&
            !pylonRs485PassthroughModeEnabled(settings);
 }
 
@@ -400,6 +439,50 @@ static bool pylonBmsSourceFresh(const bridge_runtime_settings_t *settings)
     }
 
     return false;
+}
+
+static void maybeClearNativePylonCacheIfStale(int64_t nowUs)
+{
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+    const uint32_t staleMs = PYLON_RS485_SOURCE_STALE_MS;
+    bool hadNativeCache = false;
+
+    if (settings.bms_line != LINE_RS485 ||
+        !bridgeProtocolIsRs485Pylon(settings.bms_protocol) ||
+        pylonSyntheticSourceModeEnabled(&settings) ||
+        pylonFakeResponderModeEnabled(&settings)) {
+        return;
+    }
+
+    hadNativeCache = s_pylonCache.valid42 ||
+                     s_pylonCache.valid61 ||
+                     s_pylonCache.valid63 ||
+                     s_pylonSummary.valid;
+    if (!hadNativeCache) {
+        return;
+    }
+
+    if ((s_lastPylonBmsTrafficUs != 0) &&
+        ((nowUs - s_lastPylonBmsTrafficUs) <= ((int64_t)staleMs * 1000LL))) {
+        return;
+    }
+
+    s_pylonCache.valid42 = false;
+    s_pylonCache.valid61 = false;
+    s_pylonCache.valid63 = false;
+    snprintf(s_pylonCache.info62, sizeof(s_pylonCache.info62), "00000000");
+    s_pylonCache.valid62 = true;
+    memset(&s_pylonSummary, 0, sizeof(s_pylonSummary));
+    batteryModelClear();
+    bridgeSetTelemetrySnapshot(NULL);
+    bridgeSetDecodedLogSnapshot("");
+
+    if (pylonDiagLogsEnabled() && ((nowUs - s_lastCacheBuildDiagUs) >= 1000000LL)) {
+        ESP_LOGW(EXAMPLE_TAG,
+                 "PYLON native RS485 cache cleared: source stale for >%ums",
+                 (unsigned)staleMs);
+        s_lastCacheBuildDiagUs = nowUs;
+    }
 }
 
 static bool rs485PortUsesHalfDuplex(uart_port_t uart)
@@ -716,6 +799,152 @@ static void encodeHexAscii(const uint8_t *bytes, int len, char *out, size_t outS
     }
 }
 
+static void putFixedAscii(uint8_t *dst, size_t len, const char *src)
+{
+    if (dst == NULL || len == 0u) {
+        return;
+    }
+    memset(dst, 0, len);
+    if (src == NULL) {
+        return;
+    }
+    for (size_t i = 0u; i < len && src[i] != '\0'; i++) {
+        dst[i] = (uint8_t)src[i];
+    }
+}
+
+static uint16_t scaledU16OrDefault(float value, float scale, uint16_t fallback)
+{
+    if (value <= 0.0f || scale <= 0.0f) {
+        return fallback;
+    }
+
+    float scaled = (value * scale) + 0.5f;
+    if (scaled < 0.0f) {
+        return fallback;
+    }
+    if (scaled > 65535.0f) {
+        return UINT16_MAX;
+    }
+    return (uint16_t)scaled;
+}
+
+static uint8_t pylonStatusFromModelOrSummary(const universal_battery_model_t *model)
+{
+    uint8_t status = (uint8_t)(s_pylonSummary.status_63 & 0xFFu);
+
+    if (status != 0u) {
+        return status;
+    }
+    if (model != NULL && model->valid) {
+        if ((model->protocolState & 0xFFu) != 0u) {
+            return (uint8_t)(model->protocolState & 0xFFu);
+        }
+        if (model->chargeEnabled) {
+            status |= 0x80u;
+        }
+        if (model->dischargeEnabled) {
+            status |= 0x40u;
+        }
+        if (model->balanceEnabled) {
+            status |= 0x20u;
+        }
+    }
+
+    return status != 0u ? status : 0xC0u;
+}
+
+static bool buildPylonSupplementalInfo(uint8_t cid2, char *out, size_t outSize)
+{
+    universal_battery_model_t model;
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+    uint8_t bytes[160];
+    uint16_t chargeVoltageCv = 0u;
+    uint16_t minPackVoltageCv = 4500u;
+    uint16_t chargeCurrentDca = 1000u;
+    uint16_t dischargeCurrentDca = 1000u;
+    uint16_t maxCellMv = 3650u;
+    uint16_t minCellMv = 2900u;
+    uint8_t status = 0xC0u;
+    int len = 0;
+
+    if (out == NULL || outSize == 0u) {
+        return false;
+    }
+    out[0] = '\0';
+
+    pylonGetBatteryModelForSettings(&settings, &model);
+    chargeVoltageCv = scaledU16OrDefault(model.chargeVoltageLimitV, 100.0f, 5760u);
+    chargeCurrentDca = scaledU16OrDefault(model.chargeCurrentLimitA, 10.0f, 1000u);
+    dischargeCurrentDca = scaledU16OrDefault(model.dischargeCurrentLimitA, 10.0f, 1000u);
+    maxCellMv = scaledU16OrDefault(model.cellMaxV > 0.0f ? (model.cellMaxV + 0.10f) : 0.0f,
+                                   1000.0f,
+                                   maxCellMv);
+    minCellMv = scaledU16OrDefault(model.cellMinV > 0.0f ? (model.cellMinV - 0.45f) : 0.0f,
+                                   1000.0f,
+                                   minCellMv);
+    status = pylonStatusFromModelOrSummary(&model);
+
+    switch (cid2) {
+        case 0x4F:
+            bytes[0] = 0x20u;
+            len = 1;
+            break;
+
+        case 0x51:
+            putFixedAscii(&bytes[0], 10u, "PYLON");
+            putFixedAscii(&bytes[10], 1u, "2");
+            putFixedAscii(&bytes[11], 20u, "PYLONTECH");
+            len = 31;
+            break;
+
+        case 0x92:
+            putBe16(&bytes[0], chargeVoltageCv);
+            putBe16(&bytes[2], minPackVoltageCv);
+            putBe16(&bytes[4], chargeCurrentDca);
+            putBe16(&bytes[6], dischargeCurrentDca);
+            bytes[8] = status;
+            len = 9;
+            break;
+
+        case 0x44:
+        case 0x62:
+            memset(bytes, 0, 8u);
+            len = 8;
+            break;
+
+        case 0x47:
+            putBe16(&bytes[0], maxCellMv);
+            putBe16(&bytes[2], minCellMv);
+            putBe16(&bytes[4], minCellMv);
+            putBe16(&bytes[6], (uint16_t)(50 * 10 + 2731));
+            putBe16(&bytes[8], (uint16_t)(-20 * 10 + 2731));
+            putBe16(&bytes[10], chargeCurrentDca);
+            putBe16(&bytes[12], chargeVoltageCv);
+            putBe16(&bytes[14], minPackVoltageCv);
+            putBe16(&bytes[16], minPackVoltageCv);
+            putBe16(&bytes[18], (uint16_t)(50 * 10 + 2731));
+            putBe16(&bytes[20], (uint16_t)(-20 * 10 + 2731));
+            putBe16(&bytes[22], dischargeCurrentDca);
+            len = 24;
+            break;
+
+        case 0x60:
+            putFixedAscii(&bytes[0], 10u, "Battery");
+            putFixedAscii(&bytes[10], 20u, "PYLONTECH");
+            putFixedAscii(&bytes[30], 2u, "20");
+            bytes[32] = 0u;
+            len = 33;
+            break;
+
+        default:
+            return false;
+    }
+
+    encodeHexAscii(bytes, len, out, outSize);
+    return out[0] != '\0';
+}
+
 static bool buildCanDerivedInfo61(char *out, size_t outSize)
 {
     static const uint8_t template61[49] = {
@@ -1006,6 +1235,7 @@ static void maybeRefreshSyntheticCacheFromUniversal(void)
         s_pylonCache.valid62 = false;
         s_pylonCache.valid63 = false;
         memset(&s_pylonSummary, 0, sizeof(s_pylonSummary));
+        bridgeSetTelemetrySnapshot(NULL);
         if (pylonDiagLogsEnabled() && ((nowUs - s_lastCacheBuildDiagUs) >= 1000000LL)) {
             ESP_LOGW(EXAMPLE_TAG,
                      "PYLON synthetic cache cleared: source not fresh (v61=%s v62=%s v63=%s)",
@@ -1043,6 +1273,31 @@ static void maybeRefreshSyntheticCacheFromUniversal(void)
 }
 
 #ifdef HOST_TEST
+bool pylonRs485BridgeUsesCachedResponderForTest(void)
+{
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+    return pylonRs485CachedResponderModeEnabled(&settings);
+}
+
+bool pylonRs485BridgeBuildSupplementalInfoForTest(uint8_t cid2, char *out, size_t outSize)
+{
+    return buildPylonSupplementalInfo(cid2, out, outSize);
+}
+
+void pylonRs485BridgeResetForTest(void)
+{
+    memset(&s_pylonCache, 0, sizeof(s_pylonCache));
+    memset(&s_pylonSummary, 0, sizeof(s_pylonSummary));
+    memset(&s_probePending, 0, sizeof(s_probePending));
+    memset(&s_forwardPending, 0, sizeof(s_forwardPending));
+    s_probePreferredAdr = 0u;
+    s_lastPylonBmsTrafficUs = 0;
+    s_lastPylonInverterTrafficUs = 0;
+    s_lastCacheBuildDiagUs = 0;
+    snprintf(s_pylonCache.info62, sizeof(s_pylonCache.info62), "00000000");
+    s_pylonCache.valid62 = true;
+}
+
 void pylonRs485BridgeRefreshSyntheticCacheForTest(void)
 {
     maybeRefreshSyntheticCacheFromUniversal();
@@ -1122,6 +1377,11 @@ static void telemetryFromSummary(void)
     } else if (preferModelTelemetry) {
         pylonGetBatteryModelForSettings(&settings, &model);
         useModelTelemetry = model.valid;
+        if (!useModelTelemetry) {
+            ESP_LOGD("PYLON_RS485", "[TELEM_FROM_SUMMARY] Synthetic model invalid, clearing telemetry");
+            bridgeSetTelemetrySnapshot(NULL);
+            return;
+        }
     }
 
     snap.valid = true;
@@ -1746,27 +2006,49 @@ static bool buildCachedResponse(const uint8_t *request,
                                 uint8_t *outAdr)
 {
     uint8_t ver = 0, adr = 0, cid1 = 0, cid2 = 0;
-    const char *infoAscii = NULL;
-    char body[384];
-    uint16_t checksum;
-    uint16_t lengthField;
     bridge_runtime_settings_t settings = runtimeSettingsGet();
     if (!parsePylonHeader(request, requestLen, &ver, &adr, &cid1, &cid2) || cid1 != 0x46) {
         return false;
     }
 
-    bool sourceFresh = pylonBmsSourceFresh(&settings);
-    bool forceFake = pylonSyntheticSourceModeEnabled(&settings) && PYLON_CAN_RS485_FORCE_FAKE_ENABLE;
-
-    maybeRefreshSyntheticCacheFromUniversal();
-
-    if (!sourceFresh && !forceFake) {
+    if (!pylonBmsSourceFresh(&settings) &&
+        !(pylonSyntheticSourceModeEnabled(&settings) && PYLON_CAN_RS485_FORCE_FAKE_ENABLE)) {
         ESP_LOGW(EXAMPLE_TAG,
                  "RS485 PYLON FAKE BMS skip: source not fresh for cid2=0x%02X addr=0x%02X",
                  (unsigned)cid2,
                  (unsigned)adr);
         return false;
     }
+
+    return buildPylonCachedResponseFrame(ver,
+                                         adr,
+                                         cid2,
+                                         response,
+                                         responseSize,
+                                         outLen,
+                                         outCid2,
+                                         outAdr);
+}
+
+static bool buildPylonCachedResponseFrame(uint8_t ver,
+                                          uint8_t adr,
+                                          uint8_t cid2,
+                                          uint8_t *response,
+                                          int responseSize,
+                                          int *outLen,
+                                          uint8_t *outCid2,
+                                          uint8_t *outAdr)
+{
+    const char *infoAscii = NULL;
+    char supplementalInfo[384];
+    char body[768];
+    uint16_t checksum;
+    uint16_t lengthField;
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+    bool forceFake = pylonSyntheticSourceModeEnabled(&settings) && PYLON_CAN_RS485_FORCE_FAKE_ENABLE;
+
+    maybeRefreshSyntheticCacheFromUniversal();
+    (void)forceFake;
 
     switch (cid2) {
         case 0x42:
@@ -1797,6 +2079,20 @@ static bool buildCachedResponse(const uint8_t *request,
             }
             infoAscii = s_pylonCache.info63;
             break;
+        case 0x44:
+        case 0x47:
+        case 0x4F:
+        case 0x51:
+        case 0x60:
+        case 0x92:
+            if (!buildPylonSupplementalInfo(cid2, supplementalInfo, sizeof(supplementalInfo))) {
+                ESP_LOGW(EXAMPLE_TAG,
+                         "RS485 PYLON FAKE BMS skip: failed supplemental cid2=0x%02X",
+                         (unsigned)cid2);
+                return false;
+            }
+            infoAscii = supplementalInfo;
+            break;
         default:
             ESP_LOGW(EXAMPLE_TAG, "RS485 PYLON FAKE BMS skip: unsupported cid2=0x%02X", (unsigned)cid2);
             return false;
@@ -1826,7 +2122,7 @@ static bool buildCachedResponse(const uint8_t *request,
 
 static void sendCachedResponse(const pylonRs485BridgeCtx_t *ctx, const uint8_t *request, int requestLen)
 {
-    uint8_t response[448];
+    uint8_t response[896];
     uint8_t cid2 = 0;
     uint8_t adr = 0;
     int outLen = 0;
@@ -2047,6 +2343,7 @@ static void processPylonBridgeFrame(pylonRs485BridgeCtx_t *ctx,
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
     bool consumedByProbe = false;
+    bool cachedResponder = pylonRs485CachedResponderModeEnabled(&settings);
     bool fakeResponder = pylonFakeResponderModeEnabled(&settings);
 
     if (ctx == NULL || frame == NULL || frameLen <= 0) {
@@ -2072,7 +2369,24 @@ static void processPylonBridgeFrame(pylonRs485BridgeCtx_t *ctx,
             forwardFrame(ctx->rxName, ctx->txName, ctx->txUart, ctx->txDirPin, frame, frameLen);
         }
     } else if (settings.mode == MODE_BRIDGE) {
-        if (pylonRs485PassthroughModeEnabled(&settings)) {
+        if (cachedResponder) {
+            if (consumedByProbe) {
+                if (pylonDiagLogsEnabled()) {
+                    ESP_LOGI(EXAMPLE_TAG,
+                             "RS485 PYLON probe response on %s consumed locally, not forwarded to inverter",
+                             ctx->rxName);
+                }
+                return;
+            }
+            if (ctx->isInverterSide) {
+                sendCachedResponse(ctx, frame, frameLen);
+            } else if (pylonDiagLogsEnabled()) {
+                ESP_LOGI(EXAMPLE_TAG,
+                         "RS485 PYLON cached responder active: live BMS frame on %s consumed, not forwarded",
+                         ctx->rxName);
+            }
+            return;
+        } else if (pylonRs485PassthroughModeEnabled(&settings)) {
             if (fakeResponder) {
                 if (ctx->isInverterSide) {
                     sendCachedResponse(ctx, frame, frameLen);
@@ -2106,6 +2420,9 @@ static void pylonBridgeTask(void *pv)
         int64_t nowUs = esp_timer_get_time();
 
         maybeCheckProbeTimeout(ctx, nowUs);
+        if (ctx->isBmsSide) {
+            maybeClearNativePylonCacheIfStale(nowUs);
+        }
 
         if (len > 0) {
             size_t scan = 0u;
@@ -2262,6 +2579,56 @@ static void pylonProbeTask(void *pv)
     }
 }
 
+#if PYLON_RS485_ACTIVE_INVERTER_PUSH_ENABLE
+static void pylonPushTask(void *pv)
+{
+    static const uint8_t pushSeq[] = {0x4F, 0x51, 0x92, 0x61, 0x62, 0x63, 0x47, 0x60};
+    pylonPushTaskCtx_t *ctx = (pylonPushTaskCtx_t *)pv;
+    size_t idx = 0u;
+    uint8_t frame[896];
+    int frameLen = 0;
+
+    while (1) {
+        bridge_runtime_settings_t settings = runtimeSettingsGet();
+        int64_t nowUs = esp_timer_get_time();
+        bool recentInverterTraffic =
+            (s_lastPylonInverterTrafficUs != 0) &&
+            ((nowUs - s_lastPylonInverterTrafficUs) < 1500000LL);
+
+        if (ctx != NULL &&
+            pylonRs485CachedResponderModeEnabled(&settings) &&
+            pylonBmsSourceFresh(&settings) &&
+            !recentInverterTraffic) {
+            uint8_t adr = (s_probePreferredAdr != 0u) ? s_probePreferredAdr : 0x02u;
+            uint8_t cid2 = pushSeq[idx];
+
+            if (buildPylonCachedResponseFrame(0x20u,
+                                              adr,
+                                              cid2,
+                                              frame,
+                                              sizeof(frame),
+                                              &frameLen,
+                                              NULL,
+                                              NULL)) {
+                if (pylonDiagLogsEnabled()) {
+                    ESP_LOGI(EXAMPLE_TAG,
+                             "RS485 PYLON active inverter push -> %s: cid2=0x%02X addr=0x%02X len=%d",
+                             ctx->txName,
+                             (unsigned)cid2,
+                             (unsigned)adr,
+                             frameLen);
+                }
+                forwardFrame("PYLON_ACTIVE_PUSH", ctx->txName, ctx->txUart, ctx->txDirPin, frame, frameLen);
+            }
+
+            idx = (idx + 1u) % (sizeof(pushSeq) / sizeof(pushSeq[0]));
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(PYLON_RS485_ACTIVE_INVERTER_PUSH_PERIOD_MS));
+    }
+}
+#endif
+
 bool pylonRs485BridgeSupportsRoute(const bridge_runtime_settings_t *settings)
 {
     if (settings == NULL) {
@@ -2272,6 +2639,7 @@ bool pylonRs485BridgeSupportsRoute(const bridge_runtime_settings_t *settings)
             (settings->inverter_line == LINE_RS485) &&
             bridgeProtocolIsRs485Pylon(settings->bms_protocol) &&
             bridgeProtocolIsRs485Pylon(settings->inverter_protocol)) ||
+           pylonRs485SourceOnlyModeEnabled(settings) ||
            pylonRs485ToCanModeEnabled(settings) ||
            pylonCanToRs485ModeEnabled(settings) ||
            pylonCanSyntheticSourceModeEnabled(settings);
@@ -2287,10 +2655,15 @@ void pylonRs485BridgeEnable(void)
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
     const bool rs485Passthrough = pylonRs485PassthroughModeEnabled(&settings);
+    const bool rs485CachedResponder = pylonRs485CachedResponderModeEnabled(&settings);
     const bool rs485ToCan = pylonRs485ToCanModeEnabled(&settings);
+    const bool rs485SourceOnly = pylonRs485SourceOnlyModeEnabled(&settings);
     static pylonRs485BridgeCtx_t bmsCtx;
     static pylonRs485BridgeCtx_t inverterCtx;
     static pylonProbeTaskCtx_t probeCtx;
+#if PYLON_RS485_ACTIVE_INVERTER_PUSH_ENABLE
+    static pylonPushTaskCtx_t pushCtx;
+#endif
 
     memset(&s_pylonCache, 0, sizeof(s_pylonCache));
     memset(&s_pylonSummary, 0, sizeof(s_pylonSummary));
@@ -2307,6 +2680,9 @@ void pylonRs485BridgeEnable(void)
     deleteTaskIfRunning(&s_pylonBmsTask);
     deleteTaskIfRunning(&s_pylonInvTask);
     deleteTaskIfRunning(&s_pylonProbeTaskHandle);
+#if PYLON_RS485_ACTIVE_INVERTER_PUSH_ENABLE
+    deleteTaskIfRunning(&s_pylonPushTaskHandle);
+#endif
 
     bmsCtx.rxName = (settings.bms_port == 1) ? "RS485_1" : "RS485_2";
     bmsCtx.txName = (settings.inverter_port == 1) ? "RS485_1" : "RS485_2";
@@ -2332,22 +2708,50 @@ void pylonRs485BridgeEnable(void)
 #else
     (void)uart_set_line_inverse(bmsCtx.rxUart, UART_SIGNAL_INV_DISABLE);
 #endif
+#if PYLON_RS485_INVERTER_UART_INVERT
+    (void)uart_set_line_inverse(inverterCtx.rxUart, UART_SIGNAL_TXD_INV | UART_SIGNAL_RXD_INV);
+    ESP_LOGI(EXAMPLE_TAG, "Pylon inverter UART TX/RX inversion enabled on %s", inverterCtx.rxName);
+#else
     (void)uart_set_line_inverse(inverterCtx.rxUart, UART_SIGNAL_INV_DISABLE);
+#endif
 
-    if (rs485Passthrough || rs485ToCan) {
-        xTaskCreate(pylonBridgeTask, "pylon_bms_rx", 6144, &bmsCtx, 9, &s_pylonBmsTask);
+    if (rs485Passthrough || rs485CachedResponder || rs485ToCan || rs485SourceOnly) {
+        xTaskCreate(pylonBridgeTask,
+                    "pylon_bms_rx",
+                    PYLON_RS485_BRIDGE_TASK_STACK_BYTES,
+                    &bmsCtx,
+                    9,
+                    &s_pylonBmsTask);
     }
-    if (settings.inverter_line == LINE_RS485) {
-        xTaskCreate(pylonBridgeTask, "pylon_inv_rx", 6144, &inverterCtx, 9, &s_pylonInvTask);
+    if (settings.inverter_line == LINE_RS485 && !rs485SourceOnly) {
+        xTaskCreate(pylonBridgeTask,
+                    "pylon_inv_rx",
+                    PYLON_RS485_BRIDGE_TASK_STACK_BYTES,
+                    &inverterCtx,
+                    9,
+                    &s_pylonInvTask);
     }
 
-    if ((rs485Passthrough || rs485ToCan) && pylonProbeModeEnabled(settings.mode)) {
+    if ((rs485ToCan || rs485SourceOnly) && pylonProbeModeEnabled(settings.mode)) {
         probeCtx.probeName = bmsCtx.rxName;
         probeCtx.probeUart = bmsCtx.rxUart;
         probeCtx.probeDirPin = bmsCtx.rxDirPin;
         xTaskCreate(pylonProbeTask, "pylon_probe", 4096, &probeCtx, 8, &s_pylonProbeTaskHandle);
         ESP_LOGI(EXAMPLE_TAG, "Pylon active probe enabled on %s (mode=%d)", probeCtx.probeName, settings.mode);
     }
+
+#if PYLON_RS485_ACTIVE_INVERTER_PUSH_ENABLE
+    if (rs485CachedResponder) {
+        pushCtx.txName = inverterCtx.rxName;
+        pushCtx.txUart = inverterCtx.rxUart;
+        pushCtx.txDirPin = inverterCtx.rxDirPin;
+        xTaskCreate(pylonPushTask, "pylon_push", 4096, &pushCtx, 7, &s_pylonPushTaskHandle);
+        ESP_LOGI(EXAMPLE_TAG,
+                 "Pylon active inverter push enabled on %s (period=%ums)",
+                 pushCtx.txName,
+                 (unsigned)PYLON_RS485_ACTIVE_INVERTER_PUSH_PERIOD_MS);
+    }
+#endif
 
     maybeRefreshSyntheticCacheFromUniversal();
     if (pylonCanToRs485ModeEnabled(&settings)) {
@@ -2357,6 +2761,12 @@ void pylonRs485BridgeEnable(void)
         }
     } else if (rs485ToCan) {
         ESP_LOGI(EXAMPLE_TAG, "Pylon RS485->CAN translator armed (BMS=RS485_PYLON inverter=CAN_PYLON)");
+    } else if (rs485SourceOnly) {
+        ESP_LOGI(EXAMPLE_TAG,
+                 "Pylon RS485 source poller armed (BMS=RS485_PYLON inverter=RS485_GROWATT)");
+    } else if (rs485CachedResponder) {
+        ESP_LOGI(EXAMPLE_TAG,
+                 "Pylon RS485 cached responder armed (BMS=RS485_PYLON inverter=RS485_PYLON)");
     } else if (pylonSyntheticSourceModeEnabled(&settings)) {
         ESP_LOGI(EXAMPLE_TAG,
                  "Pylon synthetic responder armed (BMS protocol=%s inverter=RS485_PYLON)",
@@ -2377,6 +2787,9 @@ void pylonRs485BridgeStop(void)
     deleteTaskIfRunning(&s_pylonBmsTask);
     deleteTaskIfRunning(&s_pylonInvTask);
     deleteTaskIfRunning(&s_pylonProbeTaskHandle);
+#if PYLON_RS485_ACTIVE_INVERTER_PUSH_ENABLE
+    deleteTaskIfRunning(&s_pylonPushTaskHandle);
+#endif
     memset(&s_forwardPending, 0, sizeof(s_forwardPending));
     bridgeSetTelemetrySnapshot(NULL);
     bridgeSetDecodedLogSnapshot("");

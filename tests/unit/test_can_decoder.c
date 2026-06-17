@@ -12,11 +12,13 @@
 #include "protocols/common/battery_model.h"
 #include "protocols/deye/deye_registers_map.h"
 #include "protocols/pylon/pylon_can_protocol.h"
+#include "esp_timer.h"
 #include "runtime_settings.h"
 #include <string.h>
 
 extern bridge_runtime_settings_t g_hostRuntimeSettings;
 void hostStubsReset(void);
+bool canDecoderSetPylonFrameUpdatedMsForTest(const char *ifname, uint32_t id, uint32_t updatedMs);
 
 static void write_le16(uint8_t *p, uint16_t value)
 {
@@ -288,6 +290,101 @@ void test_can_decoder_growatt_updates_battery_model_immediately(void)
     TEST_ASSERT_FALSE(model.balanceEnabled);
 }
 
+/**
+ * Test: stale Pylon CAN frames must not refresh the universal model when other
+ * CAN traffic is still present on the bus.
+ */
+void test_can_decoder_pylon_stale_required_frames_do_not_refresh_model(void)
+{
+    uint8_t f355[8] = {0};
+    uint8_t f356[8] = {0};
+    uint8_t f35C[8] = {0};
+    battery_model_t seed = {0};
+    battery_model_t model = {0};
+    const uint32_t nowMs = (uint32_t)(esp_timer_get_time() / 1000LL);
+    const uint32_t staleMs = nowMs - (BRIDGE_SOURCE_STALE_MS + 5u);
+    const uint32_t sentinelUpdatedMs = 1234u;
+
+    g_hostRuntimeSettings.mode = MODE_BRIDGE;
+    g_hostRuntimeSettings.bms_line = LINE_CAN;
+    g_hostRuntimeSettings.bms_protocol = PROTOCOL_CAN_PYLON;
+    g_hostRuntimeSettings.bms_port = 1u;
+    g_hostRuntimeSettings.inverter_line = LINE_RS485;
+    g_hostRuntimeSettings.inverter_protocol = PROTOCOL_RS485_PYLON;
+    g_hostRuntimeSettings.inverter_port = 2u;
+
+    write_le16(&f355[PYLON_CAN_355_OFF_SOC_PCT], 100u);
+    write_le16(&f355[PYLON_CAN_355_OFF_SOH_PCT], 100u);
+    write_le16(&f356[PYLON_CAN_356_OFF_PACK_V_CV], 5708u);
+    write_le16(&f356[PYLON_CAN_356_OFF_PACK_I_DA], 0u);
+    write_le16(&f356[PYLON_CAN_356_OFF_TEMP_DECIC], 250u);
+    f35C[0] = 0xC0u;
+
+    feed_can_frame(PYLON_CAN_ID_SOC_SOH_355, f355);
+    feed_can_frame(PYLON_CAN_ID_PACK_356, f356);
+    TEST_ASSERT_TRUE(canDecoderSetPylonFrameUpdatedMsForTest("CAN1", PYLON_CAN_ID_SOC_SOH_355, staleMs));
+    TEST_ASSERT_TRUE(canDecoderSetPylonFrameUpdatedMsForTest("CAN1", PYLON_CAN_ID_PACK_356, staleMs));
+
+    seed.valid = true;
+    seed.updatedMs = sentinelUpdatedMs;
+    seed.socPct = 55u;
+    seed.packVoltageV = 50.0f;
+    batteryModelSet(&seed);
+
+    feed_can_frame(PYLON_CAN_ID_STATUS_35C, f35C);
+
+    batteryModelGetReal(&model);
+    TEST_ASSERT_TRUE(model.valid);
+    TEST_ASSERT_EQUAL_UINT32(sentinelUpdatedMs, model.updatedMs);
+    TEST_ASSERT_EQUAL_UINT8(55u, model.socPct);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 50.0f, model.packVoltageV);
+    TEST_ASSERT_EQUAL_UINT8(0u, model.protocolState);
+}
+
+void test_can_decoder_pylon_stale_periodic_snapshot_clears_model(void)
+{
+    uint8_t f355[8] = {0};
+    uint8_t f356[8] = {0};
+    battery_model_t model = {0};
+    const uint32_t nowMs = (uint32_t)(esp_timer_get_time() / 1000LL);
+    const uint32_t staleMs = nowMs - (BRIDGE_SOURCE_STALE_MS + 5u);
+    uint8_t soc = 0u;
+
+    g_hostRuntimeSettings.mode = MODE_BRIDGE;
+    g_hostRuntimeSettings.bms_line = LINE_CAN;
+    g_hostRuntimeSettings.bms_protocol = PROTOCOL_CAN_PYLON;
+    g_hostRuntimeSettings.bms_port = 1u;
+    g_hostRuntimeSettings.inverter_line = LINE_RS485;
+    g_hostRuntimeSettings.inverter_protocol = PROTOCOL_RS485_PYLON;
+    g_hostRuntimeSettings.inverter_port = 2u;
+
+    write_le16(&f355[PYLON_CAN_355_OFF_SOC_PCT], 100u);
+    write_le16(&f355[PYLON_CAN_355_OFF_SOH_PCT], 100u);
+    write_le16(&f356[PYLON_CAN_356_OFF_PACK_V_CV], 5713u);
+    write_le16(&f356[PYLON_CAN_356_OFF_PACK_I_DA], 0u);
+    write_le16(&f356[PYLON_CAN_356_OFF_TEMP_DECIC], 299u);
+
+    feed_can_frame(PYLON_CAN_ID_SOC_SOH_355, f355);
+    feed_can_frame(PYLON_CAN_ID_PACK_356, f356);
+
+    batteryModelGetReal(&model);
+    TEST_ASSERT_TRUE(model.valid);
+    TEST_ASSERT_EQUAL_UINT8(100u, model.socPct);
+    TEST_ASSERT_TRUE(canDecoderTryGetSocPct("CAN1", &soc));
+    TEST_ASSERT_EQUAL_UINT8(100u, soc);
+
+    TEST_ASSERT_TRUE(canDecoderSetPylonFrameUpdatedMsForTest("CAN1", PYLON_CAN_ID_SOC_SOH_355, staleMs));
+    TEST_ASSERT_TRUE(canDecoderSetPylonFrameUpdatedMsForTest("CAN1", PYLON_CAN_ID_PACK_356, staleMs));
+
+    TEST_ASSERT_FALSE(canDecoderTryGetSocPct("CAN1", &soc));
+
+    canDecoderPrintCachedSnapshot("CAN1");
+
+    memset(&model, 0, sizeof(model));
+    batteryModelGetReal(&model);
+    TEST_ASSERT_FALSE(model.valid);
+}
+
 /* Main test runner function */
 int main(void)
 {
@@ -302,6 +399,8 @@ int main(void)
     RUN_TEST(test_can_decoder_variable_dlc);
     RUN_TEST(test_can_decoder_deye_updates_battery_model_immediately);
     RUN_TEST(test_can_decoder_growatt_updates_battery_model_immediately);
+    RUN_TEST(test_can_decoder_pylon_stale_required_frames_do_not_refresh_model);
+    RUN_TEST(test_can_decoder_pylon_stale_periodic_snapshot_clears_model);
 
     return UNITY_END();
 }

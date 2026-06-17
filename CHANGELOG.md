@@ -39,6 +39,7 @@ The goal is practical maintenance:
 - `RS485_DALY -> RS485_PYLON` bridge-mode route for Pylon-compatible inverter responders.
 - `RS485_DALY -> CAN_PYLON` bridge-mode route, field-tested with Daly RS485 on `RS485_1` feeding EASUN Pylon CAN on `CAN2`.
 - `RS485_PYLON -> CAN_PYLON` bridge-mode route, field-tested with JK Pylon RS485 on `RS485_1` feeding Pylon CAN output on `CAN2`.
+- `RS485_PYLON -> RS485_GROWATT` bridge-mode route, using the Pylon RS485 active poller as the BMS source and the existing Growatt RS485 responder fed from the shared battery model.
 - Pylon RS485 `0x42` cell-information parser and host regression coverage, so BMS variants that expose that frame can populate the web/API `cells_v[]` list.
 - Experimental `DALY_CAN` BMS poller/decoder for the Daly proprietary CAN protocol.
 - Experimental `DALY_CAN -> RS485_PYLON` bridge-mode route through the shared battery model and Pylon synthetic responder.
@@ -68,6 +69,9 @@ The goal is practical maintenance:
 - README build, test, coverage, and GitLab runner instructions were refreshed for the ESP-IDF 6.0.1 workflow.
 - Sigrok/PulseView documentation now includes a persistent combined decoder installation flow so built-in decoders such as `CAN` stay visible alongside `Pylon CAN` and `Pylon RS485`.
 - Local VS Code ESP-IDF settings were removed from version control and ignored because they contain machine-specific paths.
+- CAN telemetry now expires cached frames before periodic snapshot decoding, preventing stale `CAN_PYLON`/Deye/JK/Growatt cache data from being republished as fresh web telemetry after a BMS disconnect.
+- `RS485_PYLON -> RS485_PYLON` bridge mode stays transparent passthrough for inverter compatibility, while stale native Pylon telemetry is cleared from the web/shared model when BMS responses stop.
+- Runtime settings now boot from the NVS-backed `/api/settings` store by default again; `RUNTIME_SETTINGS_FORCE_DEFAULTS` is disabled and kept only as an explicit diagnostic switch.
 - Flash size is configured for `8MB`, and the app partition was expanded from `1MB` to `7MB`.
 - `bms_decoded_packet_t` now carries richer decoded telemetry for protocols that expose per-cell voltages, per-sensor temperatures, warning/protection/fault masks, status flags, and balance flags.
 - Pylon synthetic status generation can now use explicit PACE MOSFET charge/discharge flags while keeping the conservative generic fallback for non-native sources.
@@ -93,7 +97,7 @@ The goal is practical maintenance:
 - Pylon RS485 active probing now caches the discovered response address, avoiding long stale gaps after a JK BMS answers on address `0x02`.
 - JK-like Pylon RS485 pack-voltage scaling is normalized from the raw millivolt-like `0x61` word to the real low-voltage pack value before telemetry and CAN transmission.
 - Pylon RS485 active probing now tries common `0x42` cell-information payload variants and backs off after a full unsupported scan to avoid noisy retries on BMS profiles that reject the command.
-- The current compile-time default route is `MODE_BRIDGE`, `RS485_PYLON` on `RS485_1` to `CAN_PYLON` on `CAN2`, because `RUNTIME_SETTINGS_FORCE_DEFAULTS=1` makes boot use `config.h` defaults.
+- The current compile-time fallback route is `MODE_BRIDGE`, `RS485_PYLON` on `RS485_1` to `CAN_PYLON` on `CAN2`; normal boots load saved NVS runtime settings unless the diagnostic `RUNTIME_SETTINGS_FORCE_DEFAULTS` switch is explicitly enabled.
 - Daly RS485 source freshness is kept at `10s`, matching the desired inverter fail-safe behavior when the BMS disappears.
 - Pylon RS485 source freshness is kept at `10s`, so the Pylon CAN sender stops after the active-probe freshness window if the JK/Pylon RS485 source disappears.
 - Daly CAN documentation now records the 2026-05-30 no-ACK field result so future debugging starts at wiring/BMS CAN enablement instead of repeating protocol-level tests.

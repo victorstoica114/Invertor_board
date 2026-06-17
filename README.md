@@ -197,8 +197,9 @@ Bench setup that worked:
   `RS485_1`.
 - Inverter side is configured as `CAN_PYLON` on `CAN2`.
 - Firmware route: `MODE_BRIDGE`, `PROTOCOL_RS485_PYLON -> PROTOCOL_CAN_PYLON`.
-- Current `config.h` defaults are set for this bench route because
-  `RUNTIME_SETTINGS_FORCE_DEFAULTS=1` makes boot ignore stored NVS settings.
+- Current `config.h` defaults are set for this bench route when NVS is empty or
+  invalid. Normal boots load the runtime settings saved by the web UI/API from
+  NVS.
 
 Validated live values:
 
@@ -707,7 +708,7 @@ Known local setup:
 - ESP32-C6 serial port used during field tests: `COM11`
 - web UI used during field tests: `http://192.168.141.151/`
 - opening the serial monitor can reset the board; runtime-only fake inverter data must be reapplied after reset/flash
-- `RUNTIME_SETTINGS_FORCE_DEFAULTS=1` in `main/config.h`, so POSTed runtime settings can appear accepted but boot still uses compile-time defaults after reset/flash
+- runtime settings are saved in ESP-IDF NVS (`bridge_cfg`) by `/api/settings`; `RUNTIME_SETTINGS_FORCE_DEFAULTS` should stay `0` except for deliberate diagnostics
 
 Fast incremental build from a Codex/PowerShell shell:
 

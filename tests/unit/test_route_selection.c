@@ -23,6 +23,7 @@ extern int g_routeStubDalyCanBmsStartCount;
 extern int g_routeStubPylonInverterStartCount;
 extern int g_routeStubPylonBridgeEnableCount;
 extern int g_routeStubCanForwardStartCount;
+extern int g_routeStubRs485GrowattResponderStartCount;
 void routeSelectionStubReset(void);
 
 /* Test fixture setup/teardown */
@@ -188,6 +189,25 @@ void test_route_pylon_rs485_bridge_valid(void)
     /* This configuration should be valid for Pylon RS485 bridge */
     TEST_ASSERT_EQUAL_UINT8(PROTOCOL_RS485_PYLON, settings.bms_protocol);
     TEST_ASSERT_EQUAL_UINT8(PROTOCOL_RS485_PYLON, settings.inverter_protocol);
+}
+
+void test_route_pylon_rs485_to_rs485_growatt_starts_source_poller_and_responder(void)
+{
+    bridge_runtime_settings_t settings = {0};
+
+    settings.mode = MODE_BRIDGE;
+    settings.bms_line = LINE_RS485;
+    settings.bms_protocol = PROTOCOL_RS485_PYLON;
+    settings.bms_port = 1;
+    settings.inverter_line = LINE_RS485;
+    settings.inverter_protocol = PROTOCOL_RS485_GROWATT;
+    settings.inverter_port = 2;
+
+    TEST_ASSERT_EQUAL(ESP_OK, orchestratorStartFromRuntime(&settings));
+    TEST_ASSERT_EQUAL(1, g_routeStubPylonBridgeEnableCount);
+    TEST_ASSERT_EQUAL(1, g_routeStubRs485GrowattResponderStartCount);
+    TEST_ASSERT_EQUAL(0, g_routeStubCanForwardStartCount);
+    TEST_ASSERT_EQUAL(0, g_routeStubPylonInverterStartCount);
 }
 
 /**
@@ -646,6 +666,7 @@ int main(void)
     RUN_TEST(test_route_can_pylon_to_rs485_growatt_valid);
     RUN_TEST(test_route_jkbms_to_growatt_valid);
     RUN_TEST(test_route_pylon_rs485_bridge_valid);
+    RUN_TEST(test_route_pylon_rs485_to_rs485_growatt_starts_source_poller_and_responder);
     RUN_TEST(test_route_can_pylon_to_rs485_pylon_valid);
     RUN_TEST(test_route_can_jkbms_250k_to_rs485_pylon_valid);
     RUN_TEST(test_route_pace_rs485_to_rs485_pylon_valid);

@@ -51,7 +51,7 @@
 /* --- RS485 line-control compatibility (used by Pylon RS485 bridge) --- */
 #define RS485_USE_HALF_DUPLEX     1
 #define RS485_1_USE_HALF_DUPLEX   1
-#define RS485_2_USE_HALF_DUPLEX   1
+#define RS485_2_USE_HALF_DUPLEX   0
 #define RS485_1_DIR_TX_LEVEL      1
 #define RS485_2_DIR_TX_LEVEL      1
 #define RS485_1_TX_PRE_DELAY_MS   0
@@ -84,13 +84,16 @@
 /* --- Diagnostic step: force fake replies for CAN_PYLON -> RS485_PYLON route --- */
 #define PYLON_CAN_RS485_FORCE_FAKE_ENABLE 0
 #define PYLON_RS485_ACTIVE_PROBE_ENABLE 1
+#define PYLON_RS485_ACTIVE_INVERTER_PUSH_ENABLE 0
+#define PYLON_RS485_ACTIVE_INVERTER_PUSH_PERIOD_MS 500u
 #define PYLON_RS485_BMS_UART_INVERT 0
+#define PYLON_RS485_INVERTER_UART_INVERT 0
 #define PYLON_RS485_SOC_FLOOR_ENABLE 1
 #define PYLON_RS485_SOC_FLOOR_PCT 20u
 #define PYLON_RS485_PACK_ID_FALLBACK_ENABLE 0
 
-/* Diagnostic: ignore persisted NVS route and boot with the config.h route below. */
-#define RUNTIME_SETTINGS_FORCE_DEFAULTS 1
+/* Diagnostic: set to 1 only when boot must ignore stored NVS settings. */
+#define RUNTIME_SETTINGS_FORCE_DEFAULTS 0
 
 /* Source freshness window for fail-safe (stop answering if source is stale). */
 #define BRIDGE_SOURCE_STALE_MS 2000u

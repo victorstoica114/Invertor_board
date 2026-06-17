@@ -36,6 +36,7 @@ int g_routeStubDalyCanBmsStartCount;
 int g_routeStubPylonInverterStartCount;
 int g_routeStubPylonBridgeEnableCount;
 int g_routeStubCanForwardStartCount;
+int g_routeStubRs485GrowattResponderStartCount;
 
 void routeSelectionStubReset(void)
 {
@@ -50,6 +51,7 @@ void routeSelectionStubReset(void)
     g_routeStubPylonInverterStartCount = 0;
     g_routeStubPylonBridgeEnableCount = 0;
     g_routeStubCanForwardStartCount = 0;
+    g_routeStubRs485GrowattResponderStartCount = 0;
 }
 
 bridge_runtime_settings_t runtimeSettingsGet(void)
@@ -300,6 +302,11 @@ bool pylonRs485BridgeSupportsRoute(const bridge_runtime_settings_t *settings)
             bridgeProtocolIsRs485Pylon(settings->inverter_protocol)) ||
            ((settings->mode == MODE_BRIDGE) &&
             (settings->bms_line == LINE_RS485) &&
+            (settings->inverter_line == LINE_RS485) &&
+            bridgeProtocolIsRs485Pylon(settings->bms_protocol) &&
+            (settings->inverter_protocol == PROTOCOL_RS485_GROWATT)) ||
+           ((settings->mode == MODE_BRIDGE) &&
+            (settings->bms_line == LINE_RS485) &&
             (settings->inverter_line == LINE_CAN) &&
             bridgeProtocolIsRs485Pylon(settings->bms_protocol) &&
             (settings->inverter_protocol == PROTOCOL_CAN_PYLON)) ||
@@ -343,6 +350,7 @@ esp_err_t jkbmsRs485GrowattBridgeEnable(uart_port_t inverterUart,
     (void)inverterUart;
     (void)inverterDir;
     (void)ifName;
+    g_routeStubRs485GrowattResponderStartCount++;
     return ESP_OK;
 }
 

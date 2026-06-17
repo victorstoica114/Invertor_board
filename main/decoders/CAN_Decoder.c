@@ -44,6 +44,7 @@ static inline int16_t can_be16s(const uint8_t *p);
 static inline uint16_t can_le16(const uint8_t *p);
 static inline int16_t can_le16s(const uint8_t *p);
 static void canUpdateUniversalModelFromGrowattCache(const char *ifname);
+static const canBmsCachedFrame_t *canGrowattFrameById(const canBmsCachedFrame_t *cache, uint32_t id);
 
 static bool canPylonCellExtremesValid(uint16_t cellMinMv, uint16_t cellMaxMv)
 {
@@ -148,6 +149,149 @@ static bool canPylonGetFrameById(const pylon_can_frame_t *cache,
     return true;
 }
 
+static bool canPylonGetFreshFrameById(const pylon_can_frame_t *cache,
+                                      uint32_t id,
+                                      uint32_t nowMs,
+                                      uint32_t maxAgeMs,
+                                      const pylon_can_frame_t **out)
+{
+    const pylon_can_frame_t *frame = NULL;
+
+    if (!canPylonGetFrameById(cache, id, &frame)) {
+        if (out != NULL) {
+            *out = NULL;
+        }
+        return false;
+    }
+
+    if ((nowMs - frame->updatedMs) > maxAgeMs) {
+        if (out != NULL) {
+            *out = NULL;
+        }
+        return false;
+    }
+
+    if (out != NULL) {
+        *out = frame;
+    }
+    return true;
+}
+
+static bool canCachedTimestampFresh(uint32_t updatedMs, uint32_t nowMs, uint32_t maxAgeMs)
+{
+    return updatedMs != 0u && ((nowMs - updatedMs) <= maxAgeMs);
+}
+
+static void canInvalidateStaleGrowattFrames(canBmsCachedFrame_t *cache,
+                                            size_t count,
+                                            uint32_t nowMs,
+                                            uint32_t maxAgeMs)
+{
+    if (cache == NULL) {
+        return;
+    }
+
+    for (size_t i = 0u; i < count; i++) {
+        if (cache[i].valid && !canCachedTimestampFresh(cache[i].updatedMs, nowMs, maxAgeMs)) {
+            cache[i].valid = false;
+        }
+    }
+}
+
+static void canInvalidateStalePylonFrames(pylon_can_frame_t *cache,
+                                          size_t count,
+                                          uint32_t nowMs,
+                                          uint32_t maxAgeMs)
+{
+    if (cache == NULL) {
+        return;
+    }
+
+    for (size_t i = 0u; i < count; i++) {
+        if (cache[i].valid && !canCachedTimestampFresh(cache[i].updatedMs, nowMs, maxAgeMs)) {
+            cache[i].valid = false;
+        }
+    }
+}
+
+static void canInvalidateStaleJkbmsFrames(jkbms_can_frame_t *cache,
+                                          size_t count,
+                                          uint32_t nowMs,
+                                          uint32_t maxAgeMs)
+{
+    if (cache == NULL) {
+        return;
+    }
+
+    for (size_t i = 0u; i < count; i++) {
+        if (cache[i].valid && !canCachedTimestampFresh(cache[i].updatedMs, nowMs, maxAgeMs)) {
+            cache[i].valid = false;
+        }
+    }
+}
+
+static bool canInterfaceIsRuntimeBms(const char *ifname)
+{
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+    const char *name = (ifname != NULL) ? ifname : "CAN1";
+
+    if (settings.bms_line != LINE_CAN) {
+        return false;
+    }
+
+    return strcmp(name, (settings.bms_port == 1u) ? "CAN1" : "CAN2") == 0;
+}
+
+static bool canPylonCacheHasRequiredFrames(const pylon_can_frame_t *cache, int protocol)
+{
+    const pylon_can_frame_t *f351 = NULL;
+    const pylon_can_frame_t *f355 = NULL;
+    const pylon_can_frame_t *f356 = NULL;
+
+    if (protocol == PROTOCOL_CAN_DEYE) {
+        return canPylonGetFrameById(cache, DEYE_CAN_ID_LIMITS_351, &f351) && f351->dlc >= 8u &&
+               canPylonGetFrameById(cache, DEYE_CAN_ID_SOC_SOH_355, &f355) && f355->dlc >= 4u &&
+               canPylonGetFrameById(cache, DEYE_CAN_ID_PACK_356, &f356) && f356->dlc >= 6u;
+    }
+
+    return canPylonGetFrameById(cache, PYLON_CAN_ID_SOC_SOH_355, &f355) && f355->dlc >= 4u &&
+           canPylonGetFrameById(cache, PYLON_CAN_ID_PACK_356, &f356) && f356->dlc >= 6u;
+}
+
+static bool canJkbmsCacheHasRequiredFrames(const jkbms_can_frame_t *cache, size_t count)
+{
+    int idx = jkbmsCanCacheIndex(JKBMS_CAN_ID_BATT_ST);
+
+    return cache != NULL &&
+           idx >= 0 &&
+           (size_t)idx < count &&
+           cache[idx].valid &&
+           cache[idx].dlc >= 5u;
+}
+
+static bool canGrowattCacheHasRequiredFrames(const canBmsCachedFrame_t *cache)
+{
+    const canBmsCachedFrame_t *f313 = canGrowattFrameById(cache, GROWATT_CAN_ID_313_V_I_SOC_SOH);
+    const canBmsCachedFrame_t *f322 = canGrowattFrameById(cache, GROWATT_CAN_ID_322_TEMP_SOC_MIN_MAX);
+
+    return (f313 != NULL && f313->dlc >= 7u) ||
+           (f322 != NULL && f322->dlc >= 8u);
+}
+
+static void canClearStaleSourceTelemetry(const char *ifname, const char *reason)
+{
+    if (!canInterfaceIsRuntimeBms(ifname)) {
+        return;
+    }
+
+    ESP_LOGW(EXAMPLE_TAG,
+             "CAN-%s stale source snapshot ignored: %s; clearing telemetry",
+             (ifname != NULL) ? ifname : "CAN1",
+             (reason != NULL) ? reason : "source stale");
+    batteryModelClear();
+    bridgeSetTelemetrySnapshot(NULL);
+}
+
 static void canUpdateUniversalModelFromPylonCache(const char *ifname)
 {
     const char *name = (ifname != NULL) ? ifname : "CAN1";
@@ -166,6 +310,7 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
     bool havePack = false;
     universal_battery_model_t model = {0};
     uint32_t nowMs = (uint32_t)(esp_timer_get_time() / 1000LL);
+    const uint32_t maxAgeMs = BRIDGE_SOURCE_STALE_MS;
 
     if ((protocol != PROTOCOL_CAN_PYLON) && !deyeProtocol) {
         return;
@@ -182,7 +327,7 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
 
     batteryModelGetReal(&model);
 
-    if (canPylonGetFrameById(local, 0x355u, &f355) && f355->dlc >= 4u) {
+    if (canPylonGetFreshFrameById(local, 0x355u, nowMs, maxAgeMs, &f355) && f355->dlc >= 4u) {
         uint16_t soc = can_le16(&f355->data[0]);
         uint16_t soh = can_le16(&f355->data[2]);
         if (soc <= 100u) {
@@ -194,13 +339,13 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
         haveSoc = true;
     }
 
-    if (canPylonGetFrameById(local, 0x351u, &f351) && f351->dlc >= 6u) {
+    if (canPylonGetFreshFrameById(local, 0x351u, nowMs, maxAgeMs, &f351) && f351->dlc >= 6u) {
         model.chargeVoltageLimitV = (float)can_le16(&f351->data[0]) / 10.0f;
         model.chargeCurrentLimitA = (float)can_le16(&f351->data[2]) / 10.0f;
         model.dischargeCurrentLimitA = (float)can_le16(&f351->data[4]) / 10.0f;
     }
 
-    if (canPylonGetFrameById(local, 0x356u, &f356) && f356->dlc >= 6u) {
+    if (canPylonGetFreshFrameById(local, 0x356u, nowMs, maxAgeMs, &f356) && f356->dlc >= 6u) {
         float rawPackVoltageV = (float)can_le16(&f356->data[0]) / 100.0f;
         model.packVoltageV = canCorrectPylonPackVoltage(rawPackVoltageV, model.chargeVoltageLimitV);
         model.packCurrentA = (float)can_le16s(&f356->data[2]) / 10.0f;
@@ -208,7 +353,7 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
         havePack = true;
     }
 
-    if (!deyeProtocol && canPylonGetFrameById(local, 0x373u, &f373) && f373->dlc >= 8u) {
+    if (!deyeProtocol && canPylonGetFreshFrameById(local, 0x373u, nowMs, maxAgeMs, &f373) && f373->dlc >= 8u) {
         uint16_t cellMinMv = can_le16(&f373->data[PYLON_CAN_373_OFF_CELL_MIN_MV]);
         uint16_t cellMaxMv = can_le16(&f373->data[PYLON_CAN_373_OFF_CELL_MAX_MV]);
         if (canPylonCellExtremesValid(cellMinMv, cellMaxMv)) {
@@ -220,7 +365,9 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
         model.temperaturesC[2] = (float)can_le16(&f373->data[6]) / 10.0f;
     }
 
-    if (!deyeProtocol && canPylonGetFrameById(local, PYLON_CAN_ID_JK_EXT_CELL_370, &f370) && f370->dlc >= 8u) {
+    if (!deyeProtocol &&
+        canPylonGetFreshFrameById(local, PYLON_CAN_ID_JK_EXT_CELL_370, nowMs, maxAgeMs, &f370) &&
+        f370->dlc >= 8u) {
         uint16_t cellMaxMv = can_le16(&f370->data[PYLON_CAN_370_OFF_CELL_MAX_MV]);
         uint16_t cellMinMv = can_le16(&f370->data[PYLON_CAN_370_OFF_CELL_MIN_MV]);
         if (canPylonCellExtremesValid(cellMinMv, cellMaxMv)) {
@@ -232,7 +379,9 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
         }
     }
 
-    if (!deyeProtocol && canPylonGetFrameById(local, PYLON_CAN_ID_JK_EXT_INDEX_371, &f371) && f371->dlc >= 8u) {
+    if (!deyeProtocol &&
+        canPylonGetFreshFrameById(local, PYLON_CAN_ID_JK_EXT_INDEX_371, nowMs, maxAgeMs, &f371) &&
+        f371->dlc >= 8u) {
         uint16_t cellMaxIdx = can_le16(&f371->data[PYLON_CAN_371_OFF_CELL_MAX_IDX]);
         uint16_t cellMinIdx = can_le16(&f371->data[PYLON_CAN_371_OFF_CELL_MIN_IDX]);
         if (cellMaxIdx >= 1u && cellMaxIdx <= 32u) {
@@ -243,7 +392,9 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
         }
     }
 
-    if (deyeProtocol && canPylonGetFrameById(local, DEYE_CAN_ID_TEMP_CELL_370, &f370) && f370->dlc >= 8u) {
+    if (deyeProtocol &&
+        canPylonGetFreshFrameById(local, DEYE_CAN_ID_TEMP_CELL_370, nowMs, maxAgeMs, &f370) &&
+        f370->dlc >= 8u) {
         uint16_t tMaxRaw = can_le16(&f370->data[DEYE_CAN_370_OFF_TEMP_MAX_RAW]);
         uint16_t tMinRaw = can_le16(&f370->data[DEYE_CAN_370_OFF_TEMP_MIN_RAW]);
         model.temperaturesC[1] = (tMaxRaw <= 200u) ? (float)tMaxRaw : ((float)tMaxRaw / 10.0f);
@@ -253,7 +404,9 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
         model.cellDeltaV = model.cellMaxV - model.cellMinV;
     }
 
-    if (deyeProtocol && canPylonGetFrameById(local, DEYE_CAN_ID_SENSOR_INDEX_371, &f371) && f371->dlc >= 8u) {
+    if (deyeProtocol &&
+        canPylonGetFreshFrameById(local, DEYE_CAN_ID_SENSOR_INDEX_371, nowMs, maxAgeMs, &f371) &&
+        f371->dlc >= 8u) {
         uint16_t cellMaxIdx = can_le16(&f371->data[DEYE_CAN_371_OFF_CELL_MAX_IDX]);
         uint16_t cellMinIdx = can_le16(&f371->data[DEYE_CAN_371_OFF_CELL_MIN_IDX]);
         if (cellMaxIdx <= 255u) {
@@ -264,7 +417,7 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
         }
     }
 
-    if (canPylonGetFrameById(local, 0x35Cu, &f35C) && f35C->dlc >= 1u) {
+    if (canPylonGetFreshFrameById(local, 0x35Cu, nowMs, maxAgeMs, &f35C) && f35C->dlc >= 1u) {
         uint8_t status = f35C->data[0];
         model.protocolState = status;
         model.chargeEnabled = (status & 0x80u) != 0u;
@@ -278,6 +431,27 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
         batteryModelSet(&model);
     }
 }
+
+#ifdef HOST_TEST
+bool canDecoderSetPylonFrameUpdatedMsForTest(const char *ifname, uint32_t id, uint32_t updatedMs)
+{
+    pylon_can_frame_t *cache = canPylonCacheForIf(ifname);
+
+    if (cache == NULL || id < PYLON_CAN_ID_MIN || id > PYLON_CAN_ID_MAX) {
+        return false;
+    }
+
+    size_t idx = (size_t)(id - PYLON_CAN_ID_MIN);
+    portENTER_CRITICAL(&g_canBmsCacheMux);
+    if (!cache[idx].valid) {
+        portEXIT_CRITICAL(&g_canBmsCacheMux);
+        return false;
+    }
+    cache[idx].updatedMs = updatedMs;
+    portEXIT_CRITICAL(&g_canBmsCacheMux);
+    return true;
+}
+#endif
 
 static int canBmsCacheIndex(uint32_t id)
 {
@@ -1458,6 +1632,8 @@ void canDecoderPrintCachedSnapshot(const char *ifname)
     bool any = false;
     bool anyPylon = false;
     bool anyJkbms = false;
+    uint32_t nowMs = (uint32_t)(esp_timer_get_time() / 1000LL);
+    const uint32_t maxAgeMs = BRIDGE_SOURCE_STALE_MS;
 
     canBmsCachedFrame_t *src = canBmsCacheForIf(name);
     pylon_can_frame_t *pylonSrc = canPylonCacheForIf(name);
@@ -1481,9 +1657,18 @@ void canDecoderPrintCachedSnapshot(const char *ifname)
     }
     portEXIT_CRITICAL(&g_canBmsCacheMux);
 
+    canInvalidateStaleGrowattFrames(local, CAN_BMS_CACHE_COUNT, nowMs, maxAgeMs);
+    canInvalidateStalePylonFrames(pylonLocal, PYLON_CAN_CACHE_COUNT, nowMs, maxAgeMs);
+    canInvalidateStaleJkbmsFrames(jkbmsLocal, JKBMS_CAN_CACHE_COUNT, nowMs, maxAgeMs);
+
     anyPylon = pylonCanAnyValid(pylonLocal, PYLON_CAN_CACHE_COUNT);
     if (anyPylon) {
         int protocol = canProtocolForIf(name);
+
+        if (!canPylonCacheHasRequiredFrames(pylonLocal, protocol)) {
+            canClearStaleSourceTelemetry(name, "Pylon/Deye required CAN frames are stale or incomplete");
+            return;
+        }
 
         if (protocol == PROTOCOL_CAN_DEYE) {
             deyeCanDecodeSnapshot(name, pylonLocal, PYLON_CAN_CACHE_COUNT);
@@ -1491,11 +1676,22 @@ void canDecoderPrintCachedSnapshot(const char *ifname)
             pylonCanDecodeSnapshot(name, pylonLocal, PYLON_CAN_CACHE_COUNT);
         }
         return;
+    } else if (canProtocolForIf(name) == PROTOCOL_CAN_PYLON ||
+               canProtocolForIf(name) == PROTOCOL_CAN_DEYE) {
+        canClearStaleSourceTelemetry(name, "no fresh Pylon/Deye CAN frames");
+        return;
     }
 
     anyJkbms = jkbmsCanAnyValid(jkbmsLocal, JKBMS_CAN_CACHE_COUNT);
     if (anyJkbms && canProtocolForIf(name) == PROTOCOL_CAN_JKBMS_250K) {
+        if (!canJkbmsCacheHasRequiredFrames(jkbmsLocal, JKBMS_CAN_CACHE_COUNT)) {
+            canClearStaleSourceTelemetry(name, "JK required CAN frame is stale or incomplete");
+            return;
+        }
         jkbmsCanDecodeSnapshot(name, jkbmsLocal, JKBMS_CAN_CACHE_COUNT);
+        return;
+    } else if (canProtocolForIf(name) == PROTOCOL_CAN_JKBMS_250K) {
+        canClearStaleSourceTelemetry(name, "no fresh JK CAN frames");
         return;
     }
 
@@ -1507,7 +1703,16 @@ void canDecoderPrintCachedSnapshot(const char *ifname)
     }
 
     if (!any) {
+        if (canProtocolForIf(name) == PROTOCOL_CAN_GROWATT) {
+            canClearStaleSourceTelemetry(name, "no fresh Growatt CAN frames");
+        }
         ESP_LOGI(EXAMPLE_TAG, "CAN-%s SNAPSHOT: no cached BMS frames yet", name);
+        return;
+    }
+
+    if (canProtocolForIf(name) == PROTOCOL_CAN_GROWATT &&
+        !canGrowattCacheHasRequiredFrames(local)) {
+        canClearStaleSourceTelemetry(name, "Growatt required CAN frames are stale or incomplete");
         return;
     }
 
@@ -1540,6 +1745,8 @@ bool canDecoderTryGetSocPct(const char *ifname, uint8_t *socOut)
     canBmsCachedFrame_t *src = canBmsCacheForIf(name);
     pylon_can_frame_t *pylonSrc = canPylonCacheForIf(name);
     jkbms_can_frame_t *jkbmsSrc = canJkbmsCacheForIf(name);
+    uint32_t nowMs = (uint32_t)(esp_timer_get_time() / 1000LL);
+    const uint32_t maxAgeMs = BRIDGE_SOURCE_STALE_MS;
     if (src == NULL) {
         return false;
     }
@@ -1557,6 +1764,10 @@ bool canDecoderTryGetSocPct(const char *ifname, uint8_t *socOut)
         memset(jkbmsLocal, 0, sizeof(jkbmsLocal));
     }
     portEXIT_CRITICAL(&g_canBmsCacheMux);
+
+    canInvalidateStaleGrowattFrames(local, CAN_BMS_CACHE_COUNT, nowMs, maxAgeMs);
+    canInvalidateStalePylonFrames(pylonLocal, PYLON_CAN_CACHE_COUNT, nowMs, maxAgeMs);
+    canInvalidateStaleJkbmsFrames(jkbmsLocal, JKBMS_CAN_CACHE_COUNT, nowMs, maxAgeMs);
 
     if (canProtocolForIf(name) == PROTOCOL_CAN_JKBMS_250K &&
         jkbmsCanTryGetSocPct(jkbmsLocal, JKBMS_CAN_CACHE_COUNT, socOut)) {

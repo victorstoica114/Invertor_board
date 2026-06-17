@@ -12,6 +12,8 @@ typedef int uart_port_t;
 #define UART_NUM_2 2
 
 #define UART_SIGNAL_INV_DISABLE 0u
+#define UART_SIGNAL_TXD_INV (1u << 0)
+#define UART_SIGNAL_RXD_INV (1u << 1)
 
 static inline int uart_read_bytes(uart_port_t uart, void *buf, size_t len, int ticks_to_wait)
 {

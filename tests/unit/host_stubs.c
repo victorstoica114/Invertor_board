@@ -42,6 +42,11 @@ void batteryModelSet(const battery_model_t *model)
     }
 }
 
+void batteryModelClear(void)
+{
+    batteryModelSet(NULL);
+}
+
 void bridgeSetTelemetrySnapshot(const bridgeTelemetrySnapshot_t *snapshot)
 {
     (void)snapshot;
