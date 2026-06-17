@@ -40,6 +40,8 @@ The goal is practical maintenance:
 - `RS485_DALY -> CAN_PYLON` bridge-mode route, field-tested with Daly RS485 on `RS485_1` feeding EASUN Pylon CAN on `CAN2`.
 - `RS485_PYLON -> CAN_PYLON` bridge-mode route, field-tested with JK Pylon RS485 on `RS485_1` feeding Pylon CAN output on `CAN2`.
 - `RS485_PYLON -> RS485_GROWATT` bridge-mode route, using the Pylon RS485 active poller as the BMS source and the existing Growatt RS485 responder fed from the shared battery model.
+- `RS485_PYLON -> CAN_GROWATT` bridge-mode route, using the Pylon RS485 active poller as the BMS source and the Growatt CAN sender fed from the shared battery model.
+- `RS485_JKBMS -> CAN_GROWATT` bridge-mode route, so JK Modbus/native RS485 sources can keep full all-cell telemetry in the web/API while feeding Growatt CAN inverter frames.
 - Pylon RS485 `0x42` cell-information parser and host regression coverage, so BMS variants that expose that frame can populate the web/API `cells_v[]` list.
 - Experimental `DALY_CAN` BMS poller/decoder for the Daly proprietary CAN protocol.
 - Experimental `DALY_CAN -> RS485_PYLON` bridge-mode route through the shared battery model and Pylon synthetic responder.
@@ -72,6 +74,10 @@ The goal is practical maintenance:
 - CAN telemetry now expires cached frames before periodic snapshot decoding, preventing stale `CAN_PYLON`/Deye/JK/Growatt cache data from being republished as fresh web telemetry after a BMS disconnect.
 - `RS485_PYLON -> RS485_PYLON` bridge mode stays transparent passthrough for inverter compatibility, while stale native Pylon telemetry is cleared from the web/shared model when BMS responses stop.
 - Runtime settings now boot from the NVS-backed `/api/settings` store by default again; `RUNTIME_SETTINGS_FORCE_DEFAULTS` is disabled and kept only as an explicit diagnostic switch.
+- Documentation now calls out the practical workaround for JK Pylon RS485 profiles that reject `0x42`: select a JK-native BMS-side protocol when `cells_v[]` telemetry is required.
+- Pylon RS485 probing now clears a stale preferred BMS address after source timeout/repeated no-response events, so swapping from one Pylon-like BMS to another resumes address scanning instead of staying pinned to the old address.
+- Pylon RS485 `0x42` cell-info probing now tries the discovered response address before the generic address scan and includes `FF`, full-address, low-nibble, `01`, `00`, and empty-payload variants; the tested Seplos Pylon profile on `0x12` returns OK/no-payload for these requests.
+- Growatt CAN inverter output now follows the selected runtime CAN inverter port and can publish the main low-voltage Growatt CAN frame set from the shared battery model.
 - Flash size is configured for `8MB`, and the app partition was expanded from `1MB` to `7MB`.
 - `bms_decoded_packet_t` now carries richer decoded telemetry for protocols that expose per-cell voltages, per-sensor temperatures, warning/protection/fault masks, status flags, and balance flags.
 - Pylon synthetic status generation can now use explicit PACE MOSFET charge/discharge flags while keeping the conservative generic fallback for non-native sources.

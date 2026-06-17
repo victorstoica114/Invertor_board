@@ -74,6 +74,7 @@ static pylon_rs485_summary_t s_pylonSummary = {0};
 static pylonProbePending_t s_probePending = {0};
 static pylonForwardPending_t s_forwardPending = {0};
 static uint8_t s_probePreferredAdr = 0;
+static uint8_t s_probePreferredAdrTimeouts = 0;
 static TaskHandle_t s_pylonBmsTask = NULL;
 static TaskHandle_t s_pylonInvTask = NULL;
 static TaskHandle_t s_pylonProbeTaskHandle = NULL;
@@ -204,9 +205,11 @@ static bool pylonRs485SourceOnlyModeEnabled(const bridge_runtime_settings_t *set
     return (settings != NULL) &&
            (settings->mode == MODE_BRIDGE) &&
            (settings->bms_line == LINE_RS485) &&
-           (settings->inverter_line == LINE_RS485) &&
            bridgeProtocolIsRs485Pylon(settings->bms_protocol) &&
-           (settings->inverter_protocol == PROTOCOL_RS485_GROWATT);
+           (((settings->inverter_line == LINE_RS485) &&
+             (settings->inverter_protocol == PROTOCOL_RS485_GROWATT)) ||
+            ((settings->inverter_line == LINE_CAN) &&
+             (settings->inverter_protocol == PROTOCOL_CAN_GROWATT)));
 }
 
 static bool pylonSyntheticSourceModeEnabled(const bridge_runtime_settings_t *settings)
@@ -473,6 +476,9 @@ static void maybeClearNativePylonCacheIfStale(int64_t nowUs)
     snprintf(s_pylonCache.info62, sizeof(s_pylonCache.info62), "00000000");
     s_pylonCache.valid62 = true;
     memset(&s_pylonSummary, 0, sizeof(s_pylonSummary));
+    memset(&s_probePending, 0, sizeof(s_probePending));
+    s_probePreferredAdr = 0u;
+    s_probePreferredAdrTimeouts = 0u;
     batteryModelClear();
     bridgeSetTelemetrySnapshot(NULL);
     bridgeSetDecodedLogSnapshot("");
@@ -1291,6 +1297,7 @@ void pylonRs485BridgeResetForTest(void)
     memset(&s_probePending, 0, sizeof(s_probePending));
     memset(&s_forwardPending, 0, sizeof(s_forwardPending));
     s_probePreferredAdr = 0u;
+    s_probePreferredAdrTimeouts = 0u;
     s_lastPylonBmsTrafficUs = 0;
     s_lastPylonInverterTrafficUs = 0;
     s_lastCacheBuildDiagUs = 0;
@@ -2189,9 +2196,21 @@ static bool maybeHandleProbeResponse(const pylonRs485BridgeCtx_t *ctx, const uin
         s_probePending.active = false;
         return true;
     }
+    if (s_probePending.cid2 == 0x42u && (len - 18) < 6) {
+        if (pylonDiagLogsEnabled()) {
+            ESP_LOGW(EXAMPLE_TAG,
+                     "RS485 PYLON 0x42 response on %s has no cell payload: addr=0x%02X len=%d",
+                     ctx->rxName,
+                     (unsigned)adr,
+                     len);
+        }
+        s_probePending.active = false;
+        return true;
+    }
     cacheResponse(s_probePending.cid2, frame, len);
     if (s_probePending.cid2 != 0x42u) {
         s_probePreferredAdr = adr;
+        s_probePreferredAdrTimeouts = 0u;
     }
     if (pylonDiagLogsEnabled()) {
         ESP_LOGI(EXAMPLE_TAG,
@@ -2217,6 +2236,22 @@ static void maybeCheckProbeTimeout(const pylonRs485BridgeCtx_t *ctx, int64_t now
                  ctx->rxName,
                  (unsigned)s_probePending.cid2,
                  (unsigned)s_probePending.adr);
+    }
+    if (s_probePreferredAdr != 0u &&
+        s_probePending.adr == s_probePreferredAdr &&
+        s_probePending.cid2 != 0x42u) {
+        if (s_probePreferredAdrTimeouts < UINT8_MAX) {
+            s_probePreferredAdrTimeouts++;
+        }
+        if (s_probePreferredAdrTimeouts >= 6u) {
+            if (pylonDiagLogsEnabled()) {
+                ESP_LOGW(EXAMPLE_TAG,
+                         "RS485 PYLON preferred addr 0x%02X timed out repeatedly; resuming address scan",
+                         (unsigned)s_probePreferredAdr);
+            }
+            s_probePreferredAdr = 0u;
+            s_probePreferredAdrTimeouts = 0u;
+        }
     }
     s_probePending.active = false;
 }
@@ -2488,11 +2523,27 @@ static void pylonBridgeTask(void *pv)
     }
 }
 
+static const char *pylonCellInfoProbePayload(const char *variant, uint8_t adr, char *buf, size_t bufSize)
+{
+    if (variant == NULL) {
+        return NULL;
+    }
+    if (strcmp(variant, "$ADR") == 0) {
+        snprintf(buf, bufSize, "%02X", (unsigned)adr);
+        return buf;
+    }
+    if (strcmp(variant, "$LOW") == 0) {
+        snprintf(buf, bufSize, "%02X", (unsigned)(adr & 0x0Fu));
+        return buf;
+    }
+    return variant;
+}
+
 static void pylonProbeTask(void *pv)
 {
-    static const uint8_t addresses[] = {0x02, 0x12, 0x22, 0x32, 0x42};
+    static const uint8_t addresses[] = {0x00, 0x01, 0x02, 0x12, 0x22, 0x32, 0x42};
     static const uint8_t cid2Seq[] = {0x61, 0x42, 0x63, 0x62};
-    static const char *cellInfoPayloads[] = {"FF", "00", "01", NULL};
+    static const char *cellInfoPayloads[] = {"FF", "$ADR", "$LOW", "01", "00", NULL};
     pylonProbeTaskCtx_t *ctx = (pylonProbeTaskCtx_t *)pv;
     size_t addrIdx = 0;
     size_t cellInfoAddrIdx = 0;
@@ -2500,16 +2551,34 @@ static void pylonProbeTask(void *pv)
     size_t cidIdx = 0;
     int64_t cellInfoRetryAfterUs = 0;
     uint8_t frame[32];
+    char cellInfoPayloadBuf[3];
     int frameLen = 0;
 
     while (1) {
         uint8_t cid2 = cid2Seq[cidIdx];
         int64_t nowUs = esp_timer_get_time();
         bridge_runtime_settings_t settings = runtimeSettingsGet();
+        const size_t addressCount = sizeof(addresses) / sizeof(addresses[0]);
+        size_t cellInfoAddressCount = addressCount + ((s_probePreferredAdr != 0u) ? 1u : 0u);
         bool discoverCellInfoAddr = (cid2 == 0x42u) && !s_pylonCache.valid42;
-        uint8_t adr = discoverCellInfoAddr
-                          ? addresses[cellInfoAddrIdx]
-                          : ((s_probePreferredAdr != 0u) ? s_probePreferredAdr : addresses[addrIdx]);
+        uint8_t cellInfoAdr;
+        uint8_t adr;
+
+        if (cellInfoAddressCount == 0u) {
+            cellInfoAddressCount = addressCount;
+        }
+        if (cellInfoAddrIdx >= cellInfoAddressCount) {
+            cellInfoAddrIdx = 0u;
+        }
+        cellInfoAdr = addresses[cellInfoAddrIdx % addressCount];
+        if (s_probePreferredAdr != 0u) {
+            cellInfoAdr = (cellInfoAddrIdx == 0u)
+                              ? s_probePreferredAdr
+                              : addresses[(cellInfoAddrIdx - 1u) % addressCount];
+        }
+        adr = discoverCellInfoAddr
+                  ? cellInfoAdr
+                  : ((s_probePreferredAdr != 0u) ? s_probePreferredAdr : addresses[addrIdx]);
 
         if (pylonProbeShouldWaitForQuiet(settings.mode,
                                          nowUs,
@@ -2528,13 +2597,17 @@ static void pylonProbeTask(void *pv)
         }
 
         bool built = (cid2 == 0x42u)
-                         ? pylonBuildRequest(0x20,
-                                             adr,
-                                             cid2,
-                                             cellInfoPayloads[cellInfoPayloadIdx],
-                                             frame,
-                                             sizeof(frame),
-                                             &frameLen)
+                         ? pylonBuildRequest(
+                               0x20,
+                               adr,
+                               cid2,
+                               pylonCellInfoProbePayload(cellInfoPayloads[cellInfoPayloadIdx],
+                                                         adr,
+                                                         cellInfoPayloadBuf,
+                                                         sizeof(cellInfoPayloadBuf)),
+                               frame,
+                               sizeof(frame),
+                               &frameLen)
                          : pylonBuildEmptyRequest(0x20, adr, cid2, frame, sizeof(frame), &frameLen);
 
         if (built) {
@@ -2557,7 +2630,7 @@ static void pylonProbeTask(void *pv)
             cellInfoPayloadIdx =
                 (cellInfoPayloadIdx + 1u) % (sizeof(cellInfoPayloads) / sizeof(cellInfoPayloads[0]));
             if (cellInfoPayloadIdx == 0u) {
-                cellInfoAddrIdx = (cellInfoAddrIdx + 1u) % (sizeof(addresses) / sizeof(addresses[0]));
+                cellInfoAddrIdx = (cellInfoAddrIdx + 1u) % cellInfoAddressCount;
                 if (cellInfoAddrIdx == 0u && !s_pylonCache.valid42) {
                     cellInfoRetryAfterUs = nowUs + 60000000LL;
                     if (pylonDiagLogsEnabled()) {
@@ -2670,6 +2743,7 @@ void pylonRs485BridgeEnable(void)
     memset(&s_probePending, 0, sizeof(s_probePending));
     memset(&s_forwardPending, 0, sizeof(s_forwardPending));
     s_probePreferredAdr = 0;
+    s_probePreferredAdrTimeouts = 0u;
     s_lastPylonBmsTrafficUs = 0;
     s_lastPylonInverterTrafficUs = 0;
     snprintf(s_pylonCache.info62, sizeof(s_pylonCache.info62), "00000000");
@@ -2763,7 +2837,8 @@ void pylonRs485BridgeEnable(void)
         ESP_LOGI(EXAMPLE_TAG, "Pylon RS485->CAN translator armed (BMS=RS485_PYLON inverter=CAN_PYLON)");
     } else if (rs485SourceOnly) {
         ESP_LOGI(EXAMPLE_TAG,
-                 "Pylon RS485 source poller armed (BMS=RS485_PYLON inverter=RS485_GROWATT)");
+                 "Pylon RS485 source poller armed (BMS=RS485_PYLON inverter=%s)",
+                 protocolToStrLocal(settings.inverter_protocol));
     } else if (rs485CachedResponder) {
         ESP_LOGI(EXAMPLE_TAG,
                  "Pylon RS485 cached responder armed (BMS=RS485_PYLON inverter=RS485_PYLON)");

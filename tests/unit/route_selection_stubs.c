@@ -33,6 +33,7 @@ int g_routeStubWowBmsStartCount;
 int g_routeStubSeplosBmsStartCount;
 int g_routeStubDalyRs485BmsStartCount;
 int g_routeStubDalyCanBmsStartCount;
+int g_routeStubGrowattInverterStartCount;
 int g_routeStubPylonInverterStartCount;
 int g_routeStubPylonBridgeEnableCount;
 int g_routeStubCanForwardStartCount;
@@ -48,6 +49,7 @@ void routeSelectionStubReset(void)
     g_routeStubSeplosBmsStartCount = 0;
     g_routeStubDalyRs485BmsStartCount = 0;
     g_routeStubDalyCanBmsStartCount = 0;
+    g_routeStubGrowattInverterStartCount = 0;
     g_routeStubPylonInverterStartCount = 0;
     g_routeStubPylonBridgeEnableCount = 0;
     g_routeStubCanForwardStartCount = 0;
@@ -240,6 +242,7 @@ bool dalyCanBmsTaskGetLatestSnapshot(daly_rs485_snapshot_t *outSnapshot)
 esp_err_t growattInverterTaskStart(QueueHandle_t inQueue)
 {
     (void)inQueue;
+    g_routeStubGrowattInverterStartCount++;
     return ESP_OK;
 }
 
@@ -310,6 +313,11 @@ bool pylonRs485BridgeSupportsRoute(const bridge_runtime_settings_t *settings)
             (settings->inverter_line == LINE_CAN) &&
             bridgeProtocolIsRs485Pylon(settings->bms_protocol) &&
             (settings->inverter_protocol == PROTOCOL_CAN_PYLON)) ||
+           ((settings->mode == MODE_BRIDGE) &&
+            (settings->bms_line == LINE_RS485) &&
+            (settings->inverter_line == LINE_CAN) &&
+            bridgeProtocolIsRs485Pylon(settings->bms_protocol) &&
+            (settings->inverter_protocol == PROTOCOL_CAN_GROWATT)) ||
            ((settings->bms_line == LINE_CAN) &&
             (settings->inverter_line == LINE_RS485) &&
             ((settings->bms_protocol == PROTOCOL_CAN_PYLON) ||

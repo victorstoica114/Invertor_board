@@ -46,9 +46,10 @@ Implemented / available:
 - `WOW_MODBUS` BMS polling/decoding for JK UART profile `009 - WOW_RS485_Modbus_V1.3` + PACE-compatible pack/cell/temperature snapshot
 - `DALY_RS485` BMS polling/decoding for the Daly proprietary RS485 protocol + rich snapshot
 - experimental `DALY_CAN` BMS polling/decoding for the Daly proprietary CAN protocol
-- `GROWATT` inverter CAN sender (publishes frame `0x322`)
+- `GROWATT` inverter CAN sender (publishes the main low-voltage Growatt CAN frame set from the shared battery model)
 - `CAN_GROWATT | CAN_PYLON | CAN_GOODWE | CAN_SOFAR | CAN_SMA | CAN_VICTRON -> RS485_GROWATT` translator (`main/protocols/rs485_growatt/rs485_growatt_bridge.c`)
 - `RS485_JKBMS -> RS485_GROWATT` translator (`JKBMS_MODBUS`, `JKBMS_MODBUS_115200`, and `JKBMS_RS485_NATIVE`)
+- `RS485_JKBMS -> CAN_GROWATT` translator/sender (`JKBMS_MODBUS`, `JKBMS_MODBUS_115200`, and `JKBMS_RS485_NATIVE`), preserving JK all-cell telemetry while publishing Growatt CAN inverter frames
 - `RS485_JKBMS -> RS485_PYLON` translator/responder (`JKBMS_MODBUS`, `JKBMS_MODBUS_115200`, and `JKBMS_RS485_NATIVE`)
 - `RS485_GROWATT -> RS485_PYLON` translator/responder, intended for JK UART profile `006 - Growatt_BMS_RS485_Protocol_1xSxxP_ESS_Rev2.01`
 - `RS485_PACE -> RS485_PYLON` translator/responder
@@ -58,6 +59,7 @@ Implemented / available:
 - `RS485_DALY -> RS485_PYLON` translator/responder
 - `RS485_DALY -> CAN_PYLON` translator/sender, field-tested as Daly RS485 on `RS485_1` to EASUN Pylon CAN on `CAN2`
 - `RS485_PYLON -> CAN_PYLON` translator/sender, field-tested as JK Pylon RS485 on `RS485_1` to Pylon CAN inverter output on `CAN2`
+- `RS485_PYLON -> CAN_GROWATT` translator/sender, using the Pylon RS485 source poller and Growatt CAN sender on the selected CAN inverter port
 - experimental `DALY_CAN -> RS485_PYLON` translator/responder
 - `RS485_PYLON <-> RS485_PYLON` bridge/responder, including the `RS485_PYLON_115200` variant
 - `CAN_PYLON -> RS485_PYLON` synthetic responder/bridge, including the `RS485_PYLON_115200` variant
@@ -82,6 +84,7 @@ Current bridge-mode route matrix:
 | --- | --- | --- |
 | CAN -> RS485_GROWATT translator | `bms_line=CAN`, `inv_line=RS485`, `inv_protocol=RS485_GROWATT`, `bms_protocol in {CAN_GROWATT,CAN_PYLON,CAN_GOODWE,CAN_SOFAR,CAN_SMA,CAN_VICTRON}` | Active |
 | RS485_JKBMS -> RS485_GROWATT translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol in {JKBMS_MODBUS,JKBMS_MODBUS_115200,JKBMS_RS485_NATIVE}`, `inv_protocol=RS485_GROWATT` | Active for Modbus; native is experimental |
+| RS485_JKBMS -> CAN_GROWATT translator | `bms_line=RS485`, `inv_line=CAN`, `bms_protocol in {JKBMS_MODBUS,JKBMS_MODBUS_115200,JKBMS_RS485_NATIVE}`, `inv_protocol=CAN_GROWATT` | Active; preferred when the web/API must show JK all-cell voltages while the inverter receives Growatt CAN |
 | RS485_JKBMS -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol in {JKBMS_MODBUS,JKBMS_MODBUS_115200,JKBMS_RS485_NATIVE}`, `inv_protocol in {RS485_PYLON,RS485_PYLON_115200}` | Active for Modbus; native is experimental |
 | RS485_GROWATT -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=RS485_GROWATT`, `inv_protocol=RS485_PYLON` | Active; covers JK UART profile `006` |
 | RS485_PACE -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=PACE_RS485_MODBUS`, `inv_protocol=RS485_PYLON` | Active |
@@ -91,6 +94,7 @@ Current bridge-mode route matrix:
 | RS485_DALY -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=DALY_RS485`, `inv_protocol=RS485_PYLON` | Active |
 | RS485_DALY -> CAN_PYLON translator | `bms_line=RS485`, `inv_line=CAN`, `bms_protocol=DALY_RS485`, `inv_protocol=CAN_PYLON` | Active; field-tested with EASUN 24V |
 | RS485_PYLON -> CAN_PYLON translator | `bms_line=RS485`, `inv_line=CAN`, `bms_protocol in {RS485_PYLON,RS485_PYLON_115200}`, `inv_protocol=CAN_PYLON` | Active; field-tested with JK Pylon RS485 at 9600 |
+| RS485_PYLON -> CAN_GROWATT translator | `bms_line=RS485`, `inv_line=CAN`, `bms_protocol in {RS485_PYLON,RS485_PYLON_115200}`, `inv_protocol=CAN_GROWATT` | Active; uses the Pylon RS485 source poller and Growatt CAN sender |
 | DALY_CAN -> RS485_PYLON translator | `bms_line=CAN`, `inv_line=RS485`, `bms_protocol=DALY_CAN`, `inv_protocol=RS485_PYLON` | Experimental; protocol task implemented, live CAN link not validated |
 | Pylon RS485 bridge | `RS485_PYLON<->RS485_PYLON`, `RS485_PYLON->CAN_PYLON`, `CAN_PYLON->RS485_PYLON`, `CAN_DEYE->RS485_PYLON`, or `JKBMS_CAN_250K->RS485_PYLON`, with `RS485_PYLON_115200` accepted on RS485 sides | Active |
 | Generic orchestrator route | any other valid combination | Active, depends on protocol task maturity |
@@ -217,13 +221,25 @@ Validated live values:
   empty payload was rejected on the live `0x02` address with response code
   `0x04`; the other tested Pylon pack addresses did not answer. For this JK
   profile the UI/API therefore shows only the `0x61` cell max/min values, not
-  `cells_v[]`.
+  `cells_v[]`. Use `JKBMS_MODBUS` or `JKBMS_RS485_NATIVE` on the BMS side, plus
+  an inverter-facing route such as `RS485_JKBMS -> CAN_GROWATT`, when full cell
+  voltages are required in telemetry.
+- Pylon-compatible RS485 batteries can expose all-cell telemetry through
+  `CID2=0x42`; the active probe now tries the aggregate `FF` request, the
+  discovered response address, the low address nibble, `01`, `00`, and an empty
+  payload. The tested Seplos Pylon profile replied to `0x42` on address `0x12`
+  with an OK frame but no payload for those request forms, so its web/API
+  telemetry currently remains limited to `0x61` cell max/min values.
 
 Implementation details that matter:
 
 - The active Pylon RS485 probe discovers the live BMS response address
   (`0x02` on the tested JK setup) and then keeps using that address instead of
   cycling slowly through every candidate address.
+- When a BMS is swapped on the same RS485 port, the probe drops the old
+  preferred Pylon address after stale traffic or repeated timeouts and resumes
+  address scanning. This was needed after swapping from a JK Pylon device to a
+  Seplos Pylon device, where Seplos responded on `0x12`.
 - JK-style Pylon RS485 `0x61` responses can encode the first voltage word as a
   raw millivolt-like pack value. The firmware normalizes that value before web
   telemetry and Pylon CAN transmission, so `0xDF34` becomes about `57.14 V`,
@@ -297,6 +313,11 @@ Observed on the bench:
 - Adding external RS485 bias resistors to the Seplos-facing bus made the link
   behave normally enough for valid Pylon-style Seplos responses to be captured
   and decoded.
+- With the biased Seplos link, `0x61`, `0x62`, and `0x63` Pylon-compatible
+  responses decode correctly on address `0x12`. `0x42` cell-information probes
+  using `FF`, the discovered address (`12`), low nibble (`02`), `01`, `00`, and
+  empty payload returned OK/no-payload frames, so this Seplos Pylon profile did
+  not expose full per-cell voltages during the field test.
 
 Hardware requirement / diagnostic recommendation:
 

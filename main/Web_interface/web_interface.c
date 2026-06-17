@@ -564,6 +564,7 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "let txt='';"
         "if(mode!==3){txt='Bridge inactive in this mode.';}"
         "else if(bl===2&&(bp===6||bp===16||bp===12)&&il===2&&ip===2){txt='Special route active: '+protoLabel(bp)+' (RS485_'+bport+') -> RS485_GROWATT responder (RS485_'+iport+').';}"
+        "else if(bl===2&&(bp===6||bp===16||bp===12)&&il===1&&ip===1){txt='Special route active: '+protoLabel(bp)+' (RS485_'+bport+') -> CAN_GROWATT sender (CAN_'+iport+').';}"
         "else if(bl===2&&(bp===6||bp===16||bp===12)&&il===2&&(ip===3||ip===17)){txt='Special route active: '+protoLabel(bp)+' (RS485_'+bport+') -> '+protoLabel(ip)+' responder (RS485_'+iport+').';}"
         "else if(bl===2&&bp===11&&il===2&&(ip===3||ip===17)){txt='Special route active: PACE_RS485_MODBUS_V1.3 (RS485_'+bport+') -> '+protoLabel(ip)+' responder (RS485_'+iport+').';}"
         "else if(bl===2&&bp===2&&il===2&&(ip===3||ip===17)){txt='Special route active: RS485_GROWATT / JK 006 (RS485_'+bport+') -> '+protoLabel(ip)+' responder (RS485_'+iport+').';}"
