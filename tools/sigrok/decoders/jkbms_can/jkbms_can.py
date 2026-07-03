@@ -4,6 +4,9 @@
 ## Kept dependency-free so the parser can be unit-tested without PulseView.
 ##
 
+DECODER_VERSION = 'v2026.07.03a'
+JKBMS_CAN_MAX_CELLS = 25
+
 SHORT_FRAME_NAMES = {
     0x02F0: 'battery status',
     0x04F0: 'cell voltage extremes',
@@ -14,9 +17,9 @@ SHORT_FRAME_NAMES = {
 EXT_FRAME_NAMES = {
     0x18F128F0: 'capacity/cycles',
     0x18F228F0: 'extended temperatures',
-    0x18F328F0: 'extended alarms',
-    0x18F428F0: 'BMS info',
-    0x18F528F0: 'BMS status',
+    0x18F328F0: 'extended alarms raw',
+    0x18F428F0: 'BMS info raw',
+    0x18F528F0: 'BMS status raw',
     0x1806E5F0: 'charge limits',
 }
 
@@ -95,6 +98,14 @@ def temp_c(raw):
     return float(raw) - 50.0
 
 
+def cell_voltage_text(cell_idx, mv):
+    if mv == 0:
+        return 'C{:02d}=0'.format(cell_idx)
+    if mv > 7000:
+        return 'C{:02d}=raw{}mV?'.format(cell_idx, mv)
+    return 'C{:02d}={:.3f}V'.format(cell_idx, mv / 1000.0)
+
+
 def alarm_level_text(level):
     return {
         0: 'none',
@@ -153,13 +164,13 @@ def describe_cell_voltage_frame(cmd, data):
     cells = []
     for idx in range(4):
         off = idx * 2
+        cell_idx = base_cell + idx
         if off + 1 >= len(data):
             break
+        if cell_idx > JKBMS_CAN_MAX_CELLS:
+            break
         mv = le16(data, off)
-        if mv == 0:
-            cells.append('C{:02d}=0'.format(base_cell + idx))
-        else:
-            cells.append('C{:02d}={:.3f}V'.format(base_cell + idx, mv / 1000.0))
+        cells.append(cell_voltage_text(cell_idx, mv))
 
     return '0x{:08X} cells {}'.format(cmd, ' '.join(cells) if cells else 'none')
 
@@ -207,10 +218,11 @@ def describe_packet(can_packet):
         return '0x{:03X} alarms raw=0x{:08X} {}'.format(cmd, raw, active_alarm_levels(raw))
 
     if cmd == 0x18F128F0 and dlc >= 8:
-        return '0x{:08X} capacity remain={:.1f}Ah rated={:.1f}Ah cycles={}'.format(
+        return '0x{:08X} capacity remain={:.1f}Ah rated={:.1f}Ah reserved=0x{:04X} cycles={}'.format(
             cmd,
             le16(data, 0) / 10.0,
             le16(data, 2) / 10.0,
+            le16(data, 4),
             le16(data, 6),
         )
 
@@ -222,10 +234,11 @@ def describe_packet(can_packet):
         return cell_text
 
     if cmd == 0x1806E5F0 and dlc >= 4:
-        return '0x{:08X} charge limit V={:.1f}V I={:.1f}A'.format(
+        return '0x{:08X} charge info V={:.1f}V I={:.1f}A raw={}'.format(
             cmd,
             le16(data, 0) / 10.0,
             le16(data, 2) / 10.0,
+            format_data(data),
         )
 
     name = FRAME_NAMES.get(cmd, 'unknown')

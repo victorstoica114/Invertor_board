@@ -34,7 +34,8 @@ Available PulseView/libsigrokdecode protocol decoders:
 - `jkbms_modbus`: JK BMS RS485 Modbus poller frames, stacked above `uart`;
   current visible name is `JKBMS Modbus v2026.07.02b`
 - `jkbms_rs485_native`: JK native binary RS485 frames, stacked above `uart`
-- `jkbms_can`: JK native CAN V2.0 frames, standalone CAN decoder
+- `jkbms_can`: JK native CAN V2.0 frames, standalone CAN decoder;
+  current visible name is `JKBMS CAN v2026.07.03a`
 
 ## Pylon RS485 Decoder
 
@@ -356,7 +357,8 @@ Copy-Item -Recurse tools\sigrok\decoders\jkbms_rs485_native "$env:ProgramData\li
 ## JKBMS CAN Decoder
 
 The `decoders/jkbms_can` directory is a PulseView/libsigrokdecode protocol
-decoder for JK app profile `000 - JK BMS CAN Protocol (250K) V2.0`. It is
+decoder for JK app profile `000 - JK BMS CAN Protocol (250K) V2.0`. Its
+current visible PulseView name is `JKBMS CAN v2026.07.03a`. It is
 standalone on the CAN RX logic signal and internally reuses the built-in CAN
 decoder, so add it directly from the decoder selector.
 
@@ -384,6 +386,8 @@ reference: `0x02F4`, `0x04F4`, `0x05F4`, `0x07F4`, extended cell-voltage frames
 `0x18E028F4..0x18E628F4`, extended temperatures `0x18F228F4`, and related
 status/capacity frames. It also accepts the same command family with an `...F0`
 suffix, because some references mask the low nibble as the JK node/BMS suffix.
+Per-cell voltage decoding is capped at cells `1..25`, matching the ESP32
+firmware cache behavior.
 
 On Windows, copy the whole decoder directory alongside the other custom
 decoders, or run the installer script:

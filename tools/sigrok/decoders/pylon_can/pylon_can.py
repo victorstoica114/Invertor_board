@@ -9,11 +9,18 @@ FRAME_NAMES = {
     0x355: 'SOC/SOH',
     0x356: 'pack',
     0x359: 'module info',
+    0x35A: 'vendor info',
     0x35C: 'status',
     0x35E: 'ASCII name',
     0x370: 'JK ext cell/temp',
     0x371: 'JK ext indexes',
+    0x372: 'misc',
     0x373: 'cell/temp',
+    0x374: 'ASCII 1',
+    0x375: 'ASCII 2',
+    0x376: 'ASCII 3',
+    0x377: 'ASCII 4',
+    0x379: 'misc',
 }
 
 
@@ -158,4 +165,3 @@ def frame_summary(can_packet):
 
 def format_data(data):
     return ' '.join('{:02X}'.format(value & 0xFF) for value in data)
-

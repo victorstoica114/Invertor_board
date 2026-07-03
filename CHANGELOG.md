@@ -77,6 +77,7 @@ The goal is practical maintenance:
 - Sigrok/PulseView documentation now includes a persistent combined decoder installation flow so built-in decoders such as `CAN` stay visible alongside `Pylon CAN` and `Pylon RS485`.
 - Sigrok/PulseView workflow now treats this firmware repository as the decoder workbench/source of truth; the separate decoder repository is reserved for validated/published decoders only.
 - Added a PulseView decoder coverage/backlog document so register-map coverage, tentative fields, and publication rules stay explicit while decoders are refined.
+- `JKBMS CAN` PulseView decoder was bumped to visible version `v2026.07.03a`, aligned with the ESP32 JK CAN map for `1..25` extended cell-voltage decoding, and now exposes vendor-reference capacity/charge-info frames without inventing meanings for still-raw frames.
 - `JKBMS_MODBUS` now treats the `0x12A0..0x12A1` alarm/status word as a raw
   candidate unless validated by a real fault-state capture; this prevents live
   no-alarm values such as `0x2344_6400` from surfacing as false UI protections
@@ -121,6 +122,7 @@ The goal is practical maintenance:
 
 ### Fixed
 
+- Web settings route hints now follow the currently selected form values and failed saves surface an explicit timeout/error instead of leaving the UI stuck on `Saving...`.
 - Fixed inverter fault on `JKBMS_MODBUS -> RS485_PYLON`.
 - Fixed the inactive/stale source path for `CAN_DEYE -> RS485_PYLON`, where the Deye decoder existed but the Pylon responder route was not being armed as a supported synthetic source.
 

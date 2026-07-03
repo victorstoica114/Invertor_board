@@ -69,5 +69,8 @@
 #define PYLON_CAN_371_OFF_CELL_MAX_IDX  4u
 #define PYLON_CAN_371_OFF_CELL_MIN_IDX  6u
 
-/* Optional/placeholder Modbus map kept for future Pylon RS485 extensions. */
-#include "pylon_register_map.h"
+/*
+ * Pylon RS485 is an ASCII CID2 payload protocol in this codebase, not a
+ * Modbus register map. Keep RS485 payload structures in pylon_rs485_protocol.h
+ * and keep this file focused on CAN frame IDs/offsets.
+ */

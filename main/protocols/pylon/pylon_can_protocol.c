@@ -128,22 +128,22 @@ bool pylonCanAnyValid(const pylon_can_frame_t *cache, size_t count)
 
 void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, size_t count)
 {
-    const pylon_can_frame_t *f351 = pylonCanFrameById(cache, count, 0x351u);
-    const pylon_can_frame_t *f355 = pylonCanFrameById(cache, count, 0x355u);
-    const pylon_can_frame_t *f356 = pylonCanFrameById(cache, count, 0x356u);
-    const pylon_can_frame_t *f359 = pylonCanFrameById(cache, count, 0x359u);
-    const pylon_can_frame_t *f35A = pylonCanFrameById(cache, count, 0x35Au);
-    const pylon_can_frame_t *f35C = pylonCanFrameById(cache, count, 0x35Cu);
-    const pylon_can_frame_t *f35E = pylonCanFrameById(cache, count, 0x35Eu);
+    const pylon_can_frame_t *f351 = pylonCanFrameById(cache, count, PYLON_CAN_ID_LIMITS_351);
+    const pylon_can_frame_t *f355 = pylonCanFrameById(cache, count, PYLON_CAN_ID_SOC_SOH_355);
+    const pylon_can_frame_t *f356 = pylonCanFrameById(cache, count, PYLON_CAN_ID_PACK_356);
+    const pylon_can_frame_t *f359 = pylonCanFrameById(cache, count, PYLON_CAN_ID_MODULE_INFO_359);
+    const pylon_can_frame_t *f35A = pylonCanFrameById(cache, count, PYLON_CAN_ID_VENDOR_INFO_35A);
+    const pylon_can_frame_t *f35C = pylonCanFrameById(cache, count, PYLON_CAN_ID_STATUS_35C);
+    const pylon_can_frame_t *f35E = pylonCanFrameById(cache, count, PYLON_CAN_ID_ASCII_ID_35E);
     const pylon_can_frame_t *f370 = pylonCanFrameById(cache, count, PYLON_CAN_ID_JK_EXT_CELL_370);
     const pylon_can_frame_t *f371 = pylonCanFrameById(cache, count, PYLON_CAN_ID_JK_EXT_INDEX_371);
-    const pylon_can_frame_t *f372 = pylonCanFrameById(cache, count, 0x372u);
-    const pylon_can_frame_t *f373 = pylonCanFrameById(cache, count, 0x373u);
-    const pylon_can_frame_t *f374 = pylonCanFrameById(cache, count, 0x374u);
-    const pylon_can_frame_t *f375 = pylonCanFrameById(cache, count, 0x375u);
-    const pylon_can_frame_t *f376 = pylonCanFrameById(cache, count, 0x376u);
-    const pylon_can_frame_t *f377 = pylonCanFrameById(cache, count, 0x377u);
-    const pylon_can_frame_t *f379 = pylonCanFrameById(cache, count, 0x379u);
+    const pylon_can_frame_t *f372 = pylonCanFrameById(cache, count, PYLON_CAN_ID_MISC_372);
+    const pylon_can_frame_t *f373 = pylonCanFrameById(cache, count, PYLON_CAN_ID_CELL_TEMP_373);
+    const pylon_can_frame_t *f374 = pylonCanFrameById(cache, count, PYLON_CAN_ID_ASCII_374);
+    const pylon_can_frame_t *f375 = pylonCanFrameById(cache, count, PYLON_CAN_ID_ASCII_375);
+    const pylon_can_frame_t *f376 = pylonCanFrameById(cache, count, PYLON_CAN_ID_ASCII_376);
+    const pylon_can_frame_t *f377 = pylonCanFrameById(cache, count, PYLON_CAN_ID_ASCII_377);
+    const pylon_can_frame_t *f379 = pylonCanFrameById(cache, count, PYLON_CAN_ID_MISC_379);
     bridgeTelemetrySnapshot_t snap = {0};
     char raw359[32] = {0};
     char raw35A[32] = {0};

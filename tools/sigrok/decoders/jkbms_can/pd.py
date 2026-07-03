@@ -16,9 +16,9 @@ except Exception:
     SamplerateError = Exception
 
 try:
-    from .jkbms_can import describe_packet, format_data, frame_summary, is_known_frame_id
+    from .jkbms_can import DECODER_VERSION, describe_packet, format_data, frame_summary, is_known_frame_id
 except Exception:
-    from jkbms_can import describe_packet, format_data, frame_summary, is_known_frame_id
+    from jkbms_can import DECODER_VERSION, describe_packet, format_data, frame_summary, is_known_frame_id
 
 
 class ChannelError(Exception):
@@ -41,8 +41,8 @@ else:
 class Decoder(BaseDecoder):
     api_version = 3
     id = 'jkbms_can'
-    name = 'JKBMS CAN'
-    longname = 'JKBMS native CAN'
+    name = 'JKBMS CAN {}'.format(DECODER_VERSION)
+    longname = 'JKBMS native CAN V2.0 {}'.format(DECODER_VERSION)
     desc = 'JK BMS native CAN V2.0 frames over Classic CAN.'
     license = 'gplv2+'
     inputs = ['logic']

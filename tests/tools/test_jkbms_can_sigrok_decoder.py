@@ -15,7 +15,7 @@ PULSEVIEW_DECODER_DIR = Path(r"C:\Program Files\sigrok\PulseView\share\libsigrok
 PULSEVIEW_SRD_DIR = Path(r"C:\Program Files\sigrok\PulseView\share\libsigrokdecode")
 sys.path.insert(0, str(DECODER_DIR))
 
-from jkbms_can import describe_packet, frame_summary, is_known_frame_id  # noqa: E402
+from jkbms_can import DECODER_VERSION, describe_packet, frame_summary, is_known_frame_id  # noqa: E402
 
 
 def test_jkbms_can_describes_native_battery_status_frame():
@@ -77,6 +77,45 @@ def test_jkbms_can_describes_extended_temperatures():
     assert "T5=28.0C" in text
 
 
+def test_jkbms_can_describes_vendor_capacity_and_charge_info_frames():
+    capacity = (
+        "extended",
+        0x18F128F4,
+        "data",
+        8,
+        [0xF4, 0x01, 0x80, 0x02, 0x00, 0x00, 0x40, 0x00],
+    )
+    charge_info = (
+        "extended",
+        0x1806E5F4,
+        "data",
+        8,
+        [0x40, 0x02, 0xF4, 0x01, 0, 0, 0, 0],
+    )
+
+    assert "remain=50.0Ah" in describe_packet(capacity)
+    assert "rated=64.0Ah" in describe_packet(capacity)
+    assert "cycles=64" in describe_packet(capacity)
+    assert "charge info V=57.6V I=50.0A" in describe_packet(charge_info)
+
+
+def test_jkbms_can_extended_cells_stop_at_confirmed_25_cell_limit():
+    packet = (
+        "extended",
+        0x18E628F4,
+        "data",
+        8,
+        [0xF2, 0x0D, 0xF3, 0x0D, 0xF4, 0x0D, 0xF5, 0x0D],
+    )
+
+    text = describe_packet(packet)
+
+    assert "C25=3.570V" in text
+    assert "C26" not in text
+    assert "C27" not in text
+    assert "C28" not in text
+
+
 def test_sigrok_jkbms_can_package_exports_decoder(monkeypatch):
     stub_sigrokdecode = types.SimpleNamespace(Decoder=object, OUTPUT_ANN=1, OUTPUT_PYTHON=2)
     monkeypatch.setitem(sys.modules, "sigrokdecode", stub_sigrokdecode)
@@ -91,6 +130,8 @@ def test_sigrok_jkbms_can_package_exports_decoder(monkeypatch):
 
     assert module.Decoder.id == "jkbms_can"
     assert module.Decoder.inputs == ["logic"]
+    assert DECODER_VERSION in module.Decoder.name
+    assert DECODER_VERSION in module.Decoder.longname
     assert any(option["id"] == "input_mode" for option in module.Decoder.options)
 
 
