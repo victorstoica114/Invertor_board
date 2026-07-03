@@ -221,6 +221,7 @@ void deyeCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, s
     snap.currentA = packCurrent;
     snap.packVoltageV = packVolt;
     snap.packPowerW = packVolt * packCurrent;
+    snap.packPowerValid = true;
     snap.socPct = (soc <= 100u) ? (uint8_t)soc : 0u;
     snap.sohPct = (soh <= 100u) ? (uint8_t)soh : 0u;
     snap.cellMaxV = cellMax;

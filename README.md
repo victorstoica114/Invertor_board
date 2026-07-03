@@ -505,6 +505,10 @@ These are useful for reference/history, but are not the primary active implement
 `main/protocols/jkbms_modbus/`
 
 - active JK BMS Modbus poller + decoder + rich snapshot extraction
+- `0x12A0..0x12A1` is exposed as an alarm/status candidate only; live hardware
+  has shown stable non-zero values there while the JK display reports no
+  alarms, so these bits are not propagated to UI protections/alarms/warnings or
+  inverter-facing alarm masks until a real fault-state capture validates them
 
 `main/protocols/jkbms_rs485/`
 
@@ -682,9 +686,29 @@ Runtime settings are persisted in NVS namespace `bridge_cfg`.
 
 Optional PulseView/libsigrokdecode helpers live under `tools/sigrok/`.
 
+Decoder development rule:
+
+- this firmware repository is the workbench/source of truth for all in-progress
+  PulseView decoders
+- develop, test, and refine decoders under `tools/sigrok/decoders`
+- copy a decoder to the separate `sigrok-pylon-bms-decoders` repository only
+  after it is validated together on captures/hardware and explicitly accepted
+  for publication
+- for live debugging, launch PulseView through
+  `tools/sigrok/start-pulseview.ps1` or the `PulseView Workbench Decoders`
+  shortcut so the active local workbench decoder set is used
+
 - `tools/sigrok/decoders/pylon_rs485/` decodes Pylon-compatible RS485 ASCII frames stacked above the built-in `uart` decoder.
+- `tools/sigrok/decoders/growatt_rs485/` decodes Growatt-compatible RS485 Modbus RTU frames stacked above the built-in `uart` decoder, including CRC, request/response register ranges, status/warning/protection fields, and the `0x0071..0x0080` cell-voltage block.
+- `tools/sigrok/decoders/pylon_can/` decodes Pylon-compatible Classic CAN frames directly from a CAN/RXD or digitized CANH/CANL logic capture.
+- `tools/sigrok/decoders/growatt_can/` decodes Growatt-compatible Classic CAN frames directly from a CAN/RXD or digitized CANH/CANL logic capture, including `0x311..0x323` pack, limit, alert, cell, temperature, and metadata frames.
+- `tools/sigrok/decoders/jkbms_modbus/` decodes JK BMS RS485 Modbus poller frames stacked above `uart`, including the `0x1200..0x12B8` runtime register map used by `JKBMS_MODBUS (RS485 Poller, 115200)`.
+- `tools/sigrok/decoders/jkbms_rs485_native/` decodes JK native binary RS485 frames (`4E 57 ...`) stacked above `uart`, including the `0x79` all-cell voltage list, pack values, temperatures, alarm bits, and status flags.
+- `tools/sigrok/decoders/jkbms_can/` decodes JK native CAN V2.0 frames at `250 kbit/s`, including `0x02F4`, `0x04F4`, `0x05F4`, `0x07F4`, extended `0x18E*28F4` cell-voltage frames, and `0x18F228F4` temperatures.
 - Typical analyzer settings are `9600` baud, `8N1`, LSB-first; line inversion depends on whether the probe is on TTL RX/TX or on the RS485 A/B pair.
-- The decoder validates Pylon length/checksum fields and decodes common `0x61`, `0x62`, and `0x63` payloads, including the important `0x63` status byte (`0xC0` = charge/discharge enabled, balance off).
+- For the JK app profile `001 - JK BMS RS485 Modbus V1.0`, use the `jkbms_modbus` decoder at `115200 8N1`; for profile `013`, use the same decoder at `9600 8N1`.
+- The Pylon RS485 decoder validates Pylon length/checksum fields and decodes common `0x61`, `0x62`, and `0x63` payloads, including the important `0x63` status byte (`0xC0` = charge/discharge enabled, balance off).
+- For JK Modbus captures, use the local register table in `main/protocols/jkbms_modbus/jkbms_modbus_registers_map.h`; for JK native RS485 captures, use the binary data-ID map in the decoder/firmware parser instead of treating the bytes as Modbus registers.
 - See `tools/sigrok/README.md` for installation and PulseView usage.
 
 ## Build and Run

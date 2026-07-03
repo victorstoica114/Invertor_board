@@ -17,7 +17,9 @@ typedef struct {
     float currentA;
     float packVoltageV;
     float packPowerW;
+    bool packPowerValid;
     float balanceCurrentA;
+    bool balanceCurrentValid;
     float remainingAh;
     float fullAh;
     uint16_t cycles;

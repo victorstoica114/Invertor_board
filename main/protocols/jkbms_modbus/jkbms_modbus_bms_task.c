@@ -8,6 +8,7 @@
 #include "decoders/modbusDecoder.h"
 #include "orchestrator/protocol_types.h"
 #include "protocols/common/battery_model.h"
+#include "protocols/jkbms_modbus/jkbms_modbus_alerts.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_poller.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_freshness.h"
 #include "protocols/jkbms_modbus/jkbms_modbus_registers_map.h"
@@ -25,6 +26,10 @@ typedef struct {
     jkbms_modbus_poller_t poller;
     uint32_t sequence;
     int64_t lastPublishUs;
+    int64_t lastStatsLogUs;
+    uint32_t rxBytes;
+    uint32_t pollTxCount;
+    uint32_t pollTxFailCount;
 } jkbmsModbusBmsTaskCtx_t;
 
 static jkbmsModbusBmsTaskCtx_t g_jkbmsModbusBmsCtx;
@@ -1041,23 +1046,8 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
         out->packCurrentMa = i32;
     }
 
-    if (decodeI32Best(decoder, JKBMS_RT_REG_PACK_WATT_MW_U32, 200000000, &i32)) {
-        out->hasPackPowerMw = true;
-        out->packPowerMw = i32;
-    } else if (out->hasPackVoltageMv && out->hasPackCurrentMa) {
-        int64_t mw = ((int64_t)out->packVoltageMv * (int64_t)out->packCurrentMa) / 1000LL;
-        if (mw > INT32_MAX) {
-            mw = INT32_MAX;
-        }
-        if (mw < INT32_MIN) {
-            mw = INT32_MIN;
-        }
-        out->hasPackPowerMw = true;
-        out->packPowerMw = (int32_t)mw;
-    }
-
     if (decoderGetI16(decoder, JKBMS_RT_REG_BALAN_CURRENT_MA_I16, &i16) &&
-        i16 >= -30000 && i16 <= 30000) {
+        i16 >= -5000 && i16 <= 5000) {
         out->hasBalanceCurrentMa = true;
         out->balanceCurrentMa = i16;
     }
@@ -1087,8 +1077,12 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
     }
 
     if (decoderGetU32(decoder, JKBMS_RT_REG_ALARM_U32, &u32)) {
-        out->hasAlarmBits = true;
-        out->alarmBits = u32;
+        out->hasAlarmCandidateBits = true;
+        out->alarmCandidateBits = u32;
+        if (jkbmsModbusAlarmBitsAreValidated(u32)) {
+            out->hasAlarmBits = true;
+            out->alarmBits = u32;
+        }
     }
 
     out->valid = out->hasSoc ||
@@ -1181,6 +1175,7 @@ static void jkbmsModbusBmsTask(void *pv)
         int64_t nowUs = esp_timer_get_time();
 
         if (len > 0) {
+            ctx->rxBytes += (uint32_t)len;
             modbusDecoderFeed(&ctx->decoder, rxChunk, len, nowUs);
         } else if (ctx->decoder.haveLastByte &&
                    ((nowUs - ctx->decoder.lastByteUs) > (int64_t)ctx->decoder.gapUs)) {
@@ -1191,8 +1186,10 @@ static void jkbmsModbusBmsTask(void *pv)
                                                   nowUs,
                                                   JKBMS_BMS_QUERY_PERIOD_MS);
         if (pollErr != ESP_OK && pollErr != ESP_ERR_INVALID_STATE) {
+            ctx->pollTxFailCount++;
             ESP_LOGW(EXAMPLE_TAG, "JKBMS Modbus poll TX failed (err=0x%x)", (unsigned)pollErr);
         } else if (ctx->poller.lastReqValid && ctx->poller.lastReqUs != lastRecordedReqUs) {
+            ctx->pollTxCount++;
             /* On some RS485 transceivers TX bytes are not looped into RX. Seed decoder request queue. */
             modbusDecoderRecordRequest(&ctx->decoder,
                                        ctx->poller.lastReqSlave,
@@ -1238,6 +1235,29 @@ static void jkbmsModbusBmsTask(void *pv)
                 }
             }
             ctx->lastPublishUs = nowUs;
+        }
+
+        if ((nowUs - ctx->lastStatsLogUs) >= 5000000LL) {
+            int64_t newestCacheUs = 0;
+            const bool cacheFresh = jkbmsModbusDecoderCacheFresh(&ctx->decoder, nowUs, &newestCacheUs);
+            uint32_t cacheAgeMs = 0u;
+            if (newestCacheUs > 0 && nowUs >= newestCacheUs) {
+                cacheAgeMs = (uint32_t)((nowUs - newestCacheUs) / 1000LL);
+            }
+            ESP_LOGI(EXAMPLE_TAG,
+                     "JKBMS Modbus %s diag: tx=%u txFail=%u rxBytes=%u cache=%s age=%u ms lastReq=0x%04X/%u",
+                     ifName,
+                     (unsigned)ctx->pollTxCount,
+                     (unsigned)ctx->pollTxFailCount,
+                     (unsigned)ctx->rxBytes,
+                     cacheFresh ? "fresh" : "stale",
+                     (unsigned)cacheAgeMs,
+                     (unsigned)ctx->poller.lastReqStart,
+                     (unsigned)ctx->poller.lastReqCount);
+            ctx->rxBytes = 0u;
+            ctx->pollTxCount = 0u;
+            ctx->pollTxFailCount = 0u;
+            ctx->lastStatsLogUs = nowUs;
         }
     }
 }

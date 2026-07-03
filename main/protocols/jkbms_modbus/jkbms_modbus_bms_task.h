@@ -49,6 +49,8 @@ typedef struct {
 
     bool hasAlarmBits;
     uint32_t alarmBits;
+    bool hasAlarmCandidateBits;
+    uint32_t alarmCandidateBits;
 
     uint8_t cellCount;
     uint16_t cellMv[JKBMS_MAX_CELLS];

@@ -12,15 +12,22 @@ void tearDown(void)
 {
 }
 
-void test_jkbms_alerts_decode_live_alarm_raw_sample(void)
+void test_jkbms_alerts_keep_live_nonzero_candidate_unvalidated(void)
+{
+    TEST_ASSERT_FALSE(jkbmsModbusAlarmBitsAreValidated(0x23436400u));
+    TEST_ASSERT_FALSE(jkbmsModbusAlarmBitsAreValidated(0x23456400u));
+    TEST_ASSERT_TRUE(jkbmsModbusAlarmBitsAreValidated(0u));
+}
+
+void test_jkbms_alerts_format_validated_synthetic_bits(void)
 {
     char protections[512];
     char alarms[512];
     char warnings[512];
 
-    TEST_ASSERT_EQUAL_UINT32(0x00644523u, jkbmsModbusNormalizeAlarmBits(0x23456400u));
+    const uint32_t alarmBits = (1u << 5) | (1u << 8) | (1u << 18);
 
-    jkbmsModbusFormatAlertFields(0x23456400u,
+    jkbmsModbusFormatAlertFields(alarmBits,
                                  protections,
                                  sizeof(protections),
                                  alarms,
@@ -28,18 +35,13 @@ void test_jkbms_alerts_decode_live_alarm_raw_sample(void)
                                  warnings,
                                  sizeof(warnings));
 
-    TEST_ASSERT_EQUAL_STRING("Balance wire resistance fault, MOS overtemperature protection, Pack overvoltage protection, Charge overtemperature protection, Internal communication fault, Discharge short-circuit protection",
+    TEST_ASSERT_EQUAL_STRING("Pack overvoltage protection, Charge overtemperature protection",
                              protections);
-    TEST_ASSERT_TRUE(strstr(alarms, "Balance wire resistance fault") != NULL);
     TEST_ASSERT_TRUE(strstr(alarms, "Pack overvoltage protection") != NULL);
     TEST_ASSERT_TRUE(strstr(alarms, "Charge overtemperature protection") != NULL);
     TEST_ASSERT_TRUE(strstr(alarms, "GPS disconnected") != NULL);
-    TEST_ASSERT_TRUE(strstr(alarms, "Battery overtemperature alarm") != NULL);
-    TEST_ASSERT_TRUE(strstr(alarms, "Temperature sensor anomaly") != NULL);
     TEST_ASSERT_TRUE(strstr(alarms, "Unknown") == NULL);
     TEST_ASSERT_TRUE(strstr(warnings, "GPS disconnected") != NULL);
-    TEST_ASSERT_TRUE(strstr(warnings, "Battery overtemperature alarm") != NULL);
-    TEST_ASSERT_TRUE(strstr(warnings, "Temperature sensor anomaly") != NULL);
     TEST_ASSERT_TRUE(strstr(warnings, "Unknown") == NULL);
 }
 
@@ -70,7 +72,8 @@ void test_jkbms_alerts_zero_bits_clear_outputs(void)
 int main(void)
 {
     UNITY_BEGIN();
-    RUN_TEST(test_jkbms_alerts_decode_live_alarm_raw_sample);
+    RUN_TEST(test_jkbms_alerts_keep_live_nonzero_candidate_unvalidated);
+    RUN_TEST(test_jkbms_alerts_format_validated_synthetic_bits);
     RUN_TEST(test_jkbms_alerts_keep_documented_bit_order);
     RUN_TEST(test_jkbms_alerts_zero_bits_clear_outputs);
     return UNITY_END();

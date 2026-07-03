@@ -9,8 +9,10 @@ typedef struct {
 } jkbmsAlertFlag_t;
 
 /*
- * Ji Kong BMS RS485 Modbus Universal Protocol V1.1, runtime register 0x12A0
- * (offset 0x00A0), UINT32 alarm/fault bitfield.
+ * Ji Kong BMS RS485 Modbus Universal Protocol V1.1 lists runtime register
+ * 0x12A0 as an alarm/fault bitfield. On the live JK Modbus profile we also
+ * see stable non-zero values here while the BMS display reports no alarms, so
+ * callers must validate a raw candidate before publishing it as a real alarm.
  */
 static const jkbmsAlertFlag_t kJkbmsAlarmFlags[] = {
     {1u << 0, "Balance wire resistance fault"},
@@ -89,6 +91,17 @@ uint32_t jkbmsModbusNormalizeAlarmBits(uint32_t alarmBits)
     return alarmBits;
 }
 
+bool jkbmsModbusAlarmBitsAreValidated(uint32_t alarmBits)
+{
+    /*
+     * Zero is a useful confirmed state. Non-zero candidates need a capture
+     * correlated with the JK display/app before we propagate them to the UI or
+     * inverter-facing battery model. This prevents status/runtime words around
+     * 0x12A0 from becoming false fault flags.
+     */
+    return alarmBits == 0u;
+}
+
 static void appendListItem(char *out, size_t outSize, const char *item)
 {
     size_t used = 0u;
@@ -154,7 +167,7 @@ void jkbmsModbusFormatAlertFields(uint32_t alarmBits,
     const uint32_t decodedBits = jkbmsModbusNormalizeAlarmBits(alarmBits);
 
     /*
-     * The V1.1 document defines 0x12A0 as one UINT32 alarm/fault register.
+     * Only call this for alarm candidates that have already been validated.
      * Keep the legacy UI grouping: low word in Protections, high word in
      * Warnings, and the full bitfield in Alarms.
      */

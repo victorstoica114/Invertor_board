@@ -692,6 +692,7 @@ static void fillTelemetryFromVoltronicSnapshot(const voltronic_modbus_snapshot_t
     }
     if (snapshot->hasPackPower) {
         out->packPowerW = snapshot->packPowerW;
+        out->packPowerValid = true;
     }
     if (snapshot->hasFullMah) {
         out->fullAh = (float)snapshot->fullMah / 1000.0f;
@@ -833,6 +834,9 @@ static void inferFixedTemperatureCount(const bms_decoded_packet_t *packet,
 static void fillTelemetryFromJkbmsSnapshot(const jkbms_modbus_snapshot_t *snapshot,
                                            bridgeTelemetrySnapshot_t *out)
 {
+    uint32_t cellSumMv = 0u;
+    uint8_t summedCells = 0u;
+
     if (snapshot == NULL || out == NULL || !snapshot->valid) {
         return;
     }
@@ -859,9 +863,11 @@ static void fillTelemetryFromJkbmsSnapshot(const jkbms_modbus_snapshot_t *snapsh
     }
     if (snapshot->hasPackPowerMw) {
         out->packPowerW = (float)snapshot->packPowerMw / 1000.0f;
+        out->packPowerValid = true;
     }
     if (snapshot->hasBalanceCurrentMa) {
         out->balanceCurrentA = (float)snapshot->balanceCurrentMa / 1000.0f;
+        out->balanceCurrentValid = true;
     }
 
     if (snapshot->hasRemainMah) {
@@ -890,20 +896,44 @@ static void fillTelemetryFromJkbmsSnapshot(const jkbms_modbus_snapshot_t *snapsh
 
     out->cellCount = snapshot->cellCount;
     for (uint8_t i = 0; i < snapshot->cellCount && i < 32u; i++) {
-        out->cellVoltagesV[i] = (float)snapshot->cellMv[i] / 1000.0f;
+        const uint16_t mv = snapshot->cellMv[i];
+        out->cellVoltagesV[i] = (float)mv / 1000.0f;
+        if (mv >= 500u && mv <= 6000u) {
+            cellSumMv += mv;
+            summedCells++;
+        }
+    }
+
+    if (out->packVoltageV <= 0.0f) {
+        if (summedCells >= 2u) {
+            out->packVoltageV = (float)cellSumMv / 1000.0f;
+        } else if (snapshot->hasCellAvgMv && snapshot->cellCount > 0u &&
+                   snapshot->cellAvgMv >= 500u && snapshot->cellAvgMv <= 6000u) {
+            out->packVoltageV =
+                ((float)snapshot->cellAvgMv * (float)snapshot->cellCount) / 1000.0f;
+        }
     }
 
     uint32_t decodedAlarmBits = 0u;
+    uint32_t alarmCandidateBits = 0u;
     if (snapshot->hasCellExtremes) {
         out->cellMaxV = (float)snapshot->maxCellMv / 1000.0f;
         out->cellMinV = (float)snapshot->minCellMv / 1000.0f;
         out->cellMaxIdx = snapshot->maxCellIndex;
         out->cellMinIdx = snapshot->minCellIndex;
         out->deltaV = out->cellMaxV - out->cellMinV;
+        if (out->deltaV >= 0.0f &&
+            (out->cellDiffV <= 0.0f || out->cellDiffV > (out->deltaV + 0.050f))) {
+            out->cellDiffV = out->deltaV;
+        }
+    }
+
+    if (snapshot->hasAlarmCandidateBits) {
+        alarmCandidateBits = snapshot->alarmCandidateBits;
+        out->alarmRaw = snapshot->alarmCandidateBits;
     }
 
     if (snapshot->hasAlarmBits) {
-        out->alarmRaw = snapshot->alarmBits;
         decodedAlarmBits = jkbmsModbusNormalizeAlarmBits(snapshot->alarmBits);
         jkbmsModbusFormatAlertFields(snapshot->alarmBits,
                                      out->protections,
@@ -920,8 +950,9 @@ static void fillTelemetryFromJkbmsSnapshot(const jkbms_modbus_snapshot_t *snapsh
 
     snprintf(out->stateFlags,
              sizeof(out->stateFlags),
-             "AlarmRaw=0x%08" PRIX32 ", AlarmDecoded=0x%08" PRIX32 ", Precharge=%u, Cells=%u",
-             snapshot->hasAlarmBits ? snapshot->alarmBits : 0u,
+             "AlarmCandidate=0x%08" PRIX32 ", AlarmValid=%s, AlarmDecoded=0x%08" PRIX32 ", Precharge=%u, Cells=%u",
+             alarmCandidateBits,
+             snapshot->hasAlarmBits ? "YES" : "NO",
              decodedAlarmBits,
              snapshot->hasPrecharge ? snapshot->prechargeState : 0u,
              (unsigned)snapshot->cellCount);
@@ -955,6 +986,7 @@ static void fillTelemetryFromJkbmsNativeSnapshot(const jkbms_rs485_native_snapsh
     }
     if (snapshot->hasPackPowerMw) {
         out->packPowerW = (float)snapshot->packPowerMw / 1000.0f;
+        out->packPowerValid = true;
     }
     if (snapshot->hasFullMah) {
         out->fullAh = (float)snapshot->fullMah / 1000.0f;
@@ -1046,6 +1078,7 @@ static void fillTelemetryFromSeplosSnapshot(const seplos_rs485_snapshot_t *snaps
     }
     if (snapshot->hasPackPowerW) {
         out->packPowerW = (float)snapshot->packPowerW;
+        out->packPowerValid = true;
     }
     if (snapshot->hasRemainingCapacityCah) {
         out->remainingAh = (float)snapshot->remainingCapacityCah / 100.0f;
@@ -1147,6 +1180,7 @@ static void fillTelemetryFromDalySnapshot(const daly_rs485_snapshot_t *snapshot,
         out->currentA = (float)snapshot->currentDeciA / 10.0f;
     }
     out->packPowerW = out->packVoltageV * out->currentA;
+    out->packPowerValid = true;
     if (snapshot->hasSocDeciPct) {
         out->socPct = pctFromDeci(snapshot->socDeciPct);
     }
@@ -1616,12 +1650,18 @@ static void buildFallbackLog(char *out, uint32_t outSize)
     bridge_runtime_settings_t settings = runtimeSettingsGet();
     jkbms_modbus_snapshot_t jkbms = {0};
     bool haveJkbmsSnapshot = false;
+    char powerText[24] = {0};
 
     if (bridgeProtocolIsRs485JkbmsModbus(settings.bms_protocol)) {
         haveJkbmsSnapshot = jkbmsModbusBmsTaskGetLatestSnapshot(&jkbms);
     }
 
     bridgeGetTelemetrySnapshot(&snap);
+    if (snap.packPowerValid) {
+        snprintf(powerText, sizeof(powerText), "%.1f W", (double)snap.packPowerW);
+    } else {
+        snprintf(powerText, sizeof(powerText), "%s", "-");
+    }
     if (haveJkbmsSnapshot) {
         snprintf(out,
                  outSize,
@@ -1632,11 +1672,11 @@ static void buildFallbackLog(char *out, uint32_t outSize)
                  "JKBMS Telemetry\n"
                  "  valid        : %s\n"
                  "  SOC / SOH    : %u %% / %u %%\n"
-                 "  Pack         : %.3f V | %.3f A | %.1f W\n"
+                 "  Pack         : %.3f V | %.3f A | %s\n"
                  "  Capacity     : %.3f Ah / %.3f Ah\n"
                  "  Temperatures : MOS %.1f C | T1 %.1f C | T2 %.1f C\n"
                  "  Cells        : count=%u max=%.3fV(#%u) min=%.3fV(#%u) dV=%.3fV avg=%.3fV\n"
-                 "  AlarmRaw     : 0x%08" PRIX32 "\n"
+                 "  AlarmRaw     : 0x%08" PRIX32 " (%s)\n"
                  "  Alarm bits   : %s\n",
                  modeToStr(settings.mode),
                  protocolToStr(settings.bms_protocol),
@@ -1646,7 +1686,7 @@ static void buildFallbackLog(char *out, uint32_t outSize)
                  (unsigned)snap.sohPct,
                  (double)snap.packVoltageV,
                  (double)snap.currentA,
-                 (double)snap.packPowerW,
+                 powerText,
                  (double)snap.remainingAh,
                  (double)snap.fullAh,
                  (double)snap.tempMosC,
@@ -1660,6 +1700,7 @@ static void buildFallbackLog(char *out, uint32_t outSize)
                  (double)snap.deltaV,
                  (double)snap.cellAvgV,
                  snap.alarmRaw,
+                 jkbms.hasAlarmBits ? "valid" : "candidate",
                  (snap.alarms[0] != '\0') ? snap.alarms : "None");
         return;
     }

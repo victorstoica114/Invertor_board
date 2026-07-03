@@ -53,6 +53,11 @@ The goal is practical maintenance:
 - Custom `8MB` single-app partition table for ESP32-C6-WROOM-1-N8 modules.
 - PulseView/libsigrokdecode `Pylon RS485` protocol decoder under `tools/sigrok/decoders/pylon_rs485`, plus parser regression tests using LA2016 field-captured Pylon frames.
 - PulseView/libsigrokdecode `Pylon CAN` protocol decoder under `tools/sigrok/decoders/pylon_can`, including Pylon/JK CAN IDs, raw CANH/CANL input modes for LA2016 captures, install/launcher scripts, and host regression tests.
+- PulseView/libsigrokdecode `Growatt RS485` protocol decoder under `tools/sigrok/decoders/growatt_rs485`, including Modbus RTU request/response tracking, CRC validation, Growatt register names/scaling, warning/protection/status fields, and the `0x0071..0x0080` cell-voltage block.
+- PulseView/libsigrokdecode `Growatt CAN` protocol decoder under `tools/sigrok/decoders/growatt_can`, including Growatt low-voltage CAN IDs `0x311..0x323`, LA2016 raw CANH/CANL input modes, endian-tolerant pack/cell decoding, and host regression tests.
+- PulseView/libsigrokdecode `JKBMS Modbus` protocol decoder under `tools/sigrok/decoders/jkbms_modbus`, including JK app profile `001/013` Modbus RTU traffic, request/response tracking, CRC validation, runtime register annotations, cell-voltage blocks, pack/SOC/temperature/capacity fields, and host regression tests.
+- PulseView/libsigrokdecode `JKBMS RS485 Native` protocol decoder under `tools/sigrok/decoders/jkbms_rs485_native`, including JK `4E 57` binary read-all frames, data-ID annotations, all-cell voltage list decoding, pack/SOC/temperature/status/alarm fields, and host regression tests.
+- PulseView/libsigrokdecode `JKBMS CAN` protocol decoder under `tools/sigrok/decoders/jkbms_can`, including JK native CAN V2.0 frame IDs `0x02F4`, `0x04F4`, `0x05F4`, `0x07F4`, extended `0x18E*28F4` cell-voltage frames, `0x18F228F4` temperatures, raw CANH/CANL input modes, and host regression tests.
 
 ### Changed
 
@@ -70,6 +75,12 @@ The goal is practical maintenance:
 - Firmware CI sources ESP-IDF from the local `gitlab-runner` installation and installs missing `cmake`/`ninja` tools into the ESP-IDF Python environment when needed.
 - README build, test, coverage, and GitLab runner instructions were refreshed for the ESP-IDF 6.0.1 workflow.
 - Sigrok/PulseView documentation now includes a persistent combined decoder installation flow so built-in decoders such as `CAN` stay visible alongside `Pylon CAN` and `Pylon RS485`.
+- Sigrok/PulseView workflow now treats this firmware repository as the decoder workbench/source of truth; the separate decoder repository is reserved for validated/published decoders only.
+- Added a PulseView decoder coverage/backlog document so register-map coverage, tentative fields, and publication rules stay explicit while decoders are refined.
+- `JKBMS_MODBUS` now treats the `0x12A0..0x12A1` alarm/status word as a raw
+  candidate unless validated by a real fault-state capture; this prevents live
+  no-alarm values such as `0x2344_6400` from surfacing as false UI protections
+  or inverter-facing alarm masks.
 - Local VS Code ESP-IDF settings were removed from version control and ignored because they contain machine-specific paths.
 - CAN telemetry now expires cached frames before periodic snapshot decoding, preventing stale `CAN_PYLON`/Deye/JK/Growatt cache data from being republished as fresh web telemetry after a BMS disconnect.
 - `RS485_PYLON -> RS485_PYLON` bridge mode stays transparent passthrough for inverter compatibility, while stale native Pylon telemetry is cleared from the web/shared model when BMS responses stop.

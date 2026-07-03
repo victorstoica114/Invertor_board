@@ -457,7 +457,7 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "function jkbmsCard(t,hasData){"
         "if((t.protocol!=='JKBMS_MODBUS'&&t.protocol!=='JKBMS_MODBUS_115200'&&t.protocol!=='JKBMS_RS485_NATIVE'&&t.protocol!=='SEPLOS_RS485'&&t.protocol!=='SEPLOS_RS485_19200')||!hasData){return '';}"
         "const rows=["
-        "row('Balance Current',fmt(t.balance_current_a,3,' A')),"
+        "row('Balance Current',t.balance_current_valid?fmt(t.balance_current_a,3,' A'):'-'),"
         "row('Remaining / Full',fmt(t.remaining_ah,3,' Ah')+' / '+fmt(t.full_ah,3,' Ah')),"
         "row('Cell Avg / Diff',fmt(t.cell_avg_v,3,' V')+' / '+fmt(t.cell_diff_v,3,' V')),"
         "row('Alarm Raw',isNum(t.alarm_raw)?'0x'+t.alarm_raw.toString(16).toUpperCase().padStart((t.protocol==='JKBMS_RS485_NATIVE'||t.protocol==='SEPLOS_RS485'||t.protocol==='SEPLOS_RS485_19200')?4:8,'0'):'-')"
@@ -511,7 +511,7 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "const banner=!hasData?(stale?'<div class=\"mono\" style=\"color:#d17a22\">Telemetry hidden: last update '+fmtAge(age)+' ago.</div>':'<div class=\"mono\">Waiting for telemetry...</div>'):(stale?'<div class=\"mono\" style=\"color:#d17a22\">Data marked stale.</div>':'');"
         "const cards=["
         "card('Runtime',[row('Valid',hasData?'YES':'NO'),row('Source',sourceLabel),row('Protocol',protocolLabel),row('Status 0x63',status63),row('Fake Override',t.fake_override?'ON':'OFF'),row('Age',fmtAge(age))]),"
-        "card('Pack',[row('Pack Voltage',hasData?fmt(t.pack_voltage_v,3,' V'):'-'),row('Current',hasData?fmt(t.current_a,2,' A'):'-'),row('Power',hasData?fmt(t.pack_power_w,1,' W'):'-'),row('SOC',hasData&&isNum(t.soc_pct)?t.soc_pct+' %':'-'),row('SOH',hasData&&isNum(t.soh_pct)?t.soh_pct+' %':'-'),row('Cycles',hasData&&isNum(t.cycles)?t.cycles:'-')]),"
+        "card('Pack',[row('Pack Voltage',hasData?fmt(t.pack_voltage_v,3,' V'):'-'),row('Current',hasData?fmt(t.current_a,2,' A'):'-'),row('Power',hasData&&t.pack_power_valid?fmt(t.pack_power_w,1,' W'):'-'),row('SOC',hasData&&isNum(t.soc_pct)?t.soc_pct+' %':'-'),row('SOH',hasData&&isNum(t.soh_pct)?t.soh_pct+' %':'-'),row('Cycles',hasData&&isNum(t.cycles)?t.cycles:'-')]),"
         "card('Cells',[row('Cell Max',hasData?fmt(t.cell_max_v,3,' V')+' @ #'+fmtInt(t.cell_max_idx):'-'),row('Cell Min',hasData?fmt(t.cell_min_v,3,' V')+' @ #'+fmtInt(t.cell_min_idx):'-'),row('Delta',hasData?fmt(t.delta_v,3,' V'):'-')]),"
         "temperatureCard(t,hasData),"
         "jkbmsCard(t,hasData),"
@@ -752,6 +752,7 @@ static void overlayFakeTelemetry(bridgeTelemetrySnapshot_t *snap)
     snap->currentA = model.packCurrentA;
     snap->packVoltageV = model.packVoltageV;
     snap->packPowerW = model.packVoltageV * model.packCurrentA;
+    snap->packPowerValid = true;
     snap->socPct = model.socPct;
     snap->sohPct = model.sohPct;
     snap->cycles = model.cycleCount;
@@ -806,7 +807,9 @@ static esp_err_t telemetryHandler(httpd_req_t *req)
                     "\"current_a\":%.2f,"
                     "\"pack_voltage_v\":%.3f,"
                     "\"pack_power_w\":%.1f,"
+                    "\"pack_power_valid\":%s,"
                     "\"balance_current_a\":%.3f,"
+                    "\"balance_current_valid\":%s,"
                     "\"remaining_ah\":%.3f,"
                     "\"full_ah\":%.3f,"
                     "\"soc_pct\":%u,"
@@ -847,7 +850,9 @@ static esp_err_t telemetryHandler(httpd_req_t *req)
                     (double)snap.currentA,
                     (double)snap.packVoltageV,
                     (double)snap.packPowerW,
+                    snap.packPowerValid ? "true" : "false",
                     (double)snap.balanceCurrentA,
+                    snap.balanceCurrentValid ? "true" : "false",
                     (double)snap.remainingAh,
                     (double)snap.fullAh,
                     (unsigned)snap.socPct,

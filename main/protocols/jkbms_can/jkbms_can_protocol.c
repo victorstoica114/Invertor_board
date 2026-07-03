@@ -413,6 +413,7 @@ static bool jkbmsCanExtract(const char *ifname,
         out->snap.packVoltageV = (float)voltageDv / 10.0f;
         out->snap.currentA = jkbmsCanCurrentToA(currentRaw);
         out->snap.packPowerW = out->snap.packVoltageV * out->snap.currentA;
+        out->snap.packPowerValid = true;
         out->snap.socPct = (soc <= 100u) ? soc : 0u;
         out->snap.sohPct = 100u;
 

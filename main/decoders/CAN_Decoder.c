@@ -1515,6 +1515,7 @@ static void canUpdateUniversalModelFromGrowattCache(const char *ifname)
     snap.currentA = packCurrentA;
     snap.packVoltageV = packVoltageV;
     snap.packPowerW = packVoltageV * packCurrentA;
+    snap.packPowerValid = true;
     snap.socPct = soc;
     snap.sohPct = haveSoh ? soh : 100u;
     snap.cycles = haveCycles ? cycles : 0u;
