@@ -8,11 +8,9 @@
 import sigrokdecode as srd
 
 try:
-    from .pylon import (REQUEST_NAMES, describe_info, frame_summary, infer_response_request,
-                        is_request, parse_frame)
+    from .pylon import (describe_info_texts, frame_summary_texts, is_request, parse_frame)
 except Exception:
-    from pylon import (REQUEST_NAMES, describe_info, frame_summary, infer_response_request,
-                       is_request, parse_frame)
+    from pylon import (describe_info_texts, frame_summary_texts, is_request, parse_frame)
 
 
 RX = 0
@@ -111,11 +109,14 @@ class Decoder(srd.Decoder):
         self.put_idx(rxtx, 9, 12, Ann.FIELD,
                      ['LEN 0x{:04X} ({})'.format(frame['length_field'], frame['info_len']), 'LEN'])
 
+        decoded_texts = describe_info_texts(frame, pending_cid2)
         if frame['info_ascii']:
             self.put_idx(rxtx, info_start, info_end, Ann.PAYLOAD,
                          [frame['info_ascii'], 'INFO'])
             self.put_idx(rxtx, info_start, info_end, Ann.DECODED,
-                         [describe_info(frame, pending_cid2), 'decoded'])
+                         decoded_texts)
+        else:
+            self.put_idx(rxtx, 9, 12, Ann.DECODED, decoded_texts)
 
         chk_text = 'CHK 0x{:04X} {}'.format(
             frame['checksum'], 'OK' if frame['checksum_ok'] else 'BAD')
@@ -145,18 +146,13 @@ class Decoder(srd.Decoder):
             return
 
         pending_cid2 = self.pending_for_frame(frame, rxtx)
-        summary = frame_summary(frame, self.direction_name(rxtx), pending_cid2)
-        self.put_ann(ss, es, Ann.FRAME, [summary])
+        self.put_ann(ss, es, Ann.FRAME,
+                     frame_summary_texts(frame, self.direction_name(rxtx), pending_cid2))
         self.annotate_fields(rxtx, frame, pending_cid2)
 
         if is_request(frame):
             self.remember_request(frame, rxtx)
         elif frame.get('cid1') == 0x46 and frame.get('code') == 0x00:
-            inferred = infer_response_request(frame, pending_cid2)
-            if inferred in REQUEST_NAMES:
-                self.put_ann(ss, es, Ann.DECODED,
-                             ['Response to 0x{:02X} {}'.format(inferred, REQUEST_NAMES[inferred]),
-                              'rsp 0x{:02X}'.format(inferred)])
             self.clear_pending_response(frame)
 
         self.reset_direction(rxtx)

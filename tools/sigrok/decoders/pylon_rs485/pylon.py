@@ -6,11 +6,13 @@
 
 REQUEST_NAMES = {
     0x61: 'analog/telemetry',
-    0x62: 'system/info',
+    0x62: 'alarm/status flags',
     0x63: 'charge/discharge status',
-    0x42: 'telemetry',
+    0x42: 'cell information',
     0x44: 'alarms',
 }
+
+PYLON_MAX_CELLS = 32
 
 
 def hex_nibble(ch):
@@ -71,6 +73,136 @@ def be16s(data, pos):
     if value & 0x8000:
         value -= 0x10000
     return value
+
+
+def cell_mv_valid(mv):
+    return 1500 <= mv <= 5000
+
+
+def fmt_cells(cells):
+    return ' '.join('C{:02d}={:.3f}V'.format(i + 1, mv / 1000.0)
+                    for i, mv in enumerate(cells))
+
+
+def cell_stats(cells):
+    if not cells:
+        return None
+    min_idx = min(range(len(cells)), key=lambda i: cells[i])
+    max_idx = max(range(len(cells)), key=lambda i: cells[i])
+    avg = sum(cells) / float(len(cells))
+    return {
+        'count': len(cells),
+        'min_mv': cells[min_idx],
+        'max_mv': cells[max_idx],
+        'min_idx': min_idx + 1,
+        'max_idx': max_idx + 1,
+        'avg_mv': avg,
+    }
+
+
+def try_parse_info42_simple_cells(info, start_pos=0):
+    if start_pos >= len(info):
+        return None
+    pos = start_pos
+    count = info[pos]
+    pos += 1
+    if count == 0 or count > PYLON_MAX_CELLS:
+        return None
+    if pos + count * 2 > len(info):
+        return None
+
+    cells = []
+    for _ in range(count):
+        mv = be16(info, pos)
+        pos += 2
+        if not cell_mv_valid(mv):
+            return None
+        cells.append(mv)
+    return cells
+
+
+def try_parse_info42_pack_cells(info):
+    if len(info) < 2:
+        return None
+
+    pos = 0
+    pack_count = info[pos]
+    pos += 1
+    if pack_count == 0 or pack_count > 16:
+        return None
+
+    cells = []
+    for pack in range(pack_count):
+        if pos >= len(info):
+            return None
+        count = info[pos]
+        pos += 1
+        if count == 0 or count > PYLON_MAX_CELLS:
+            return None
+        if pos + count * 2 > len(info):
+            return None
+
+        for _ in range(count):
+            mv = be16(info, pos)
+            pos += 2
+            if not cell_mv_valid(mv):
+                return None
+            if len(cells) < PYLON_MAX_CELLS:
+                cells.append(mv)
+
+        if pos >= len(info):
+            break
+
+        temp_count = info[pos]
+        pos += 1
+        if temp_count > 16 or pos + temp_count * 2 > len(info):
+            return None
+        pos += temp_count * 2
+
+        # Pylon-style 0x42 may append per-pack current, voltage, capacity,
+        # cycle count, and compatibility bytes. Some compatible BMS profiles
+        # trim this tail, so only require the inter-pack fixed area.
+        if pack + 1 < pack_count:
+            if pos + 12 > len(info):
+                return None
+            pos += 12
+
+    return cells if cells else None
+
+
+def describe_info42_cells(info):
+    cells = try_parse_info42_pack_cells(info)
+    layout = 'pack'
+    if cells is None:
+        cells = try_parse_info42_simple_cells(info, 0)
+        layout = 'simple'
+    if cells is None:
+        return None
+
+    stats = cell_stats(cells)
+    return ('0x42 cells {} layout count={} min={:.3f}V#{} max={:.3f}V#{} '
+            'avg={:.3f}V {}').format(
+                layout,
+                stats['count'],
+                stats['min_mv'] / 1000.0,
+                stats['min_idx'],
+                stats['max_mv'] / 1000.0,
+                stats['max_idx'],
+                stats['avg_mv'] / 1000.0,
+                fmt_cells(cells))
+
+
+def describe_request_payload(cid2, info):
+    if cid2 == 0x42:
+        if not info:
+            return 'empty selector'
+        if len(info) == 1:
+            if info[0] == 0xff:
+                return 'selector=0xFF aggregate/all packs'
+            return 'selector=0x{:02X}'.format(info[0])
+    if not info:
+        return 'empty payload'
+    return 'payload=' + ''.join('{:02X}'.format(b) for b in info)
 
 
 def parse_frame(raw):
@@ -153,15 +285,37 @@ def status63_flags(status):
     return ', '.join(flags)
 
 
+def short_request_name(cid2):
+    return {
+        0x42: 'cells',
+        0x61: 'telem',
+        0x62: 'flags',
+        0x63: 'status',
+        0x44: 'alarms',
+    }.get(cid2, 'cmd')
+
+
 def describe_info(frame, requested_cid2=None):
     info = frame.get('info_bytes', [])
     if frame.get('code') != 0x00:
         name = REQUEST_NAMES.get(frame.get('code'), 'request')
-        if info:
-            return 'request {} payload={}'.format(name, frame.get('info_ascii'))
-        return 'request {}'.format(name)
+        return 'request {} {}'.format(name,
+                                      describe_request_payload(frame.get('code'), info))
 
     cid2 = infer_response_request(frame, requested_cid2)
+    if not info:
+        if cid2 in REQUEST_NAMES:
+            return '0x{:02X} empty response/no payload ({})'.format(
+                cid2, REQUEST_NAMES[cid2])
+        return 'response OK empty/no payload'
+
+    if cid2 == 0x42:
+        decoded = describe_info42_cells(info)
+        if decoded is not None:
+            return decoded
+        return '0x42 payload present but no valid cell list ({})'.format(
+            frame.get('info_ascii'))
+
     if cid2 == 0x63 and len(info) >= 9:
         status = info[8]
         return '0x63 status=0x{:02X} ({})'.format(status, status63_flags(status))
@@ -182,28 +336,130 @@ def describe_info(frame, requested_cid2=None):
                     max_mv / 1000.0, max_idx, min_mv / 1000.0, min_idx)
 
     if cid2 == 0x62:
-        return '0x62 payload={}'.format(frame.get('info_ascii'))
+        flags = int(frame.get('info_ascii') or '0', 16)
+        if flags == 0:
+            return '0x62 flags=0x{} (no flags set)'.format(frame.get('info_ascii'))
+        return '0x62 flags=0x{} raw={}'.format(frame.get('info_ascii'),
+                                               frame.get('info_ascii'))
 
     if frame.get('info_ascii'):
         return 'response OK payload={}'.format(frame.get('info_ascii'))
     return 'response OK'
 
 
+def describe_info_texts(frame, requested_cid2=None):
+    long_text = describe_info(frame, requested_cid2)
+    info = frame.get('info_bytes', [])
+
+    if frame.get('code') != 0x00:
+        cid2 = frame.get('code')
+        if info:
+            return [long_text,
+                    'req 0x{:02X} {}'.format(cid2, frame.get('info_ascii')),
+                    'req 0x{:02X}'.format(cid2),
+                    'req']
+        return [long_text, 'req 0x{:02X} empty'.format(cid2), 'req 0x{:02X}'.format(cid2), 'req']
+
+    cid2 = infer_response_request(frame, requested_cid2)
+    if not info:
+        if cid2 is not None:
+            return [long_text, '0x{:02X} empty'.format(cid2), 'empty']
+        return [long_text, 'empty']
+
+    if cid2 == 0x63 and len(info) >= 9:
+        status = info[8]
+        charge = 'ON' if (status & 0x80) else 'OFF'
+        discharge = 'ON' if (status & 0x40) else 'OFF'
+        balance = 'ON' if (status & 0x20) else 'OFF'
+        return [long_text,
+                '0x63 C={} D={} B={}'.format(charge, discharge, balance),
+                '0x63 C/D {}'.format('ON' if (status & 0xC0) == 0xC0 else 'state'),
+                '0x63']
+
+    if cid2 == 0x61 and len(info) >= 33:
+        pack_v = be16(info, 0) / 1000.0
+        soc = info[4]
+        max_mv = be16(info, 11)
+        max_idx = be16(info, 13) & 0xff
+        min_mv = be16(info, 15)
+        min_idx = be16(info, 17) & 0xff
+        return [long_text,
+                '0x61 V={:.3f} SOC={} min={:.3f}#{} max={:.3f}#{}'.format(
+                    pack_v, soc, min_mv / 1000.0, min_idx, max_mv / 1000.0, max_idx),
+                '0x61 SOC={} min/max'.format(soc),
+                '0x61']
+
+    if cid2 == 0x62:
+        flags = int(frame.get('info_ascii') or '0', 16)
+        if flags == 0:
+            return [long_text, '0x62 flags=0', '0x62']
+        return [long_text, '0x62 flags=0x{:X}'.format(flags), '0x62']
+
+    if cid2 == 0x42:
+        decoded = describe_info42_cells(info)
+        if decoded is not None:
+            cells = try_parse_info42_pack_cells(info) or try_parse_info42_simple_cells(info, 0) or []
+            stats = cell_stats(cells)
+            return [long_text,
+                    '0x42 cells={} min={:.3f} max={:.3f}'.format(
+                        stats['count'], stats['min_mv'] / 1000.0, stats['max_mv'] / 1000.0),
+                    '0x42 cells={}'.format(stats['count']),
+                    '0x42']
+        return [long_text, '0x42 no cell list', '0x42']
+
+    return [long_text, 'decoded']
+
+
 def frame_summary(frame, direction='', pending_cid2=None):
     prefix = (direction + ' ') if direction else ''
     if is_request(frame):
         name = REQUEST_NAMES.get(frame['code'], 'request')
-        return '{}Pylon req addr=0x{:02X} cid2=0x{:02X} {} chk={}'.format(
+        empty = ' empty' if not frame.get('info_ascii') else ''
+        return '{}Pylon req addr=0x{:02X} cid2=0x{:02X} {} chk={} len={}{}'.format(
             prefix, frame['addr'], frame['code'], name,
-            'OK' if frame['checksum_ok'] else 'BAD')
+            'OK' if frame['checksum_ok'] else 'BAD',
+            frame.get('info_len', 0), empty)
 
     if frame.get('cid1') == 0x46 and frame.get('code') == 0x00:
         cid2 = infer_response_request(frame, pending_cid2)
         cid_text = ' cid2=0x{:02X}'.format(cid2) if cid2 is not None else ''
-        return '{}Pylon rsp addr=0x{:02X} OK{} chk={}'.format(
+        name = REQUEST_NAMES.get(cid2, None)
+        name_text = ' {}'.format(name) if name else ''
+        empty = ' empty' if not frame.get('info_ascii') else ''
+        return '{}Pylon rsp addr=0x{:02X} OK{} chk={}{} len={}{}'.format(
             prefix, frame['addr'], cid_text,
-            'OK' if frame['checksum_ok'] else 'BAD')
+            'OK' if frame['checksum_ok'] else 'BAD',
+            name_text, frame.get('info_len', 0), empty)
 
     return '{}Pylon frame addr=0x{:02X} cid1=0x{:02X} code=0x{:02X} chk={}'.format(
         prefix, frame['addr'], frame['cid1'], frame['code'],
         'OK' if frame['checksum_ok'] else 'BAD')
+
+
+def frame_summary_texts(frame, direction='', pending_cid2=None):
+    long_text = frame_summary(frame, direction, pending_cid2)
+    prefix = (direction + ' ') if direction else ''
+    chk = 'OK' if frame.get('checksum_ok') else 'BAD'
+
+    if is_request(frame):
+        cid2 = frame['code']
+        return [long_text,
+                '{}req 0x{:02X} {} len={} chk={}'.format(
+                    prefix, cid2, short_request_name(cid2), frame.get('info_len', 0), chk),
+                '{}req 0x{:02X}'.format(prefix, cid2),
+                'req']
+
+    if frame.get('cid1') == 0x46 and frame.get('code') == 0x00:
+        cid2 = infer_response_request(frame, pending_cid2)
+        if cid2 is not None:
+            empty = ' empty' if not frame.get('info_ascii') else ''
+            return [long_text,
+                    '{}rsp 0x{:02X} {} len={} chk={}{}'.format(
+                        prefix, cid2, short_request_name(cid2), frame.get('info_len', 0), chk, empty),
+                    '{}rsp 0x{:02X}'.format(prefix, cid2),
+                    'rsp']
+        return [long_text, '{}rsp len={} chk={}'.format(prefix, frame.get('info_len', 0), chk), 'rsp']
+
+    return [long_text,
+            '{}frame code=0x{:02X} chk={}'.format(prefix, frame.get('code', 0), chk),
+            'frame']

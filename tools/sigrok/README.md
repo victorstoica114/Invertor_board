@@ -89,6 +89,15 @@ root instead:
 Restart PulseView after copying. Add a `UART` decoder first, then add
 `Pylon RS485` above it in the decoder stack.
 
+The decoder validates Pylon ASCII length/checksum fields, tracks request and
+response pairs, and annotates the common `0x61`, `0x62`, `0x63`, and `0x42`
+flows. `0x61` is treated as pack/min-max telemetry, `0x63` exposes the
+charge/discharge/balance status byte, `0x62` shows the raw flag mask and marks
+all-zero flags as no flags set, and `0x42` decodes simple or pack-structured
+per-cell voltage lists when the BMS actually returns them. An OK/no-payload
+`0x42` response is annotated explicitly as empty/no cell payload rather than as
+a decoder failure.
+
 If PulseView is started with only the repository decoder root in
 `SIGROKDECODE_DIR`, built-in decoders such as `CAN` may disappear from the
 selector. Use the local launcher to build a single combined decoder directory

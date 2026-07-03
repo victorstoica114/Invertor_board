@@ -31,6 +31,16 @@ def build_pylon_response(info_ascii, addr=0x02):
     return parse_frame("~{}{:04X}\r".format(body, ascii_checksum(body)))
 
 
+def build_pylon_request(cid2, info_ascii="", addr=0x02):
+    info_len = len(info_ascii)
+    n0 = (info_len >> 8) & 0x0F
+    n1 = (info_len >> 4) & 0x0F
+    n2 = info_len & 0x0F
+    lchksum = (~(n0 + n1 + n2) + 1) & 0x0F
+    body = "20{:02X}46{:02X}{:04X}{}".format(addr, cid2, (lchksum << 12) | info_len, info_ascii)
+    return parse_frame("~{}{:04X}\r".format(body, ascii_checksum(body)))
+
+
 def test_parse_la2016_pylon_status_frame():
     frame = parse_frame("~20024600D01205E0B180017C076CC0F9B8\r")
 
@@ -66,6 +76,38 @@ def test_describe_pylon_analog_61_uses_millivolt_pack_voltage():
     assert "SOH=100%" in decoded
     assert "cell_max=3.572V#1" in decoded
     assert "cell_min=3.571V#2" in decoded
+
+
+def test_describe_pylon_42_cell_list_response():
+    frame = build_pylon_response("040DF10DF20DF30DF4")
+
+    decoded = describe_info(frame, 0x42)
+
+    assert "0x42 cells simple layout count=4" in decoded
+    assert "min=3.569V#1" in decoded
+    assert "max=3.572V#4" in decoded
+    assert "C01=3.569V" in decoded
+    assert "C04=3.572V" in decoded
+
+
+def test_describe_pylon_42_empty_response_is_explicit():
+    frame = build_pylon_response("")
+
+    assert "0x42 empty response/no payload" in describe_info(frame, 0x42)
+    assert "empty" in frame_summary(frame, "RX", 0x42)
+
+
+def test_describe_pylon_42_request_selector():
+    frame = build_pylon_request(0x42, "FF")
+
+    assert "request cell information selector=0xFF aggregate/all packs" in describe_info(frame)
+    assert "Pylon req addr=0x02 cid2=0x42 cell information" in frame_summary(frame, "TX")
+
+
+def test_describe_pylon_62_zero_flags():
+    frame = build_pylon_response("00000000")
+
+    assert "0x62 flags=0x00000000 (no flags set)" in describe_info(frame, 0x62)
 
 
 def test_reject_bad_pylon_checksum():
