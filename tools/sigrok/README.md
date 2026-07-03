@@ -31,6 +31,12 @@ Available PulseView/libsigrokdecode protocol decoders:
 - `pylon_can`: Pylon-compatible Classic CAN frames, standalone CAN decoder
 - `growatt_rs485`: Growatt RS485 Modbus RTU frames, stacked above `uart`
 - `growatt_can`: Growatt-compatible Classic CAN frames, standalone CAN decoder
+- `deye_can`: Deye-compatible Classic CAN frames, standalone CAN decoder;
+  current visible name is `Deye CAN v2026.07.03a`
+- `goodwe_can`: GoodWe-compatible Classic CAN frames, standalone CAN decoder;
+  current visible name is `GoodWe CAN v2026.07.03a`
+- `victron_can`: Victron-compatible Classic CAN frames, standalone CAN decoder;
+  current visible name is `Victron CAN v2026.07.03a`
 - `jkbms_modbus`: JK BMS RS485 Modbus poller frames, stacked above `uart`;
   current visible name is `JKBMS Modbus v2026.07.02b`
 - `jkbms_rs485_native`: JK native binary RS485 frames, stacked above `uart`
@@ -261,6 +267,131 @@ decoders, or run the installer script:
 
 ```powershell
 Copy-Item -Recurse tools\sigrok\decoders\growatt_can "$env:ProgramData\libsigrokdecode\decoders\growatt_can"
+.\tools\sigrok\install-pulseview-decoders.ps1
+```
+
+## Deye CAN Decoder
+
+The `decoders/deye_can` directory is a PulseView/libsigrokdecode protocol
+decoder for Deye-compatible low-voltage Classic CAN frames. Its current visible
+PulseView name is `Deye CAN v2026.07.03a`. It is standalone on the CAN RX
+logic signal and internally reuses the built-in CAN decoder, so add it directly
+from the decoder selector.
+
+Typical Deye CAN settings for the JK app profile `001 - Deye Low-voltage
+hybrid inverter CAN`:
+
+- CAN RX/H: the analyzer channel connected to the CAN transceiver `RXD` logic
+  signal, to digitized `CANL`, or to digitized `CANH` depending on `Input mode`
+- CANL: optional second analyzer channel, only used by `CANH/CANL digital diff`
+- nominal bitrate: `500000`
+- fast bitrate: unused for Classic CAN; leave the default or set it to
+  `500000`
+- sample point: start with `70%`; if annotations look unstable, try `75%` or
+  `80%`
+- input mode:
+  - `rx/canl-direct`: default. Use with transceiver `RXD`, or with `CANL` if
+    the logic-analyzer threshold turns recessive into `1` and dominant into `0`.
+  - `canh-inverted`: use with `CANH` when the analyzer shows recessive as `0`
+    and dominant as `1`.
+  - `canh-canl-diff`: use CH0 as `CANH` and the optional `CANL` channel as
+    CH1. This works with digitized bus wires, not with analog differential
+    voltages; the analyzer thresholds still matter.
+
+The decoder follows the ESP32 map in
+`main/protocols/deye/deye_registers_map.h` and covers IDs `0x351`, `0x355`,
+`0x356`, `0x359`, `0x35C`, `0x35E`, `0x370`, and `0x371`.
+
+On Windows, copy the whole decoder directory alongside the other custom
+decoders, or run the installer script:
+
+```powershell
+Copy-Item -Recurse tools\sigrok\decoders\deye_can "$env:ProgramData\libsigrokdecode\decoders\deye_can"
+.\tools\sigrok\install-pulseview-decoders.ps1
+```
+
+## GoodWe CAN Decoder
+
+The `decoders/goodwe_can` directory is a PulseView/libsigrokdecode protocol
+decoder for GoodWe-compatible low-voltage Classic CAN frames. Its current
+visible PulseView name is `GoodWe CAN v2026.07.03a`. It is standalone on the
+CAN RX logic signal and internally reuses the built-in CAN decoder, so add it
+directly from the decoder selector.
+
+Typical GoodWe CAN settings for the tested JK app profile
+`008 - GoodWe LV BMS Protocol`:
+
+- CAN RX/H: the analyzer channel connected to the CAN transceiver `RXD` logic
+  signal, to digitized `CANL`, or to digitized `CANH` depending on `Input mode`
+- CANL: optional second analyzer channel, only used by `CANH/CANL digital diff`
+- nominal bitrate: `500000`
+- fast bitrate: unused for Classic CAN; leave the default or set it to
+  `500000`
+- sample point: start with `70%`; if annotations look unstable, try `75%` or
+  `80%`
+- input mode:
+  - `rx/canl-direct`: default. Use with transceiver `RXD`, or with `CANL` if
+    the logic-analyzer threshold turns recessive into `1` and dominant into `0`.
+  - `canh-inverted`: use with `CANH` when the analyzer shows recessive as `0`
+    and dominant as `1`.
+  - `canh-canl-diff`: use CH0 as `CANH` and the optional `CANL` channel as
+    CH1. This works with digitized bus wires, not with analog differential
+    voltages; the analyzer thresholds still matter.
+
+The decoder follows the ESP32 GoodWe map in
+`main/protocols/goodwe/goodwe_registers_map.h` for classic IDs `0x453`,
+`0x455`, `0x456`, `0x457`, and `0x458`. It also decodes the field-tested JK
+GoodWe profile that emits a Pylon/Deye-like dialect on IDs `0x351`, `0x355`,
+`0x356`, `0x359`, `0x35C`, `0x35E`, `0x370`, and `0x371`.
+
+On Windows, copy the whole decoder directory alongside the other custom
+decoders, or run the installer script:
+
+```powershell
+Copy-Item -Recurse tools\sigrok\decoders\goodwe_can "$env:ProgramData\libsigrokdecode\decoders\goodwe_can"
+.\tools\sigrok\install-pulseview-decoders.ps1
+```
+
+## Victron CAN Decoder
+
+The `decoders/victron_can` directory is a PulseView/libsigrokdecode protocol
+decoder for Victron-compatible low-voltage Classic CAN frames. Its current
+visible PulseView name is `Victron CAN v2026.07.03a`. It is standalone on the
+CAN RX logic signal and internally reuses the built-in CAN decoder, so add it
+directly from the decoder selector.
+
+Typical Victron CAN settings for the tested JK app profile
+`004 - Victron_CANbus_BMS_protocol_20170717`:
+
+- CAN RX/H: the analyzer channel connected to the CAN transceiver `RXD` logic
+  signal, to digitized `CANL`, or to digitized `CANH` depending on `Input mode`
+- CANL: optional second analyzer channel, only used by `CANH/CANL digital diff`
+- nominal bitrate: `500000`
+- fast bitrate: unused for Classic CAN; leave the default or set it to
+  `500000`
+- sample point: start with `70%`; if annotations look unstable, try `75%` or
+  `80%`
+- input mode:
+  - `rx/canl-direct`: default. Use with transceiver `RXD`, or with `CANL` if
+    the logic-analyzer threshold turns recessive into `1` and dominant into `0`.
+  - `canh-inverted`: use with `CANH` when the analyzer shows recessive as `0`
+    and dominant as `1`.
+  - `canh-canl-diff`: use CH0 as `CANH` and the optional `CANL` channel as
+    CH1. This works with digitized bus wires, not with analog differential
+    voltages; the analyzer thresholds still matter.
+
+The decoder follows the ESP32 Victron map in
+`main/protocols/victron/victron_registers_map.h` for IDs `0x351`, `0x355`,
+and `0x356`. It also annotates the field-captured JK Victron profile frames
+`0x35A`, `0x35E`, `0x35F`, `0x360`, `0x370..0x381`, keeping unknown fields as
+raw hex and marking the Pylon-style `0x373` cell/temperature decode as
+tentative.
+
+On Windows, copy the whole decoder directory alongside the other custom
+decoders, or run the installer script:
+
+```powershell
+Copy-Item -Recurse tools\sigrok\decoders\victron_can "$env:ProgramData\libsigrokdecode\decoders\victron_can"
 .\tools\sigrok\install-pulseview-decoders.ps1
 ```
 

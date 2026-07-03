@@ -3,11 +3,13 @@
 #include "config.h"
 #include "Web_interface/web_bridge_api.h"
 #include "protocols/common/battery_model.h"
+#include "protocols/goodwe/goodwe_registers_map.h"
 #include "protocols/growatt/growatt_registers_map.h"
 #include "protocols/deye/deye_can_protocol.h"
 #include "protocols/deye/deye_registers_map.h"
 #include "protocols/jkbms_can/jkbms_can_protocol.h"
 #include "protocols/pylon/pylon_can_protocol.h"
+#include "protocols/victron/victron_registers_map.h"
 #include "runtime_settings.h"
 
 #include <inttypes.h>
@@ -21,6 +23,9 @@
 #define CAN_BMS_CACHE_ID_MIN GROWATT_CAN_CACHE_ID_MIN
 #define CAN_BMS_CACHE_ID_MAX GROWATT_CAN_CACHE_ID_MAX
 #define CAN_BMS_CACHE_COUNT (CAN_BMS_CACHE_ID_MAX - CAN_BMS_CACHE_ID_MIN + 1u)
+#define GOODWE_CAN_CACHE_ID_MIN GOODWE_CAN_ID_MODULES_453
+#define GOODWE_CAN_CACHE_ID_MAX GOODWE_CAN_ID_PACK_458
+#define GOODWE_CAN_CACHE_COUNT (GOODWE_CAN_CACHE_ID_MAX - GOODWE_CAN_CACHE_ID_MIN + 1u)
 
 typedef struct {
     bool valid;
@@ -37,6 +42,8 @@ static pylon_can_frame_t g_can1PylonCache[PYLON_CAN_CACHE_COUNT];
 static pylon_can_frame_t g_can2PylonCache[PYLON_CAN_CACHE_COUNT];
 static jkbms_can_frame_t g_can1JkbmsCache[JKBMS_CAN_CACHE_COUNT];
 static jkbms_can_frame_t g_can2JkbmsCache[JKBMS_CAN_CACHE_COUNT];
+static canBmsCachedFrame_t g_can1GoodweCache[GOODWE_CAN_CACHE_COUNT];
+static canBmsCachedFrame_t g_can2GoodweCache[GOODWE_CAN_CACHE_COUNT];
 static char g_canGrowattDecodedLog[2048];
 
 static inline uint16_t can_be16(const uint8_t *p);
@@ -44,6 +51,7 @@ static inline int16_t can_be16s(const uint8_t *p);
 static inline uint16_t can_le16(const uint8_t *p);
 static inline int16_t can_le16s(const uint8_t *p);
 static void canUpdateUniversalModelFromGrowattCache(const char *ifname);
+static void canUpdateUniversalModelFromGoodweCache(const char *ifname);
 static const canBmsCachedFrame_t *canGrowattFrameById(const canBmsCachedFrame_t *cache, uint32_t id);
 
 static bool canPylonCellExtremesValid(uint16_t cellMinMv, uint16_t cellMaxMv)
@@ -80,6 +88,20 @@ static canBmsCachedFrame_t *canBmsCacheForIf(const char *ifname)
     }
     if (strcmp(ifname, "CAN2") == 0) {
         return g_can2BmsCache;
+    }
+    return NULL;
+}
+
+static canBmsCachedFrame_t *canGoodweCacheForIf(const char *ifname)
+{
+    if (ifname == NULL) {
+        return g_can1GoodweCache;
+    }
+    if (strcmp(ifname, "CAN1") == 0) {
+        return g_can1GoodweCache;
+    }
+    if (strcmp(ifname, "CAN2") == 0) {
+        return g_can2GoodweCache;
     }
     return NULL;
 }
@@ -254,6 +276,12 @@ static bool canPylonCacheHasRequiredFrames(const pylon_can_frame_t *cache, int p
                canPylonGetFrameById(cache, DEYE_CAN_ID_PACK_356, &f356) && f356->dlc >= 6u;
     }
 
+    if (protocol == PROTOCOL_CAN_VICTRON) {
+        return canPylonGetFrameById(cache, VICTRON_CAN_ID_LIMITS_351, &f351) && f351->dlc >= 8u &&
+               canPylonGetFrameById(cache, VICTRON_CAN_ID_SOC_SOH_355, &f355) && f355->dlc >= 4u &&
+               canPylonGetFrameById(cache, VICTRON_CAN_ID_PACK_356, &f356) && f356->dlc >= 6u;
+    }
+
     return canPylonGetFrameById(cache, PYLON_CAN_ID_SOC_SOH_355, &f355) && f355->dlc >= 4u &&
            canPylonGetFrameById(cache, PYLON_CAN_ID_PACK_356, &f356) && f356->dlc >= 6u;
 }
@@ -297,6 +325,12 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
     const char *name = (ifname != NULL) ? ifname : "CAN1";
     int protocol = canProtocolForIf(name);
     bool deyeProtocol = protocol == PROTOCOL_CAN_DEYE;
+    bool goodweProtocol = protocol == PROTOCOL_CAN_GOODWE;
+    bool victronProtocol = protocol == PROTOCOL_CAN_VICTRON;
+    bool deyeLikeProtocol = deyeProtocol || goodweProtocol;
+    bool pylonLikeProtocol = (protocol == PROTOCOL_CAN_PYLON) ||
+                             deyeLikeProtocol ||
+                             victronProtocol;
     pylon_can_frame_t local[PYLON_CAN_CACHE_COUNT];
     pylon_can_frame_t *src = NULL;
     const pylon_can_frame_t *f351 = NULL;
@@ -312,7 +346,7 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
     uint32_t nowMs = (uint32_t)(esp_timer_get_time() / 1000LL);
     const uint32_t maxAgeMs = BRIDGE_SOURCE_STALE_MS;
 
-    if ((protocol != PROTOCOL_CAN_PYLON) && !deyeProtocol) {
+    if (!pylonLikeProtocol) {
         return;
     }
 
@@ -343,6 +377,11 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
         model.chargeVoltageLimitV = (float)can_le16(&f351->data[0]) / 10.0f;
         model.chargeCurrentLimitA = (float)can_le16(&f351->data[2]) / 10.0f;
         model.dischargeCurrentLimitA = (float)can_le16(&f351->data[4]) / 10.0f;
+        model.chargeEnabled = model.chargeCurrentLimitA > 0.0f;
+        model.dischargeEnabled = model.dischargeCurrentLimitA > 0.0f;
+        model.protocolState = (model.chargeEnabled ? 0x80u : 0u) |
+                              (model.dischargeEnabled ? 0x40u : 0u) |
+                              (model.balanceEnabled ? 0x20u : 0u);
     }
 
     if (canPylonGetFreshFrameById(local, 0x356u, nowMs, maxAgeMs, &f356) && f356->dlc >= 6u) {
@@ -392,7 +431,7 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
         }
     }
 
-    if (deyeProtocol &&
+    if (deyeLikeProtocol &&
         canPylonGetFreshFrameById(local, DEYE_CAN_ID_TEMP_CELL_370, nowMs, maxAgeMs, &f370) &&
         f370->dlc >= 8u) {
         uint16_t tMaxRaw = can_le16(&f370->data[DEYE_CAN_370_OFF_TEMP_MAX_RAW]);
@@ -404,7 +443,7 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
         model.cellDeltaV = model.cellMaxV - model.cellMinV;
     }
 
-    if (deyeProtocol &&
+    if (deyeLikeProtocol &&
         canPylonGetFreshFrameById(local, DEYE_CAN_ID_SENSOR_INDEX_371, nowMs, maxAgeMs, &f371) &&
         f371->dlc >= 8u) {
         uint16_t cellMaxIdx = can_le16(&f371->data[DEYE_CAN_371_OFF_CELL_MAX_IDX]);
@@ -461,6 +500,14 @@ static int canBmsCacheIndex(uint32_t id)
     return (int)(id - CAN_BMS_CACHE_ID_MIN);
 }
 
+static int canGoodweCacheIndex(uint32_t id)
+{
+    if (id < GOODWE_CAN_CACHE_ID_MIN || id > GOODWE_CAN_CACHE_ID_MAX) {
+        return -1;
+    }
+    return (int)(id - GOODWE_CAN_CACHE_ID_MIN);
+}
+
 static void canBmsCacheUpdate(const char *ifname, const twai_message_t *m)
 {
     if (ifname == NULL || m == NULL) return;
@@ -469,6 +516,29 @@ static void canBmsCacheUpdate(const char *ifname, const twai_message_t *m)
     if (cache == NULL) return;
 
     int idx = canBmsCacheIndex((uint32_t)m->identifier);
+    if (idx < 0) return;
+
+    canBmsCachedFrame_t f = {0};
+    f.valid = true;
+    f.id = (uint32_t)m->identifier;
+    f.updatedMs = (uint32_t)(esp_timer_get_time() / 1000LL);
+    f.dlc = (uint8_t)m->data_length_code;
+    if (f.dlc > 8u) f.dlc = 8u;
+    memcpy(f.data, m->data, f.dlc);
+
+    portENTER_CRITICAL(&g_canBmsCacheMux);
+    cache[idx] = f;
+    portEXIT_CRITICAL(&g_canBmsCacheMux);
+}
+
+static void canGoodweCacheUpdate(const char *ifname, const twai_message_t *m)
+{
+    if (ifname == NULL || m == NULL) return;
+
+    canBmsCachedFrame_t *cache = canGoodweCacheForIf(ifname);
+    if (cache == NULL) return;
+
+    int idx = canGoodweCacheIndex((uint32_t)m->identifier);
     if (idx < 0) return;
 
     canBmsCachedFrame_t f = {0};
@@ -560,6 +630,133 @@ static const canBmsCachedFrame_t *canGrowattFrameById(const canBmsCachedFrame_t 
         return NULL;
     }
     return cache[idx].valid ? &cache[idx] : NULL;
+}
+
+static const canBmsCachedFrame_t *canGoodweFrameById(const canBmsCachedFrame_t *cache, uint32_t id)
+{
+    int idx = canGoodweCacheIndex(id);
+    if (cache == NULL || idx < 0 || (size_t)idx >= GOODWE_CAN_CACHE_COUNT) {
+        return NULL;
+    }
+    return cache[idx].valid ? &cache[idx] : NULL;
+}
+
+static uint8_t clampPctFromDeciPct(uint16_t deciPct)
+{
+    uint16_t pct = (uint16_t)((deciPct + 5u) / 10u);
+    return (uint8_t)((pct > 100u) ? 100u : pct);
+}
+
+static void canUpdateUniversalModelFromGoodweCache(const char *ifname)
+{
+    const char *name = (ifname != NULL) ? ifname : "CAN1";
+    int protocol = canProtocolForIf(name);
+    canBmsCachedFrame_t local[GOODWE_CAN_CACHE_COUNT];
+    canBmsCachedFrame_t *src = NULL;
+    const canBmsCachedFrame_t *f456 = NULL;
+    const canBmsCachedFrame_t *f457 = NULL;
+    const canBmsCachedFrame_t *f458 = NULL;
+    bridgeTelemetrySnapshot_t snap = {0};
+    universal_battery_model_t model = {0};
+    uint32_t nowMs = (uint32_t)(esp_timer_get_time() / 1000LL);
+    const uint32_t maxAgeMs = BRIDGE_SOURCE_STALE_MS;
+    bool haveLimits = false;
+
+    if (protocol != PROTOCOL_CAN_GOODWE) {
+        return;
+    }
+
+    src = canGoodweCacheForIf(name);
+    if (src == NULL) {
+        return;
+    }
+
+    portENTER_CRITICAL(&g_canBmsCacheMux);
+    memcpy(local, src, sizeof(local));
+    portEXIT_CRITICAL(&g_canBmsCacheMux);
+
+    f456 = canGoodweFrameById(local, GOODWE_CAN_ID_LIMITS_456);
+    f457 = canGoodweFrameById(local, GOODWE_CAN_ID_SOC_SOH_457);
+    f458 = canGoodweFrameById(local, GOODWE_CAN_ID_PACK_458);
+
+    if (f457 == NULL || f457->dlc < 4u ||
+        !canCachedTimestampFresh(f457->updatedMs, nowMs, maxAgeMs)) {
+        return;
+    }
+    if (f458 == NULL || f458->dlc < 6u ||
+        !canCachedTimestampFresh(f458->updatedMs, nowMs, maxAgeMs)) {
+        return;
+    }
+
+    model.valid = true;
+    model.updatedMs = nowMs;
+    model.socPct = clampPctFromDeciPct(can_le16(&f457->data[GOODWE_CAN_457_OFF_SOC_DECIPCT]));
+    model.sohPct = clampPctFromDeciPct(can_le16(&f457->data[GOODWE_CAN_457_OFF_SOH_DECIPCT]));
+    if (model.sohPct == 0u) {
+        model.sohPct = 100u;
+    }
+
+    model.packVoltageV = (float)can_le16(&f458->data[GOODWE_CAN_458_OFF_PACK_V_DV]) / 10.0f;
+    model.packCurrentA = (float)can_le16s(&f458->data[GOODWE_CAN_458_OFF_PACK_I_DA]) / 10.0f;
+    model.temperaturesC[0] = (float)can_le16s(&f458->data[GOODWE_CAN_458_OFF_TEMP_DECIC]) / 10.0f;
+
+    if (f456 != NULL && f456->dlc >= 8u &&
+        canCachedTimestampFresh(f456->updatedMs, nowMs, maxAgeMs)) {
+        model.chargeVoltageLimitV = (float)can_le16(&f456->data[GOODWE_CAN_456_OFF_CHG_VLIM_DV]) / 10.0f;
+        model.chargeCurrentLimitA = (float)can_le16s(&f456->data[GOODWE_CAN_456_OFF_CHG_ILIM_DA]) / 10.0f;
+        model.dischargeCurrentLimitA = (float)can_le16s(&f456->data[GOODWE_CAN_456_OFF_DIS_ILIM_DA]) / 10.0f;
+        if (model.chargeCurrentLimitA < 0.0f) {
+            model.chargeCurrentLimitA = -model.chargeCurrentLimitA;
+        }
+        if (model.dischargeCurrentLimitA < 0.0f) {
+            model.dischargeCurrentLimitA = -model.dischargeCurrentLimitA;
+        }
+        haveLimits = true;
+    }
+
+    model.chargeEnabled = !haveLimits || model.chargeCurrentLimitA > 0.0f;
+    model.dischargeEnabled = !haveLimits || model.dischargeCurrentLimitA > 0.0f;
+    model.protocolState = (model.chargeEnabled ? 0x80u : 0u) |
+                          (model.dischargeEnabled ? 0x40u : 0u);
+
+    if (model.packVoltageV >= 30.0f) {
+        uint16_t avgMv = (uint16_t)((model.packVoltageV * 1000.0f / 16.0f) + 0.5f);
+        if (avgMv >= 1500u && avgMv <= 5000u) {
+            model.cellMinV = (float)avgMv / 1000.0f;
+            model.cellMaxV = model.cellMinV;
+            model.cellMinIdx = 0u;
+            model.cellMaxIdx = 0u;
+            model.cellDeltaV = 0.0f;
+        }
+    }
+
+    snap.valid = true;
+    snprintf(snap.source, sizeof(snap.source), "%s", name);
+    snprintf(snap.protocol, sizeof(snap.protocol), "CAN_GOODWE");
+    snap.packVoltageV = model.packVoltageV;
+    snap.currentA = model.packCurrentA;
+    snap.packPowerW = model.packVoltageV * model.packCurrentA;
+    snap.packPowerValid = true;
+    snap.socPct = model.socPct;
+    snap.sohPct = model.sohPct;
+    snap.tempMosC = model.temperaturesC[0];
+    snap.tempT1C = model.temperaturesC[0];
+    snap.tempT2C = model.temperaturesC[0];
+    snap.tempCount = 1u;
+    snap.pylonStatus63 = (uint8_t)(model.protocolState & 0xFFu);
+    snap.cellMaxV = model.cellMaxV;
+    snap.cellMinV = model.cellMinV;
+    snap.cellMaxIdx = model.cellMaxIdx;
+    snap.cellMinIdx = model.cellMinIdx;
+    snap.deltaV = model.cellDeltaV;
+    snprintf(snap.stateFlags,
+             sizeof(snap.stateFlags),
+             "charge=%s, discharge=%s",
+             model.chargeEnabled ? "ON" : "OFF",
+             model.dischargeEnabled ? "ON" : "OFF");
+
+    batteryModelSet(&model);
+    bridgeSetTelemetrySnapshot(&snap);
 }
 
 static bool canGrowattValidPackVoltageRaw(uint16_t raw, float *voltageOut)
@@ -1667,7 +1864,7 @@ void canDecoderPrintCachedSnapshot(const char *ifname)
         int protocol = canProtocolForIf(name);
 
         if (!canPylonCacheHasRequiredFrames(pylonLocal, protocol)) {
-            canClearStaleSourceTelemetry(name, "Pylon/Deye required CAN frames are stale or incomplete");
+            canClearStaleSourceTelemetry(name, "Pylon-like required CAN frames are stale or incomplete");
             return;
         }
 
@@ -1678,8 +1875,10 @@ void canDecoderPrintCachedSnapshot(const char *ifname)
         }
         return;
     } else if (canProtocolForIf(name) == PROTOCOL_CAN_PYLON ||
-               canProtocolForIf(name) == PROTOCOL_CAN_DEYE) {
-        canClearStaleSourceTelemetry(name, "no fresh Pylon/Deye CAN frames");
+               canProtocolForIf(name) == PROTOCOL_CAN_DEYE ||
+               canProtocolForIf(name) == PROTOCOL_CAN_GOODWE ||
+               canProtocolForIf(name) == PROTOCOL_CAN_VICTRON) {
+        canClearStaleSourceTelemetry(name, "no fresh Pylon-like CAN frames");
         return;
     }
 
@@ -1741,9 +1940,11 @@ bool canDecoderTryGetSocPct(const char *ifname, uint8_t *socOut)
 
     const char *name = (ifname != NULL) ? ifname : "CAN1";
     canBmsCachedFrame_t local[CAN_BMS_CACHE_COUNT];
+    canBmsCachedFrame_t goodweLocal[GOODWE_CAN_CACHE_COUNT];
     pylon_can_frame_t pylonLocal[PYLON_CAN_CACHE_COUNT];
     jkbms_can_frame_t jkbmsLocal[JKBMS_CAN_CACHE_COUNT];
     canBmsCachedFrame_t *src = canBmsCacheForIf(name);
+    canBmsCachedFrame_t *goodweSrc = canGoodweCacheForIf(name);
     pylon_can_frame_t *pylonSrc = canPylonCacheForIf(name);
     jkbms_can_frame_t *jkbmsSrc = canJkbmsCacheForIf(name);
     uint32_t nowMs = (uint32_t)(esp_timer_get_time() / 1000LL);
@@ -1754,6 +1955,11 @@ bool canDecoderTryGetSocPct(const char *ifname, uint8_t *socOut)
 
     portENTER_CRITICAL(&g_canBmsCacheMux);
     memcpy(local, src, sizeof(local));
+    if (goodweSrc != NULL) {
+        memcpy(goodweLocal, goodweSrc, sizeof(goodweLocal));
+    } else {
+        memset(goodweLocal, 0, sizeof(goodweLocal));
+    }
     if (pylonSrc != NULL) {
         memcpy(pylonLocal, pylonSrc, sizeof(pylonLocal));
     } else {
@@ -1767,6 +1973,7 @@ bool canDecoderTryGetSocPct(const char *ifname, uint8_t *socOut)
     portEXIT_CRITICAL(&g_canBmsCacheMux);
 
     canInvalidateStaleGrowattFrames(local, CAN_BMS_CACHE_COUNT, nowMs, maxAgeMs);
+    canInvalidateStaleGrowattFrames(goodweLocal, GOODWE_CAN_CACHE_COUNT, nowMs, maxAgeMs);
     canInvalidateStalePylonFrames(pylonLocal, PYLON_CAN_CACHE_COUNT, nowMs, maxAgeMs);
     canInvalidateStaleJkbmsFrames(jkbmsLocal, JKBMS_CAN_CACHE_COUNT, nowMs, maxAgeMs);
 
@@ -1784,6 +1991,15 @@ bool canDecoderTryGetSocPct(const char *ifname, uint8_t *socOut)
                 *socOut = (uint8_t)soc;
                 return true;
             }
+        }
+    }
+
+    {
+        const canBmsCachedFrame_t *f457 = canGoodweFrameById(goodweLocal, GOODWE_CAN_ID_SOC_SOH_457);
+        if (canProtocolForIf(name) == PROTOCOL_CAN_GOODWE &&
+            f457 != NULL && f457->dlc >= 2u) {
+            *socOut = clampPctFromDeciPct(can_le16(&f457->data[GOODWE_CAN_457_OFF_SOC_DECIPCT]));
+            return true;
         }
     }
 
@@ -1814,9 +2030,11 @@ bool canDecoderHasFreshData(const char *ifname, uint32_t maxAgeMs)
 {
     const char *name = (ifname != NULL) ? ifname : "CAN1";
     canBmsCachedFrame_t local[CAN_BMS_CACHE_COUNT];
+    canBmsCachedFrame_t goodweLocal[GOODWE_CAN_CACHE_COUNT];
     pylon_can_frame_t pylonLocal[PYLON_CAN_CACHE_COUNT];
     jkbms_can_frame_t jkbmsLocal[JKBMS_CAN_CACHE_COUNT];
     canBmsCachedFrame_t *src = canBmsCacheForIf(name);
+    canBmsCachedFrame_t *goodweSrc = canGoodweCacheForIf(name);
     pylon_can_frame_t *pylonSrc = canPylonCacheForIf(name);
     jkbms_can_frame_t *jkbmsSrc = canJkbmsCacheForIf(name);
     uint32_t nowMs = (uint32_t)(esp_timer_get_time() / 1000LL);
@@ -1827,6 +2045,11 @@ bool canDecoderHasFreshData(const char *ifname, uint32_t maxAgeMs)
 
     portENTER_CRITICAL(&g_canBmsCacheMux);
     memcpy(local, src, sizeof(local));
+    if (goodweSrc != NULL) {
+        memcpy(goodweLocal, goodweSrc, sizeof(goodweLocal));
+    } else {
+        memset(goodweLocal, 0, sizeof(goodweLocal));
+    }
     if (pylonSrc != NULL) {
         memcpy(pylonLocal, pylonSrc, sizeof(pylonLocal));
     } else {
@@ -1853,6 +2076,12 @@ bool canDecoderHasFreshData(const char *ifname, uint32_t maxAgeMs)
 
     for (size_t i = 0; i < CAN_BMS_CACHE_COUNT; i++) {
         if (local[i].valid && (nowMs - local[i].updatedMs) <= maxAgeMs) {
+            return true;
+        }
+    }
+
+    for (size_t i = 0; i < GOODWE_CAN_CACHE_COUNT; i++) {
+        if (goodweLocal[i].valid && (nowMs - goodweLocal[i].updatedMs) <= maxAgeMs) {
             return true;
         }
     }
@@ -1943,9 +2172,11 @@ void canDecoderOnFrame(const char *ifname, const twai_message_t *m)
     if (m == NULL) return;
 
     canBmsCacheUpdate(ifname, m);
+    canGoodweCacheUpdate(ifname, m);
     canPylonCacheUpdate(ifname, m);
     canJkbmsCacheUpdate(ifname, m);
     canUpdateUniversalModelFromGrowattCache(ifname);
+    canUpdateUniversalModelFromGoodweCache(ifname);
     canUpdateUniversalModelFromPylonCache(ifname);
     canUpdateUniversalModelFromJkbmsCache(ifname);
 
@@ -1967,6 +2198,8 @@ void canDecoderResetCaches(void)
     memset(g_can2PylonCache, 0, sizeof(g_can2PylonCache));
     memset(g_can1JkbmsCache, 0, sizeof(g_can1JkbmsCache));
     memset(g_can2JkbmsCache, 0, sizeof(g_can2JkbmsCache));
+    memset(g_can1GoodweCache, 0, sizeof(g_can1GoodweCache));
+    memset(g_can2GoodweCache, 0, sizeof(g_can2GoodweCache));
     portEXIT_CRITICAL(&g_canBmsCacheMux);
 }
 

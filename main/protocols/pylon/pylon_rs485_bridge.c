@@ -169,6 +169,8 @@ static bool pylonCanSyntheticSourceModeEnabled(const bridge_runtime_settings_t *
            (settings->inverter_line == LINE_RS485) &&
            ((settings->bms_protocol == PROTOCOL_CAN_JKBMS_250K) ||
             (settings->bms_protocol == PROTOCOL_CAN_GROWATT) ||
+            (settings->bms_protocol == PROTOCOL_CAN_GOODWE) ||
+            (settings->bms_protocol == PROTOCOL_CAN_VICTRON) ||
             (settings->bms_protocol == PROTOCOL_CAN_DEYE) ||
             (settings->bms_protocol == PROTOCOL_CAN_DALY)) &&
            bridgeProtocolIsRs485Pylon(settings->inverter_protocol);
@@ -240,6 +242,8 @@ static bool pylonSourceUsesNativePayloadEncoding(const bridge_runtime_settings_t
             (settings->bms_protocol == PROTOCOL_RS485_VOLTRONIC) ||
             (settings->bms_protocol == PROTOCOL_RS485_DALY) ||
             (settings->bms_protocol == PROTOCOL_CAN_DALY) ||
+            (settings->bms_protocol == PROTOCOL_CAN_GOODWE) ||
+            (settings->bms_protocol == PROTOCOL_CAN_VICTRON) ||
             (settings->bms_protocol == PROTOCOL_CAN_DEYE));
 }
 
@@ -777,6 +781,12 @@ static bool pylonSummaryCellStats(uint16_t *minMv,
     return true;
 }
 
+static void pylonSummaryClearCellList(void)
+{
+    s_pylonSummary.cell_count = 0u;
+    memset(s_pylonSummary.cell_mv, 0, sizeof(s_pylonSummary.cell_mv));
+}
+
 static bool modelTempValid(float tempC)
 {
     return tempC > -99.0f && tempC < 120.0f;
@@ -1256,6 +1266,7 @@ static void maybeRefreshSyntheticCacheFromUniversal(void)
     if (buildCanDerivedInfo61(info61, sizeof(info61))) {
         snprintf(s_pylonCache.info61, sizeof(s_pylonCache.info61), "%s", info61);
         s_pylonCache.valid61 = true;
+        pylonSummaryClearCellList();
         updateSummary61();
         telemetryFromSummary();
     } else if (pylonDiagLogsEnabled() && ((nowUs - s_lastCacheBuildDiagUs) >= 1000000LL)) {
@@ -1354,6 +1365,8 @@ static void telemetryFromSummary(void)
     char iface[12] = {0};
     bool preferModelTelemetry = pylonSyntheticSourceModeEnabled(&settings) ||
                                 pylonFakeResponderModeEnabled(&settings);
+    bool allowSummaryCellList = (settings.bms_line == LINE_RS485) &&
+                                bridgeProtocolIsRs485Pylon(settings.bms_protocol);
     bool useModelTelemetry = false;
 
     if (!pylonShouldPublishTelemetrySnapshot(&settings)) {
@@ -1410,7 +1423,7 @@ static void telemetryFromSummary(void)
     snap.cellMaxIdx = useModelTelemetry ? model.cellMaxIdx : s_pylonSummary.max_cell_idx;
     snap.cellMinIdx = useModelTelemetry ? model.cellMinIdx : s_pylonSummary.min_cell_idx;
     snap.deltaV = useModelTelemetry ? model.cellDeltaV : (snap.cellMaxV - snap.cellMinV);
-    if (s_pylonSummary.cell_count > 0u) {
+    if (allowSummaryCellList && s_pylonSummary.cell_count > 0u) {
         uint16_t minMv = 0u;
         uint16_t maxMv = 0u;
         uint8_t minIdx = 0u;

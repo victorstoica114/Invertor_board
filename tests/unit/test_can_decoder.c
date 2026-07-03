@@ -8,10 +8,12 @@
 #include "unity.h"
 #include "config.h"
 #include "decoders/CAN_Decoder.h"
+#include "protocols/goodwe/goodwe_registers_map.h"
 #include "protocols/growatt/growatt_registers_map.h"
 #include "protocols/common/battery_model.h"
 #include "protocols/deye/deye_registers_map.h"
 #include "protocols/pylon/pylon_can_protocol.h"
+#include "protocols/victron/victron_registers_map.h"
 #include "esp_timer.h"
 #include "runtime_settings.h"
 #include <string.h>
@@ -290,6 +292,150 @@ void test_can_decoder_growatt_updates_battery_model_immediately(void)
     TEST_ASSERT_FALSE(model.balanceEnabled);
 }
 
+void test_can_decoder_victron_updates_battery_model_immediately(void)
+{
+    uint8_t f351[8] = {0};
+    uint8_t f355[8] = {0};
+    uint8_t f356[8] = {0};
+    battery_model_t model = {0};
+    uint8_t soc = 0u;
+
+    g_hostRuntimeSettings.mode = MODE_BRIDGE;
+    g_hostRuntimeSettings.bms_line = LINE_CAN;
+    g_hostRuntimeSettings.bms_protocol = PROTOCOL_CAN_VICTRON;
+    g_hostRuntimeSettings.bms_port = 1u;
+    g_hostRuntimeSettings.inverter_line = LINE_RS485;
+    g_hostRuntimeSettings.inverter_protocol = PROTOCOL_RS485_PYLON;
+    g_hostRuntimeSettings.inverter_port = 2u;
+
+    write_le16(&f351[VICTRON_CAN_351_OFF_CHG_VLIM_DV], 576u);
+    write_le16(&f351[VICTRON_CAN_351_OFF_CHG_ILIM_DA], 250u);
+    write_le16(&f351[VICTRON_CAN_351_OFF_DIS_ILIM_DA], 1000u);
+    write_le16(&f351[VICTRON_CAN_351_OFF_DIS_VLIM_DV], 450u);
+    write_le16(&f355[VICTRON_CAN_355_OFF_SOC_PCT], 91u);
+    write_le16(&f355[VICTRON_CAN_355_OFF_SOH_PCT], 100u);
+    write_le16(&f356[VICTRON_CAN_356_OFF_PACK_V_CV], 5715u);
+    write_le16(&f356[VICTRON_CAN_356_OFF_PACK_I_DA], 0u);
+    write_le16(&f356[VICTRON_CAN_356_OFF_TEMP_DECIC], 263u);
+
+    feed_can_frame(VICTRON_CAN_ID_LIMITS_351, f351);
+    feed_can_frame(VICTRON_CAN_ID_SOC_SOH_355, f355);
+    feed_can_frame(VICTRON_CAN_ID_PACK_356, f356);
+
+    batteryModelGetReal(&model);
+    TEST_ASSERT_TRUE(model.valid);
+    TEST_ASSERT_EQUAL_UINT8(91u, model.socPct);
+    TEST_ASSERT_EQUAL_UINT8(100u, model.sohPct);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 57.15f, model.packVoltageV);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.0f, model.packCurrentA);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 26.3f, model.temperaturesC[0]);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 57.6f, model.chargeVoltageLimitV);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 25.0f, model.chargeCurrentLimitA);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 100.0f, model.dischargeCurrentLimitA);
+    TEST_ASSERT_TRUE(model.chargeEnabled);
+    TEST_ASSERT_TRUE(model.dischargeEnabled);
+    TEST_ASSERT_EQUAL_UINT32(0xC0u, model.protocolState);
+    TEST_ASSERT_TRUE(canDecoderTryGetSocPct("CAN1", &soc));
+    TEST_ASSERT_EQUAL_UINT8(91u, soc);
+}
+
+void test_can_decoder_goodwe_updates_battery_model_immediately(void)
+{
+    uint8_t f456[8] = {0};
+    uint8_t f457[8] = {0};
+    uint8_t f458[8] = {0};
+    battery_model_t model = {0};
+    uint8_t soc = 0u;
+
+    g_hostRuntimeSettings.mode = MODE_BRIDGE;
+    g_hostRuntimeSettings.bms_line = LINE_CAN;
+    g_hostRuntimeSettings.bms_protocol = PROTOCOL_CAN_GOODWE;
+    g_hostRuntimeSettings.bms_port = 1u;
+    g_hostRuntimeSettings.inverter_line = LINE_RS485;
+    g_hostRuntimeSettings.inverter_protocol = PROTOCOL_RS485_PYLON;
+    g_hostRuntimeSettings.inverter_port = 2u;
+
+    write_le16(&f456[GOODWE_CAN_456_OFF_CHG_VLIM_DV], 576u);
+    write_le16(&f456[GOODWE_CAN_456_OFF_CHG_ILIM_DA], 1000u);
+    write_le16(&f456[GOODWE_CAN_456_OFF_DIS_ILIM_DA], 1200u);
+    write_le16(&f456[GOODWE_CAN_456_OFF_DIS_VLIM_DV], 450u);
+    write_le16(&f457[GOODWE_CAN_457_OFF_SOC_DECIPCT], 870u);
+    write_le16(&f457[GOODWE_CAN_457_OFF_SOH_DECIPCT], 1000u);
+    write_le16(&f458[GOODWE_CAN_458_OFF_PACK_V_DV], 571u);
+    write_le16(&f458[GOODWE_CAN_458_OFF_PACK_I_DA], 25u);
+    write_le16(&f458[GOODWE_CAN_458_OFF_TEMP_DECIC], 263u);
+
+    feed_can_frame(GOODWE_CAN_ID_LIMITS_456, f456);
+    feed_can_frame(GOODWE_CAN_ID_SOC_SOH_457, f457);
+    feed_can_frame(GOODWE_CAN_ID_PACK_458, f458);
+
+    batteryModelGetReal(&model);
+    TEST_ASSERT_TRUE(model.valid);
+    TEST_ASSERT_EQUAL_UINT8(87u, model.socPct);
+    TEST_ASSERT_EQUAL_UINT8(100u, model.sohPct);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 57.1f, model.packVoltageV);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 2.5f, model.packCurrentA);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 26.3f, model.temperaturesC[0]);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 57.6f, model.chargeVoltageLimitV);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 100.0f, model.chargeCurrentLimitA);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 120.0f, model.dischargeCurrentLimitA);
+    TEST_ASSERT_EQUAL_UINT32(0xC0u, model.protocolState);
+    TEST_ASSERT_TRUE(canDecoderTryGetSocPct("CAN1", &soc));
+    TEST_ASSERT_EQUAL_UINT8(87u, soc);
+}
+
+void test_can_decoder_goodwe_pylon_like_frames_update_battery_model_immediately(void)
+{
+    uint8_t f351[8] = {0};
+    uint8_t f355[8] = {0};
+    uint8_t f356[8] = {0};
+    uint8_t f370[8] = {0};
+    uint8_t f371[8] = {0};
+    battery_model_t model = {0};
+
+    g_hostRuntimeSettings.mode = MODE_BRIDGE;
+    g_hostRuntimeSettings.bms_line = LINE_CAN;
+    g_hostRuntimeSettings.bms_protocol = PROTOCOL_CAN_GOODWE;
+    g_hostRuntimeSettings.bms_port = 1u;
+    g_hostRuntimeSettings.inverter_line = LINE_RS485;
+    g_hostRuntimeSettings.inverter_protocol = PROTOCOL_RS485_PYLON;
+    g_hostRuntimeSettings.inverter_port = 2u;
+
+    write_le16(&f351[PYLON_CAN_351_OFF_CHG_VLIM_DV], 670u);
+    write_le16(&f351[PYLON_CAN_351_OFF_CHG_ILIM_DA], 380u);
+    write_le16(&f351[PYLON_CAN_351_OFF_DIS_ILIM_DA], 1900u);
+    write_le16(&f355[PYLON_CAN_355_OFF_SOC_PCT], 99u);
+    write_le16(&f355[PYLON_CAN_355_OFF_SOH_PCT], 100u);
+    write_le16(&f356[PYLON_CAN_356_OFF_PACK_V_CV], 5715u);
+    write_le16(&f356[PYLON_CAN_356_OFF_PACK_I_DA], 0u);
+    write_le16(&f356[PYLON_CAN_356_OFF_TEMP_DECIC], 309u);
+    write_le16(&f370[PYLON_CAN_370_OFF_TEMP_MAX_RAW], 31u);
+    write_le16(&f370[PYLON_CAN_370_OFF_TEMP_MIN_RAW], 30u);
+    write_le16(&f370[PYLON_CAN_370_OFF_CELL_MAX_MV], 3573u);
+    write_le16(&f370[PYLON_CAN_370_OFF_CELL_MIN_MV], 3571u);
+    write_le16(&f371[PYLON_CAN_371_OFF_CELL_MAX_IDX], 1u);
+    write_le16(&f371[PYLON_CAN_371_OFF_CELL_MIN_IDX], 11u);
+
+    feed_can_frame(PYLON_CAN_ID_LIMITS_351, f351);
+    feed_can_frame(PYLON_CAN_ID_SOC_SOH_355, f355);
+    feed_can_frame(PYLON_CAN_ID_PACK_356, f356);
+    feed_can_frame(PYLON_CAN_ID_JK_EXT_CELL_370, f370);
+    feed_can_frame(PYLON_CAN_ID_JK_EXT_INDEX_371, f371);
+
+    batteryModelGetReal(&model);
+    TEST_ASSERT_TRUE(model.valid);
+    TEST_ASSERT_EQUAL_UINT8(99u, model.socPct);
+    TEST_ASSERT_EQUAL_UINT8(100u, model.sohPct);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 57.15f, model.packVoltageV);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 30.9f, model.temperaturesC[0]);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 31.0f, model.temperaturesC[1]);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 30.0f, model.temperaturesC[2]);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 3.573f, model.cellMaxV);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 3.571f, model.cellMinV);
+    TEST_ASSERT_EQUAL_UINT8(1u, model.cellMaxIdx);
+    TEST_ASSERT_EQUAL_UINT8(11u, model.cellMinIdx);
+}
+
 /**
  * Test: stale Pylon CAN frames must not refresh the universal model when other
  * CAN traffic is still present on the bus.
@@ -399,6 +545,9 @@ int main(void)
     RUN_TEST(test_can_decoder_variable_dlc);
     RUN_TEST(test_can_decoder_deye_updates_battery_model_immediately);
     RUN_TEST(test_can_decoder_growatt_updates_battery_model_immediately);
+    RUN_TEST(test_can_decoder_victron_updates_battery_model_immediately);
+    RUN_TEST(test_can_decoder_goodwe_updates_battery_model_immediately);
+    RUN_TEST(test_can_decoder_goodwe_pylon_like_frames_update_battery_model_immediately);
     RUN_TEST(test_can_decoder_pylon_stale_required_frames_do_not_refresh_model);
     RUN_TEST(test_can_decoder_pylon_stale_periodic_snapshot_clears_model);
 
