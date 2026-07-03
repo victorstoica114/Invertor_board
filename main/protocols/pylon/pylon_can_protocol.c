@@ -53,6 +53,21 @@ static float pylonCanDecodeTempRaw(uint16_t raw)
     return (raw <= 200u) ? (float)raw : ((float)raw / 10.0f);
 }
 
+static bool pylonCanTempValid(float tempC)
+{
+    return tempC > -50.0f && tempC < 120.0f;
+}
+
+static void pylonCanInitModelTemperatures(universal_battery_model_t *model)
+{
+    if (model == NULL) {
+        return;
+    }
+    for (uint8_t i = 0u; i < UNIVERSAL_BATTERY_TEMP_SENSORS; i++) {
+        model->temperaturesC[i] = -100.0f;
+    }
+}
+
 static float pylonCanCorrectPackVoltage(float rawPackVoltageV, float chargeVoltageLimitV)
 {
     if (rawPackVoltageV > 0.0f &&
@@ -171,6 +186,8 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
     float tempMinTentative = 0.0f;
     float tempMaxTentative = 0.0f;
     bool haveCellExtremes = false;
+    bool haveAvgTemp = false;
+    bool haveTempRange = false;
     uint16_t soc = 0;
     uint16_t soh = 0;
     uint8_t cellMaxIdx = 0u;
@@ -178,6 +195,7 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
     uint8_t moduleCount = 0;
     uint8_t status35C = 0;
     universal_battery_model_t model = {0};
+    pylonCanInitModelTemperatures(&model);
 
     if (f351 && f351->dlc >= 8u) {
         chargeVoltLimit = (float)pylonCanLe16(&f351->data[0]) / 10.0f;
@@ -194,6 +212,7 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
         packVolt = pylonCanCorrectPackVoltage(rawPackVolt, chargeVoltLimit);
         packCurrent = (float)pylonCanLe16s(&f356->data[2]) / 10.0f;
         avgTemp = (float)pylonCanLe16(&f356->data[4]) / 10.0f;
+        haveAvgTemp = pylonCanTempValid(avgTemp);
     }
     if (f359 && f359->dlc >= 5u) {
         moduleCount = f359->data[4];
@@ -219,6 +238,8 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
         uint16_t cellMaxMv = pylonCanLe16(&f373->data[PYLON_CAN_373_OFF_CELL_MAX_MV]);
         tempMinTentative = (float)pylonCanLe16(&f373->data[4]) / 10.0f;
         tempMaxTentative = (float)pylonCanLe16(&f373->data[6]) / 10.0f;
+        haveTempRange = pylonCanTempValid(tempMinTentative) &&
+                        pylonCanTempValid(tempMaxTentative);
         formatCanData(f373->data, f373->dlc, raw373, sizeof(raw373));
         if (pylonCanCellExtremesValid(cellMinMv, cellMaxMv)) {
             cellMinTentative = (float)cellMinMv / 1000.0f;
@@ -240,6 +261,8 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
             cellMinTentative = (float)cellMinMv / 1000.0f;
             tempMaxTentative = pylonCanDecodeTempRaw(pylonCanLe16(&f370->data[PYLON_CAN_370_OFF_TEMP_MAX_RAW]));
             tempMinTentative = pylonCanDecodeTempRaw(pylonCanLe16(&f370->data[PYLON_CAN_370_OFF_TEMP_MIN_RAW]));
+            haveTempRange = pylonCanTempValid(tempMinTentative) &&
+                            pylonCanTempValid(tempMaxTentative);
             haveCellExtremes = true;
         }
     }
@@ -280,9 +303,15 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
         snap.deltaV = cellMaxTentative - cellMinTentative;
         snap.cellDiffV = snap.deltaV;
     }
-    snap.tempMosC = avgTemp;
-    snap.tempT1C = tempMinTentative;
-    snap.tempT2C = tempMaxTentative;
+    if (haveAvgTemp) {
+        snap.tempMosC = avgTemp;
+        snap.tempCount = 1u;
+    }
+    if (haveTempRange) {
+        snap.tempT1C = tempMinTentative;
+        snap.tempT2C = tempMaxTentative;
+        snap.tempCount = haveAvgTemp ? 3u : 2u;
+    }
     snap.pylonStatus63 = status35C;
 
     ESP_LOGI("PYLON_CAN", "[PYLON_DECODE] Setting manual cache: valid=%s, source=%s, soc=%u%%, "
@@ -306,11 +335,13 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
     model.cellMaxIdx = cellMaxIdx;
     model.cellMinIdx = cellMinIdx;
     model.cellDeltaV = (cellMaxTentative > 0.0f && cellMinTentative > 0.0f) ? (cellMaxTentative - cellMinTentative) : 0.0f;
-    model.temperaturesC[0] = avgTemp;
-    model.temperaturesC[1] = tempMinTentative;
-    model.temperaturesC[2] = tempMaxTentative;
-    model.temperaturesC[3] = tempMinTentative;
-    model.temperaturesC[4] = tempMaxTentative;
+    if (haveAvgTemp) {
+        model.temperaturesC[0] = avgTemp;
+    }
+    if (haveTempRange) {
+        model.temperaturesC[1] = tempMinTentative;
+        model.temperaturesC[2] = tempMaxTentative;
+    }
     model.chargeEnabled = (status35C & 0x80u) != 0u;
     model.dischargeEnabled = (status35C & 0x40u) != 0u;
     model.balanceEnabled = (status35C & 0x20u) != 0u;

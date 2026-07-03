@@ -176,6 +176,13 @@ void test_pylon_can_decode_snapshot_populates_snapshot_and_model(void)
     assert_float_within(0.001f, 3.45f, g_lastSnapshot.cellMaxV);
     assert_float_within(0.001f, 3.1f, g_lastSnapshot.cellMinV);
     assert_float_within(0.001f, 0.35f, g_lastSnapshot.deltaV);
+    TEST_ASSERT_EQUAL_UINT8(0u, g_lastSnapshot.cellCount);
+    TEST_ASSERT_EQUAL_UINT8(3u, g_lastSnapshot.tempCount);
+    assert_float_within(0.01f, 25.0f, g_lastSnapshot.tempMosC);
+    assert_float_within(0.01f, 22.0f, g_lastSnapshot.tempT1C);
+    assert_float_within(0.01f, 30.0f, g_lastSnapshot.tempT2C);
+    assert_float_within(0.01f, 0.0f, g_lastSnapshot.tempT4C);
+    assert_float_within(0.01f, 0.0f, g_lastSnapshot.tempT5C);
     TEST_ASSERT_TRUE(strstr(g_lastLog, "CAN Pylon") != NULL);
 
     battery_model_t model = {0};
@@ -185,6 +192,11 @@ void test_pylon_can_decode_snapshot_populates_snapshot_and_model(void)
     TEST_ASSERT_EQUAL_UINT8(98u, model.sohPct);
     assert_float_within(0.01f, 500.0f, model.packVoltageV);
     assert_float_within(0.01f, 25.0f, model.packCurrentA);
+    assert_float_within(0.01f, 25.0f, model.temperaturesC[0]);
+    assert_float_within(0.01f, 22.0f, model.temperaturesC[1]);
+    assert_float_within(0.01f, 30.0f, model.temperaturesC[2]);
+    assert_float_within(0.01f, -100.0f, model.temperaturesC[3]);
+    assert_float_within(0.01f, -100.0f, model.temperaturesC[4]);
     TEST_ASSERT_TRUE(model.chargeEnabled);
     TEST_ASSERT_TRUE(model.dischargeEnabled);
     TEST_ASSERT_TRUE(model.balanceEnabled);
@@ -240,6 +252,10 @@ void test_pylon_can_decode_jk_extension_cell_extremes(void)
     TEST_ASSERT_EQUAL_UINT8(11u, g_lastSnapshot.cellMinIdx);
     assert_float_within(0.01f, 23.0f, g_lastSnapshot.tempT1C);
     assert_float_within(0.01f, 23.0f, g_lastSnapshot.tempT2C);
+    TEST_ASSERT_EQUAL_UINT8(0u, g_lastSnapshot.cellCount);
+    TEST_ASSERT_EQUAL_UINT8(3u, g_lastSnapshot.tempCount);
+    assert_float_within(0.01f, 0.0f, g_lastSnapshot.tempT4C);
+    assert_float_within(0.01f, 0.0f, g_lastSnapshot.tempT5C);
     TEST_ASSERT_TRUE(strstr(g_lastLog, "0x370=[17 00 17 00 F5 0D F3 0D]") != NULL);
     TEST_ASSERT_TRUE(strstr(g_lastLog, "max=3.573V#1") != NULL);
 
@@ -250,6 +266,11 @@ void test_pylon_can_decode_jk_extension_cell_extremes(void)
     TEST_ASSERT_EQUAL_UINT8(11u, model.cellMinIdx);
     assert_float_within(0.001f, 3.573f, model.cellMaxV);
     assert_float_within(0.001f, 3.571f, model.cellMinV);
+    assert_float_within(0.01f, 23.3f, model.temperaturesC[0]);
+    assert_float_within(0.01f, 23.0f, model.temperaturesC[1]);
+    assert_float_within(0.01f, 23.0f, model.temperaturesC[2]);
+    assert_float_within(0.01f, -100.0f, model.temperaturesC[3]);
+    assert_float_within(0.01f, -100.0f, model.temperaturesC[4]);
 }
 
 void test_deye_can_decode_snapshot_populates_snapshot_and_model(void)

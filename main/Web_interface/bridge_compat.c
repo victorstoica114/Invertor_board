@@ -1257,6 +1257,62 @@ static void fillTelemetryFromDalySnapshot(const daly_rs485_snapshot_t *snapshot,
     }
 }
 
+static bool telemetryTempLooksValid(float tempC)
+{
+    return tempC > -99.0f && tempC < 120.0f;
+}
+
+static void sanitizePylonCanTelemetry(bridgeTelemetrySnapshot_t *snap)
+{
+    if (snap == NULL) {
+        return;
+    }
+
+    /*
+     * Standard Pylon-compatible CAN exposes pack data, SOC/SOH, limits, and
+     * cell min/max. It does not expose a full per-cell voltage list in the
+     * frames we currently decode, so never let stale/native cell arrays leak
+     * into the web API under CAN_PYLON.
+     */
+    snap->cellCount = 0u;
+    memset(snap->cellVoltagesV, 0, sizeof(snap->cellVoltagesV));
+    snap->cellAvgV = 0.0f;
+    snap->remainingAh = 0.0f;
+    snap->fullAh = 0.0f;
+    if (snap->cellDiffV <= 0.0f) {
+        snap->cellDiffV = snap->deltaV;
+    }
+
+    if (snap->tempCount == 0u && telemetryTempLooksValid(snap->tempMosC)) {
+        snap->tempCount = 1u;
+    }
+    if (snap->tempCount < 2u) {
+        snap->tempT1C = 0.0f;
+    }
+    if (snap->tempCount < 3u) {
+        snap->tempT2C = 0.0f;
+    }
+    if (snap->tempCount < 4u) {
+        snap->tempT4C = 0.0f;
+    }
+    if (snap->tempCount < 5u) {
+        snap->tempT5C = 0.0f;
+    }
+}
+
+static void sanitizeTelemetryForRuntimeSettings(const bridge_runtime_settings_t *settings,
+                                                bridgeTelemetrySnapshot_t *snap)
+{
+    if (settings == NULL || snap == NULL || !snap->valid) {
+        return;
+    }
+
+    if ((settings->bms_line == LINE_CAN) &&
+        (settings->bms_protocol == PROTOCOL_CAN_PYLON)) {
+        sanitizePylonCanTelemetry(snap);
+    }
+}
+
 static void bridgeFormatBmsInterface(char *out, size_t outSize, const bridge_runtime_settings_t *settings)
 {
     uint8_t port = 1u;
@@ -1807,6 +1863,8 @@ void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
              out->valid ? "YES" : "NO", out->source);
 
     fillTelemetryFromLatestPacket(out, &updatedMs);
+
+    sanitizeTelemetryForRuntimeSettings(&settings, out);
 
     ESP_LOGD(BRIDGE_TAG, "[TELEM] After fill: valid=%s, source=%s, updatedMs=%u",
              out->valid ? "YES" : "NO", out->source, updatedMs);

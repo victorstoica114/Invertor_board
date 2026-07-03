@@ -68,6 +68,22 @@ static float canPylonDecodeTempRaw(uint16_t raw)
     return (raw <= 200u) ? (float)raw : ((float)raw / 10.0f);
 }
 
+static bool canTempValueValid(float tempC)
+{
+    return tempC > -99.0f && tempC < 120.0f;
+}
+
+static void canInitModelTemperatures(universal_battery_model_t *model)
+{
+    if (model == NULL) {
+        return;
+    }
+
+    for (uint8_t i = 0u; i < UNIVERSAL_BATTERY_TEMP_SENSORS; i++) {
+        model->temperaturesC[i] = -100.0f;
+    }
+}
+
 static float canCorrectPylonPackVoltage(float rawPackVoltageV, float chargeVoltageLimitV)
 {
     if (rawPackVoltageV > 0.0f &&
@@ -342,6 +358,8 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
     const pylon_can_frame_t *f371 = NULL;
     bool haveSoc = false;
     bool havePack = false;
+    bool haveAvgTemp = false;
+    bool haveTempRange = false;
     universal_battery_model_t model = {0};
     uint32_t nowMs = (uint32_t)(esp_timer_get_time() / 1000LL);
     const uint32_t maxAgeMs = BRIDGE_SOURCE_STALE_MS;
@@ -359,7 +377,7 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
     memcpy(local, src, sizeof(local));
     portEXIT_CRITICAL(&g_canBmsCacheMux);
 
-    batteryModelGetReal(&model);
+    canInitModelTemperatures(&model);
 
     if (canPylonGetFreshFrameById(local, 0x355u, nowMs, maxAgeMs, &f355) && f355->dlc >= 4u) {
         uint16_t soc = can_le16(&f355->data[0]);
@@ -389,6 +407,10 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
         model.packVoltageV = canCorrectPylonPackVoltage(rawPackVoltageV, model.chargeVoltageLimitV);
         model.packCurrentA = (float)can_le16s(&f356->data[2]) / 10.0f;
         model.temperaturesC[0] = (float)can_le16(&f356->data[4]) / 10.0f;
+        haveAvgTemp = canTempValueValid(model.temperaturesC[0]);
+        if (!haveAvgTemp) {
+            model.temperaturesC[0] = -100.0f;
+        }
         havePack = true;
     }
 
@@ -400,8 +422,15 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
             model.cellMaxV = (float)cellMaxMv / 1000.0f;
             model.cellDeltaV = model.cellMaxV - model.cellMinV;
         }
-        model.temperaturesC[1] = (float)can_le16(&f373->data[4]) / 10.0f;
-        model.temperaturesC[2] = (float)can_le16(&f373->data[6]) / 10.0f;
+        {
+            float temp1C = (float)can_le16(&f373->data[4]) / 10.0f;
+            float temp2C = (float)can_le16(&f373->data[6]) / 10.0f;
+            haveTempRange = canTempValueValid(temp1C) && canTempValueValid(temp2C);
+            if (haveTempRange) {
+                model.temperaturesC[1] = temp1C;
+                model.temperaturesC[2] = temp2C;
+            }
+        }
     }
 
     if (!deyeProtocol &&
@@ -410,8 +439,13 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
         uint16_t cellMaxMv = can_le16(&f370->data[PYLON_CAN_370_OFF_CELL_MAX_MV]);
         uint16_t cellMinMv = can_le16(&f370->data[PYLON_CAN_370_OFF_CELL_MIN_MV]);
         if (canPylonCellExtremesValid(cellMinMv, cellMaxMv)) {
-            model.temperaturesC[1] = canPylonDecodeTempRaw(can_le16(&f370->data[PYLON_CAN_370_OFF_TEMP_MAX_RAW]));
-            model.temperaturesC[2] = canPylonDecodeTempRaw(can_le16(&f370->data[PYLON_CAN_370_OFF_TEMP_MIN_RAW]));
+            float tempMaxC = canPylonDecodeTempRaw(can_le16(&f370->data[PYLON_CAN_370_OFF_TEMP_MAX_RAW]));
+            float tempMinC = canPylonDecodeTempRaw(can_le16(&f370->data[PYLON_CAN_370_OFF_TEMP_MIN_RAW]));
+            haveTempRange = canTempValueValid(tempMaxC) && canTempValueValid(tempMinC);
+            if (haveTempRange) {
+                model.temperaturesC[1] = tempMaxC;
+                model.temperaturesC[2] = tempMinC;
+            }
             model.cellMaxV = (float)cellMaxMv / 1000.0f;
             model.cellMinV = (float)cellMinMv / 1000.0f;
             model.cellDeltaV = model.cellMaxV - model.cellMinV;
