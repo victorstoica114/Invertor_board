@@ -1311,6 +1311,7 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
            (settings.inverter_line == LINE_RS485) &&
            ((settings.bms_protocol == PROTOCOL_CAN_GROWATT) ||
             (settings.bms_protocol == PROTOCOL_CAN_PYLON) ||
+            (settings.bms_protocol == PROTOCOL_CAN_JKBMS_250K) ||
          (settings.bms_protocol == PROTOCOL_CAN_GOODWE) ||
          (settings.bms_protocol == PROTOCOL_CAN_SOFAR) ||
          (settings.bms_protocol == PROTOCOL_CAN_SMA) ||

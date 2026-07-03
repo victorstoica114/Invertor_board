@@ -37,6 +37,7 @@ int g_routeStubGrowattInverterStartCount;
 int g_routeStubPylonInverterStartCount;
 int g_routeStubPylonBridgeEnableCount;
 int g_routeStubCanForwardStartCount;
+int g_routeStubCanRs485GrowattTranslatorStartCount;
 int g_routeStubRs485GrowattResponderStartCount;
 
 void routeSelectionStubReset(void)
@@ -53,6 +54,7 @@ void routeSelectionStubReset(void)
     g_routeStubPylonInverterStartCount = 0;
     g_routeStubPylonBridgeEnableCount = 0;
     g_routeStubCanForwardStartCount = 0;
+    g_routeStubCanRs485GrowattTranslatorStartCount = 0;
     g_routeStubRs485GrowattResponderStartCount = 0;
 }
 
@@ -348,6 +350,7 @@ esp_err_t canRs485GrowattBridgeEnable(uart_port_t inverterUart,
     (void)ifName;
     (void)srcCanBus;
     (void)srcCanIf;
+    g_routeStubCanRs485GrowattTranslatorStartCount++;
     return ESP_OK;
 }
 

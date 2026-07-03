@@ -6,6 +6,7 @@
 #include "protocols/common/battery_model.h"
 #include "protocols/goodwe/goodwe_registers_map.h"
 #include "protocols/growatt/growatt_registers_map.h"
+#include "protocols/jkbms_can/jkbms_can_protocol.h"
 #include "protocols/pylon/pylon_registers_map.h"
 #include "protocols/sofar/sofar_registers_map.h"
 
@@ -129,6 +130,11 @@ static inline int16_t deciCToIntC(int16_t tempDeciC)
     return (tempDeciC >= 0) ? (int16_t)((tempDeciC + 5) / 10) : (int16_t)((tempDeciC - 5) / 10);
 }
 
+static inline int16_t jkbmsCanTempRawToC(uint8_t raw)
+{
+    return (int16_t)((int16_t)raw - 50);
+}
+
 static uint16_t crc16(const uint8_t *data, int len)
 {
     uint16_t crc = 0xFFFFu;
@@ -244,6 +250,55 @@ static void cacheFromCanFrame(canRs485GrowattCtx_t *ctx, const twai_message_t *m
             ctx->cache.hasTempC = true;
             ctx->cache.socPct = (uint8_t)((d[6] > 100u) ? 100u : d[6]);
             ctx->cache.hasSoc = true;
+            handled = true;
+            break;
+        }
+        case JKBMS_CAN_ID_BATT_ST: {
+            const uint16_t packDv = le16(&d[0]);
+            ctx->cache.packCv = (uint16_t)(packDv * 10u);
+            ctx->cache.hasPackCv = true;
+
+            ctx->cache.socPct = (uint8_t)((d[4] > 100u) ? 100u : d[4]);
+            ctx->cache.hasSoc = true;
+            ctx->cache.sohPct = 100u;
+            ctx->cache.hasSoh = true;
+
+            handled = true;
+            break;
+        }
+        case JKBMS_CAN_ID_CELL_VOLT: {
+            const uint16_t maxMv = le16(&d[0]);
+            const uint16_t minMv = le16(&d[3]);
+
+            if (maxMv >= 1500u && maxMv <= 5000u &&
+                minMv >= 1500u && minMv <= 5000u) {
+                ctx->cache.cellMaxMv = maxMv;
+                ctx->cache.cellMinMv = minMv;
+                ctx->cache.cellMaxIdx = d[2];
+                ctx->cache.cellMinIdx = d[5];
+                ctx->cache.hasCellExtremes = true;
+            }
+
+            handled = true;
+            break;
+        }
+        case JKBMS_CAN_ID_CELL_TEMP: {
+            const int16_t tempMaxC = jkbmsCanTempRawToC(d[0]);
+            const int16_t tempMinC = jkbmsCanTempRawToC(d[2]);
+            const int16_t tempAvgC = jkbmsCanTempRawToC(d[4]);
+
+            ctx->cache.tempC = tempAvgC;
+            ctx->cache.tempDeciC = (int16_t)(tempAvgC * 10);
+            ctx->cache.tempMinDeciC = (int16_t)(tempMinC * 10);
+            ctx->cache.tempMaxDeciC = (int16_t)(tempMaxC * 10);
+            if (ctx->cache.tempMinDeciC > ctx->cache.tempMaxDeciC) {
+                int16_t t = ctx->cache.tempMinDeciC;
+                ctx->cache.tempMinDeciC = ctx->cache.tempMaxDeciC;
+                ctx->cache.tempMaxDeciC = t;
+            }
+            ctx->cache.hasTempC = true;
+            ctx->cache.hasTempRangeDeciC = true;
+
             handled = true;
             break;
         }
@@ -1187,7 +1242,7 @@ esp_err_t canRs485GrowattBridgeEnable(uart_port_t inverterUart,
 
     BaseType_t taskOk = xTaskCreate(canRs485GrowattTask,
                                     "can_to_rs485_gw",
-                                    4096,
+                                    CAN_RS485_GROWATT_TASK_STACK,
                                     &g_canRsGrowattCtx,
                                     9,
                                     &g_canRsGrowattTaskHandle);

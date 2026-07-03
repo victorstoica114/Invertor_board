@@ -24,6 +24,7 @@ extern int g_routeStubGrowattInverterStartCount;
 extern int g_routeStubPylonInverterStartCount;
 extern int g_routeStubPylonBridgeEnableCount;
 extern int g_routeStubCanForwardStartCount;
+extern int g_routeStubCanRs485GrowattTranslatorStartCount;
 extern int g_routeStubRs485GrowattResponderStartCount;
 void routeSelectionStubReset(void);
 
@@ -246,6 +247,28 @@ void test_route_jkbms_rs485_to_can_growatt_starts_bms_poller_and_can_sender(void
     TEST_ASSERT_EQUAL(ESP_OK, orchestratorStartFromRuntime(&settings));
     TEST_ASSERT_EQUAL(1, g_routeStubJkbmsModbusBmsStartCount);
     TEST_ASSERT_EQUAL(1, g_routeStubGrowattInverterStartCount);
+    TEST_ASSERT_EQUAL(0, g_routeStubPylonBridgeEnableCount);
+    TEST_ASSERT_EQUAL(0, g_routeStubRs485GrowattResponderStartCount);
+    TEST_ASSERT_EQUAL(0, g_routeStubCanForwardStartCount);
+    TEST_ASSERT_EQUAL(0, g_routeStubPylonInverterStartCount);
+}
+
+void test_route_jkbms_can_to_rs485_growatt_starts_can_rs485_translator(void)
+{
+    bridge_runtime_settings_t settings = {0};
+
+    settings.mode = MODE_BRIDGE;
+    settings.bms_line = LINE_CAN;
+    settings.bms_protocol = PROTOCOL_CAN_JKBMS_250K;
+    settings.bms_port = 1;
+    settings.inverter_line = LINE_RS485;
+    settings.inverter_protocol = PROTOCOL_RS485_GROWATT;
+    settings.inverter_port = 2;
+
+    TEST_ASSERT_EQUAL(ESP_OK, orchestratorStartFromRuntime(&settings));
+    TEST_ASSERT_EQUAL(1, g_routeStubCanRs485GrowattTranslatorStartCount);
+    TEST_ASSERT_EQUAL(0, g_routeStubJkbmsModbusBmsStartCount);
+    TEST_ASSERT_EQUAL(0, g_routeStubGrowattInverterStartCount);
     TEST_ASSERT_EQUAL(0, g_routeStubPylonBridgeEnableCount);
     TEST_ASSERT_EQUAL(0, g_routeStubRs485GrowattResponderStartCount);
     TEST_ASSERT_EQUAL(0, g_routeStubCanForwardStartCount);
@@ -711,6 +734,7 @@ int main(void)
     RUN_TEST(test_route_pylon_rs485_to_rs485_growatt_starts_source_poller_and_responder);
     RUN_TEST(test_route_pylon_rs485_to_can_growatt_starts_source_poller_and_can_sender);
     RUN_TEST(test_route_jkbms_rs485_to_can_growatt_starts_bms_poller_and_can_sender);
+    RUN_TEST(test_route_jkbms_can_to_rs485_growatt_starts_can_rs485_translator);
     RUN_TEST(test_route_can_pylon_to_rs485_pylon_valid);
     RUN_TEST(test_route_can_jkbms_250k_to_rs485_pylon_valid);
     RUN_TEST(test_route_pace_rs485_to_rs485_pylon_valid);

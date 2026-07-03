@@ -80,6 +80,7 @@
 #define CAN_RS485_SOC_SLAVE_ID 1u
 #define CAN_RS485_SOC_FAKE_PCT 99u
 #define CAN_RS485_SOC_RX_GAP_US 5000u
+#define CAN_RS485_GROWATT_TASK_STACK 8192
 
 /* --- Diagnostic step: force fake replies for CAN_PYLON -> RS485_PYLON route --- */
 #define PYLON_CAN_RS485_FORCE_FAKE_ENABLE 0

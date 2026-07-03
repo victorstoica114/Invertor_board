@@ -588,6 +588,7 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "else if(bl===1&&bp===4&&il===2&&(ip===3||ip===17)){txt='Special route active: CAN_PYLON -> '+protoLabel(ip)+' translator.';}"
         "else if(bl===1&&bp===22&&il===2&&(ip===3||ip===17)){txt='Special route active: DALY_CAN (CAN_'+bport+') -> '+protoLabel(ip)+' responder (RS485_'+iport+').';}"
         "else if(bl===1&&bp===22){txt='Testing DALY_CAN native poller on CAN_'+bport+'.';}"
+        "else if(bl===1&&bp===18&&il===2&&ip===2){txt='Special route active: JK BMS CAN 250K -> RS485_GROWATT translator.';}"
         "else if(bl===1&&bp===18&&il===2&&(ip===3||ip===17)){txt='Special route active: JK BMS CAN 250K -> '+protoLabel(ip)+' responder.';}"
         "else if(bl===1&&bp===18){txt='Testing JK BMS CAN 250K V2.0 on CAN_'+bport+'.';}"
         "else if(bl===2&&(bp===3||bp===17)&&il===2&&(ip===3||ip===17)){txt='Special route active: '+protoLabel(bp)+' bridge (bidirectional pass-through + cache).';}"
