@@ -301,6 +301,31 @@ static bool isRsJkbmsToRsGrowattRoute(const bridge_runtime_settings_t *settings)
            (settings->inverter_protocol == PROTOCOL_RS485_GROWATT);
 }
 
+static bool isRsWowToRsGrowattRoute(const bridge_runtime_settings_t *settings)
+{
+    if (settings == NULL) {
+        return false;
+    }
+
+    return (settings->bms_line == LINE_RS485) &&
+           (settings->inverter_line == LINE_RS485) &&
+           (settings->bms_protocol == PROTOCOL_RS485_WOW) &&
+           (settings->inverter_protocol == PROTOCOL_RS485_GROWATT);
+}
+
+static bool isRsGrowattToRsGrowattRoute(const bridge_runtime_settings_t *settings)
+{
+    if (settings == NULL) {
+        return false;
+    }
+
+    return (settings->mode == MODE_BRIDGE) &&
+           (settings->bms_line == LINE_RS485) &&
+           (settings->inverter_line == LINE_RS485) &&
+           (settings->bms_protocol == PROTOCOL_RS485_GROWATT) &&
+           (settings->inverter_protocol == PROTOCOL_RS485_GROWATT);
+}
+
 static bool isRsPylonToRsGrowattRoute(const bridge_runtime_settings_t *settings)
 {
     if (settings == NULL) {
@@ -652,6 +677,8 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
 
     const bool canToRsGrowatt = isCanToRsGrowattRoute(settings);
     const bool rsJkbmsToRsGrowatt = isRsJkbmsToRsGrowattRoute(settings);
+    const bool rsWowToRsGrowatt = isRsWowToRsGrowattRoute(settings);
+    const bool rsGrowattToRsGrowatt = isRsGrowattToRsGrowattRoute(settings);
     const bool rsPylonToRsGrowatt = isRsPylonToRsGrowattRoute(settings);
     const bool rsPylonToCanGrowatt = isRsPylonToCanGrowattRoute(settings);
     const bool rsJkbmsToCanGrowatt = isRsJkbmsToCanGrowattRoute(settings);
@@ -667,7 +694,7 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
     const bool canDirectPassthrough = isCanDirectPassthroughRoute(settings);
     const bool pylonRs485Route = pylonRs485BridgeSupportsRoute(settings);
     ESP_LOGI(EXAMPLE_TAG,
-             "Orchestrator runtime start: bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) canToRsGrowatt=%s rsJkbmsToRsGrowatt=%s rsPylonToRsGrowatt=%s rsPylonToCanGrowatt=%s rsJkbmsToCanGrowatt=%s rsJkbmsToRsPylon=%s rsGrowattToRsPylon=%s rsPaceToRsPylon=%s rsVoltronicToRsPylon=%s rsChinaTowerToRsPylon=%s rsWowToRsPylon=%s rsSeplosToRsPylon=%s rsDalyToRsPylon=%s canDalyToRsPylon=%s canDirect=%s pylonRs485=%s",
+             "Orchestrator runtime start: bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) canToRsGrowatt=%s rsJkbmsToRsGrowatt=%s rsWowToRsGrowatt=%s rsGrowattToRsGrowatt=%s rsPylonToRsGrowatt=%s rsPylonToCanGrowatt=%s rsJkbmsToCanGrowatt=%s rsJkbmsToRsPylon=%s rsGrowattToRsPylon=%s rsPaceToRsPylon=%s rsVoltronicToRsPylon=%s rsChinaTowerToRsPylon=%s rsWowToRsPylon=%s rsSeplosToRsPylon=%s rsDalyToRsPylon=%s canDalyToRsPylon=%s canDirect=%s pylonRs485=%s",
              (unsigned)settings->bms_line,
              (unsigned)settings->bms_protocol,
              (unsigned)settings->bms_port,
@@ -676,6 +703,8 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
              (unsigned)settings->inverter_port,
              canToRsGrowatt ? "YES" : "NO",
              rsJkbmsToRsGrowatt ? "YES" : "NO",
+             rsWowToRsGrowatt ? "YES" : "NO",
+             rsGrowattToRsGrowatt ? "YES" : "NO",
              rsPylonToRsGrowatt ? "YES" : "NO",
              rsPylonToCanGrowatt ? "YES" : "NO",
              rsJkbmsToCanGrowatt ? "YES" : "NO",
@@ -840,6 +869,102 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
         g_orchestratorCtx.canRs485TranslatorActive = true;
         ESP_LOGI(EXAMPLE_TAG,
                  "Orchestrator started JKBMS RS485->RS485 Growatt route: BMS(RS485_%u) -> Inverter(%s:%u)",
+                 (unsigned)settings->bms_port,
+                 rsNameByPort(settings->inverter_port),
+                 (unsigned)settings->inverter_port);
+        return ESP_OK;
+    }
+
+    if (rsWowToRsGrowatt) {
+        if (g_orchestratorTaskHandle != NULL || g_orchestratorCtx.canRs485TranslatorActive) {
+            ESP_LOGW(EXAMPLE_TAG, "Orchestrator already running");
+            return ESP_ERR_INVALID_STATE;
+        }
+
+        memset(&g_orchestratorCtx, 0, sizeof(g_orchestratorCtx));
+        g_orchestratorCtx.bmsProtocol = PROTOCOL_ID_WOW;
+        g_orchestratorCtx.inverterProtocol = PROTOCOL_ID_GROWATT;
+
+        g_orchestratorCtx.bmsQueue =
+            xQueueCreate(ORCHESTRATOR_BMS_QUEUE_LEN, sizeof(bms_decoded_packet_t));
+        if (g_orchestratorCtx.bmsQueue == NULL) {
+            orchestratorReset(&g_orchestratorCtx);
+            return ESP_ERR_NO_MEM;
+        }
+
+        esp_err_t err = wowModbusBmsTaskStart(g_orchestratorCtx.bmsQueue);
+        if (err != ESP_OK) {
+            ESP_LOGW(EXAMPLE_TAG,
+                     "WOW BMS task failed for RS485->RS485 Growatt route (err=0x%x)",
+                     (unsigned)err);
+            orchestratorReset(&g_orchestratorCtx);
+            return err;
+        }
+
+        err = batteryModelRs485GrowattBridgeEnable(rsUartByPort(settings->inverter_port),
+                                                   rsDirByPort(settings->inverter_port),
+                                                   rsNameByPort(settings->inverter_port),
+                                                   "WOW_MODBUS");
+        if (err != ESP_OK) {
+            ESP_LOGW(EXAMPLE_TAG,
+                     "WOW->RS485 Growatt route failed to start translator (err=0x%x)",
+                     (unsigned)err);
+            wowModbusBmsTaskStop();
+            orchestratorReset(&g_orchestratorCtx);
+            return err;
+        }
+
+        g_orchestratorCtx.canRs485TranslatorActive = true;
+        ESP_LOGI(EXAMPLE_TAG,
+                 "Orchestrator started WOW RS485->RS485 Growatt route: BMS(RS485_%u) -> Inverter(%s:%u)",
+                 (unsigned)settings->bms_port,
+                 rsNameByPort(settings->inverter_port),
+                 (unsigned)settings->inverter_port);
+        return ESP_OK;
+    }
+
+    if (rsGrowattToRsGrowatt) {
+        if (g_orchestratorTaskHandle != NULL || g_orchestratorCtx.canRs485TranslatorActive) {
+            ESP_LOGW(EXAMPLE_TAG, "Orchestrator already running");
+            return ESP_ERR_INVALID_STATE;
+        }
+
+        memset(&g_orchestratorCtx, 0, sizeof(g_orchestratorCtx));
+        g_orchestratorCtx.bmsProtocol = PROTOCOL_ID_GROWATT;
+        g_orchestratorCtx.inverterProtocol = PROTOCOL_ID_GROWATT;
+
+        g_orchestratorCtx.bmsQueue =
+            xQueueCreate(ORCHESTRATOR_BMS_QUEUE_LEN, sizeof(bms_decoded_packet_t));
+        if (g_orchestratorCtx.bmsQueue == NULL) {
+            orchestratorReset(&g_orchestratorCtx);
+            return ESP_ERR_NO_MEM;
+        }
+
+        esp_err_t err = growattBmsTaskStart(g_orchestratorCtx.bmsQueue);
+        if (err != ESP_OK) {
+            ESP_LOGW(EXAMPLE_TAG,
+                     "Growatt BMS task failed for RS485->RS485 Growatt route (err=0x%x)",
+                     (unsigned)err);
+            orchestratorReset(&g_orchestratorCtx);
+            return err;
+        }
+
+        err = batteryModelRs485GrowattBridgeEnable(rsUartByPort(settings->inverter_port),
+                                                   rsDirByPort(settings->inverter_port),
+                                                   rsNameByPort(settings->inverter_port),
+                                                   "RS485_GROWATT");
+        if (err != ESP_OK) {
+            ESP_LOGW(EXAMPLE_TAG,
+                     "Growatt->RS485 Growatt route failed to start responder (err=0x%x)",
+                     (unsigned)err);
+            (void)growattBmsTaskStop();
+            orchestratorReset(&g_orchestratorCtx);
+            return err;
+        }
+
+        g_orchestratorCtx.canRs485TranslatorActive = true;
+        ESP_LOGI(EXAMPLE_TAG,
+                 "Orchestrator started Growatt RS485->RS485 Growatt route: BMS(RS485_%u) -> Inverter(%s:%u)",
                  (unsigned)settings->bms_port,
                  rsNameByPort(settings->inverter_port),
                  (unsigned)settings->inverter_port);

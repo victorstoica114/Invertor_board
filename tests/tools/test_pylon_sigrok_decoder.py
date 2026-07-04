@@ -17,7 +17,8 @@ PULSEVIEW_SRD_DIR = Path(r"C:\Program Files\sigrok\PulseView\share\libsigrokdeco
 sys.path.insert(0, str(DECODER_DIR))
 sys.path.insert(0, str(CAN_DECODER_DIR))
 
-from pylon import ascii_checksum, describe_info, frame_summary, parse_frame, status63_flags  # noqa: E402
+from pylon import (VERSION, ascii_checksum, describe_info, describe_payload_texts,
+                   frame_summary, parse_frame, status63_flags)  # noqa: E402
 from pylon_can import describe_packet, frame_summary as can_frame_summary  # noqa: E402
 
 
@@ -66,7 +67,10 @@ def test_describe_pylon_status_63():
 
 
 def test_describe_pylon_analog_61_uses_millivolt_pack_voltage():
-    payload = "DF360000640000000064640DF400010DF30002" + ("00" * 14)
+    payload = (
+        "DF360000640000000064640DF400010DF30002"
+        "0BA40BAE00000BA800000BA60BA3"
+    )
     frame = build_pylon_response(payload)
 
     decoded = describe_info(frame, 0x61)
@@ -76,6 +80,9 @@ def test_describe_pylon_analog_61_uses_millivolt_pack_voltage():
     assert "SOH=100%" in decoded
     assert "cell_max=3.572V#1" in decoded
     assert "cell_min=3.571V#2" in decoded
+    assert "MOS=24.9C" in decoded
+    assert "T5=24.8C" in decoded
+    assert "0x61 payload" in describe_payload_texts(frame, 0x61)[0]
 
 
 def test_describe_pylon_42_cell_list_response():
@@ -128,6 +135,8 @@ def test_sigrok_package_exports_decoder(monkeypatch):
     module = importlib.import_module("pylon_rs485")
 
     assert module.Decoder.id == "pylon_rs485"
+    assert VERSION in module.Decoder.name
+    assert VERSION in module.Decoder.longname
 
 
 def test_sigrok_decoder_emits_annotations_for_uart_frame(monkeypatch):
@@ -159,6 +168,7 @@ def test_sigrok_decoder_emits_annotations_for_uart_frame(monkeypatch):
     assert any("Pylon rsp addr=0x02 OK" in text for text in texts)
     assert any("CHK 0xF9B8 OK" in text for text in texts)
     assert any("0x63 status=0xC0" in text for text in texts)
+    assert any(VERSION in row[1] for row in module.Decoder.annotation_rows)
 
 
 def test_pylon_can_describes_live_jk_frames():

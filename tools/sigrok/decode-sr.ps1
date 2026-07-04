@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$InputFile,
 
-    [ValidateSet("jkbms_modbus", "pylon_rs485", "growatt_rs485")]
+    [ValidateSet("jkbms_modbus", "pylon_rs485", "growatt_rs485", "pace_modbus", "voltronic_modbus", "china_tower_modbus", "wow_modbus")]
     [string]$Protocol = "jkbms_modbus",
 
     [string]$Rx = "CH1",
@@ -35,10 +35,12 @@ function Copy-DecoderDir {
         Remove-Item -LiteralPath $Destination -Recurse -Force
     }
     Copy-Item -Path $Source -Destination $Destination -Recurse -Force
-    $pycache = Join-Path $Destination "__pycache__"
-    if (Test-Path $pycache) {
-        Remove-Item -LiteralPath $pycache -Recurse -Force
-    }
+    Get-ChildItem -LiteralPath $Destination -Recurse -Force -Directory |
+        Where-Object { $_.Name -eq "__pycache__" } |
+        Remove-Item -Recurse -Force
+    Get-ChildItem -LiteralPath $Destination -Recurse -Force -File |
+        Where-Object { $_.Extension -in @(".pyc", ".pyo") } |
+        Remove-Item -Force
 }
 
 if (-not (Test-Path $InputFile)) {
@@ -85,6 +87,11 @@ $keyPattern = switch ($Protocol) {
     "jkbms_modbus" { "JKBMS Modbus|crc=|CRC|response|request|read holding|decoded|warning|candidate|cell|SOC|SOH|pack|temp" }
     "pylon_rs485" { "Pylon|chk=|CHK|Response|Request|Decoded|warning|cell|SOC|SOH|status|payload" }
     "growatt_rs485" { "Growatt|crc=|CRC|response|request|decoded|warning|cell|SOC|SOH|pack|temp|limit" }
+    "pace_modbus" { "PACE Modbus|crc=|CRC|response|request|read holding|decoded|warning|cell|SOC|SOH|pack|temp|capacity" }
+    "voltronic_modbus" { "Voltronic Modbus|crc=|CRC|response|request|read holding|decoded|warning|cell|SOC|SOH|pack|temp|limit" }
+    "china_tower_modbus" { "China Tower Modbus|crc=|CRC|response|request|read holding|decoded|warning|cell|SOC|SOH|pack|temp|status" }
+    "wow_modbus" { "WOW Modbus|crc=|CRC|response|request|read holding|decoded|warning|cell|SOC|SOH|pack|temp|capacity" }
+    default { "$Protocol|crc=|CRC|response|request|decoded|warning|cell|SOC|SOH|pack|temp" }
 }
 
 $decoderPattern = "$Protocol-\d+:"

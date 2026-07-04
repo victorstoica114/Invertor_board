@@ -357,6 +357,28 @@ void test_route_growatt_rs485_to_rs485_pylon_starts_responder(void)
 }
 
 /**
+ * Test: Growatt RS485 BMS source can feed the Growatt RS485 synthetic responder.
+ */
+void test_route_growatt_rs485_to_rs485_growatt_starts_responder(void)
+{
+    bridge_runtime_settings_t settings = {0};
+
+    settings.mode = MODE_BRIDGE;
+    settings.bms_line = LINE_RS485;
+    settings.bms_protocol = PROTOCOL_RS485_GROWATT;
+    settings.bms_port = 1;
+    settings.inverter_line = LINE_RS485;
+    settings.inverter_protocol = PROTOCOL_RS485_GROWATT;
+    settings.inverter_port = 2;
+
+    TEST_ASSERT_EQUAL(ESP_OK, orchestratorStartFromRuntime(&settings));
+    TEST_ASSERT_EQUAL(1, g_routeStubGrowattBmsStartCount);
+    TEST_ASSERT_EQUAL(1, g_routeStubRs485GrowattResponderStartCount);
+    TEST_ASSERT_EQUAL(0, g_routeStubPylonBridgeEnableCount);
+    TEST_ASSERT_EQUAL(0, g_routeStubPylonInverterStartCount);
+}
+
+/**
  * Test: Voltronic RS485 BMS source can feed the Pylon RS485 synthetic responder.
  */
 void test_route_voltronic_rs485_to_rs485_pylon_starts_responder(void)
@@ -416,6 +438,28 @@ void test_route_wow_rs485_to_rs485_pylon_starts_responder(void)
     TEST_ASSERT_EQUAL(ESP_OK, orchestratorStartFromRuntime(&settings));
     TEST_ASSERT_EQUAL(1, g_routeStubWowBmsStartCount);
     TEST_ASSERT_EQUAL(1, g_routeStubPylonBridgeEnableCount);
+    TEST_ASSERT_EQUAL(0, g_routeStubPylonInverterStartCount);
+}
+
+/**
+ * Test: WOW RS485 BMS source can feed the Growatt RS485 synthetic responder.
+ */
+void test_route_wow_rs485_to_rs485_growatt_starts_responder(void)
+{
+    bridge_runtime_settings_t settings = {0};
+
+    settings.mode = MODE_BRIDGE;
+    settings.bms_line = LINE_RS485;
+    settings.bms_protocol = PROTOCOL_RS485_WOW;
+    settings.bms_port = 1;
+    settings.inverter_line = LINE_RS485;
+    settings.inverter_protocol = PROTOCOL_RS485_GROWATT;
+    settings.inverter_port = 2;
+
+    TEST_ASSERT_EQUAL(ESP_OK, orchestratorStartFromRuntime(&settings));
+    TEST_ASSERT_EQUAL(1, g_routeStubWowBmsStartCount);
+    TEST_ASSERT_EQUAL(1, g_routeStubRs485GrowattResponderStartCount);
+    TEST_ASSERT_EQUAL(0, g_routeStubPylonBridgeEnableCount);
     TEST_ASSERT_EQUAL(0, g_routeStubPylonInverterStartCount);
 }
 
@@ -779,9 +823,11 @@ int main(void)
     RUN_TEST(test_route_can_jkbms_250k_to_rs485_pylon_valid);
     RUN_TEST(test_route_pace_rs485_to_rs485_pylon_valid);
     RUN_TEST(test_route_growatt_rs485_to_rs485_pylon_starts_responder);
+    RUN_TEST(test_route_growatt_rs485_to_rs485_growatt_starts_responder);
     RUN_TEST(test_route_voltronic_rs485_to_rs485_pylon_starts_responder);
     RUN_TEST(test_route_china_tower_rs485_to_rs485_pylon_starts_responder);
     RUN_TEST(test_route_wow_rs485_to_rs485_pylon_starts_responder);
+    RUN_TEST(test_route_wow_rs485_to_rs485_growatt_starts_responder);
     RUN_TEST(test_route_seplos_rs485_to_rs485_pylon_starts_responder);
     RUN_TEST(test_route_seplos_19200_to_rs485_pylon_115200_starts_responder);
     RUN_TEST(test_route_daly_rs485_to_can_pylon_starts_can_sender);

@@ -38,6 +38,10 @@ esp_err_t canRs485GrowattBridgeEnable(uart_port_t inverterUart,
                                       const char *ifName,
                                       twai_handle_t srcCanBus,
                                       const char *srcCanIf);
+esp_err_t batteryModelRs485GrowattBridgeEnable(uart_port_t inverterUart,
+                                               gpio_num_t inverterDir,
+                                               const char *ifName,
+                                               const char *sourceName);
 esp_err_t jkbmsRs485GrowattBridgeEnable(uart_port_t inverterUart,
                                         gpio_num_t inverterDir,
                                         const char *ifName);

@@ -25,9 +25,19 @@ whenever decoder behavior changes, so stale copies installed under
 `C:\ProgramData\libsigrokdecode\decoders` or cached by an already running
 PulseView instance are obvious in the decoder selector and stack labels.
 
+Publication rule: when a decoder is accepted for the separate public decoder
+repository, copy it with `copy-decoder-to-public-repo.ps1` instead of raw
+`Copy-Item`. The helper skips generated Python artifacts such as `__pycache__`
+and `.pyc` files.
+
+```powershell
+.\tools\sigrok\copy-decoder-to-public-repo.ps1 -DecoderName voltronic_modbus
+```
+
 Available PulseView/libsigrokdecode protocol decoders:
 
-- `pylon_rs485`: Pylon-compatible RS485 ASCII frames, stacked above `uart`
+- `pylon_rs485`: Pylon-compatible RS485 ASCII frames, stacked above `uart`;
+  current visible name is `Pylon RS485 v2026.07.04a`
 - `pylon_can`: Pylon-compatible Classic CAN frames, standalone CAN decoder
 - `growatt_rs485`: Growatt RS485 Modbus RTU frames, stacked above `uart`
 - `china_tower_modbus`: China Tower / JK 008 RS485 Modbus RTU frames,
@@ -35,6 +45,12 @@ Available PulseView/libsigrokdecode protocol decoders:
   `China Tower Modbus v2026.07.03a`
 - `pace_modbus`: PACE RS485 Modbus V1.3 frames, stacked above `uart`;
   current visible name is `PACE Modbus v2026.07.04a`
+- `wow_modbus`: WOW / JK 009 RS485 Modbus frames, stacked above `uart`;
+  current visible name is `WOW Modbus v2026.07.04a`
+- `daly_rs485`: Daly native A5 and Daly Modbus RS485 frames, stacked above
+  `uart`; current visible name is `Daly RS485 v2026.07.04a`
+- `voltronic_modbus`: Voltronic-compatible RS485 Modbus frames, stacked above
+  `uart`; current visible name is `Voltronic Modbus v2026.07.04e`
 - `growatt_can`: Growatt-compatible Classic CAN frames, standalone CAN decoder
 - `deye_can`: Deye-compatible Classic CAN frames, standalone CAN decoder;
   current visible name is `Deye CAN v2026.07.03a`
@@ -51,6 +67,8 @@ Available PulseView/libsigrokdecode protocol decoders:
 - `jkbms_rs485_native`: JK native binary RS485 frames, stacked above `uart`
 - `jkbms_can`: JK native CAN V2.0 frames, standalone CAN decoder;
   current visible name is `JKBMS CAN v2026.07.03a`
+- `daly_can`: Daly native CAN frames at 250 kbit/s, standalone CAN decoder;
+  current visible name is `Daly CAN v2026.07.04a`
 
 ## Pylon RS485 Decoder
 
@@ -329,6 +347,54 @@ decoders, or run the installer script:
 
 ```powershell
 Copy-Item -Recurse tools\sigrok\decoders\pace_modbus "$env:ProgramData\libsigrokdecode\decoders\pace_modbus"
+.\tools\sigrok\install-pulseview-decoders.ps1
+```
+
+## Voltronic Modbus RS485 Decoder
+
+The `decoders/voltronic_modbus` directory is a PulseView/libsigrokdecode
+protocol decoder for Voltronic-compatible BMS RS485 Modbus traffic, including
+the JK app profile commonly exposed as Voltronic / protocol `007`. Its current
+visible PulseView name is `Voltronic Modbus v2026.07.04e`.
+
+It stacks on top of the built-in `uart` decoder:
+
+```text
+logic -> uart -> voltronic_modbus
+```
+
+Typical Voltronic RS485 settings:
+
+- baud: use the active BMS profile value, usually `9600` for inverter-style
+  RS485 profiles
+- data bits: `8`
+- parity: `none`
+- stop bits: `1`
+- bit order: `lsb-first`
+- line inversion: depends on the probe point/transceiver output
+
+The decoder follows
+`main/protocols/voltronic_modbus/voltronic_modbus_registers_map.h` and handles
+the odd variants seen by the ESP32 bridge:
+
+- classic Modbus order `slave, function, ...`
+- Voltronic function-first order `function, slave, ...`
+- standard byte-count responses, 16-bit word-count responses, and 16-bit
+  wide-byte-count responses
+- public Voltronic registers for cells, temperatures, current, voltage, SOC,
+  capacities, limits, and charge/discharge status
+- JK compatibility blocks for cells `0x1200..`, cell average/delta, MOS/T1/T2
+  temperatures, pack voltage/current candidates, SOC/SOH, capacity, cycles, and
+  alarm raw masks
+
+Unknown words are kept visible as raw registers. Warning/protection/alarm bit
+names stay raw until they are correlated with live BMS alarm states.
+
+On Windows, copy the whole decoder directory alongside the other custom
+decoders, or run the installer script:
+
+```powershell
+Copy-Item -Recurse tools\sigrok\decoders\voltronic_modbus "$env:ProgramData\libsigrokdecode\decoders\voltronic_modbus"
 .\tools\sigrok\install-pulseview-decoders.ps1
 ```
 

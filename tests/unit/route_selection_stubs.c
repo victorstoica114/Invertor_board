@@ -367,6 +367,19 @@ esp_err_t jkbmsRs485GrowattBridgeEnable(uart_port_t inverterUart,
     return ESP_OK;
 }
 
+esp_err_t batteryModelRs485GrowattBridgeEnable(uart_port_t inverterUart,
+                                               gpio_num_t inverterDir,
+                                               const char *ifName,
+                                               const char *sourceName)
+{
+    (void)inverterUart;
+    (void)inverterDir;
+    (void)ifName;
+    (void)sourceName;
+    g_routeStubRs485GrowattResponderStartCount++;
+    return ESP_OK;
+}
+
 void canRs485GrowattBridgeStop(void)
 {
 }

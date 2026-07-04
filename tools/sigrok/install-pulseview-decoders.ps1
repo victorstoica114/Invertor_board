@@ -29,10 +29,12 @@ function Copy-DecoderDir {
         Remove-Item -LiteralPath $Destination -Recurse -Force
     }
     Copy-Item -Path $Source -Destination $Destination -Recurse -Force
-    $pycache = Join-Path $Destination "__pycache__"
-    if (Test-Path $pycache) {
-        Remove-Item -LiteralPath $pycache -Recurse -Force
-    }
+    Get-ChildItem -LiteralPath $Destination -Recurse -Force -Directory |
+        Where-Object { $_.Name -eq "__pycache__" } |
+        Remove-Item -Recurse -Force
+    Get-ChildItem -LiteralPath $Destination -Recurse -Force -File |
+        Where-Object { $_.Extension -in @(".pyc", ".pyo") } |
+        Remove-Item -Force
 }
 
 if (-not (Test-Path $BuiltinDecoderDir)) {

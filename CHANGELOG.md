@@ -28,6 +28,8 @@ The goal is practical maintenance:
 - `RS485_CHINA_TOWER -> RS485_PYLON` bridge-mode route for Pylon-compatible inverter responders.
 - `WOW_MODBUS` BMS poller/decoder for JK UART protocol `009 - WOW_RS485_Modbus_V1.3`, using a PACE-compatible V1.3 register map as the initial live-test implementation.
 - `RS485_WOW -> RS485_PYLON` bridge-mode route for Pylon-compatible inverter responders.
+- `RS485_WOW -> RS485_GROWATT` bridge-mode route for Growatt-compatible RS485 inverter responders, fed through the shared battery model.
+- PulseView `wow_modbus` decoder for JK UART protocol `009 - WOW_RS485_Modbus_V1.3`, with Modbus CRC, request/response tracking, runtime values, cell voltages, and temperatures.
 - `JKBMS_CAN_250K` decoder for JK app protocol `000 - JK BMS CAN Protocol (250K) V2.0`, covering pack voltage/current/SOC, cell extremes, temperatures, and alarm severity fields.
 - `JKBMS_CAN_250K -> RS485_PYLON` synthetic responder route through the universal battery model.
 - CAN protocol backlog documentation under `docs/can_protocols.md`.

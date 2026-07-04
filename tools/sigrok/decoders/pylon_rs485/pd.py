@@ -8,13 +8,16 @@
 import sigrokdecode as srd
 
 try:
-    from .pylon import (describe_info_texts, frame_summary_texts, is_request, parse_frame)
+    from .pylon import (VERSION, describe_info_texts, describe_payload_texts,
+                         frame_summary_texts, is_request, parse_frame)
 except Exception:
-    from pylon import (describe_info_texts, frame_summary_texts, is_request, parse_frame)
+    from pylon import (VERSION, describe_info_texts, describe_payload_texts,
+                       frame_summary_texts, is_request, parse_frame)
 
 
 RX = 0
 TX = 1
+DECODER_VERSION = VERSION
 
 
 class Ann:
@@ -24,8 +27,8 @@ class Ann:
 class Decoder(srd.Decoder):
     api_version = 3
     id = 'pylon_rs485'
-    name = 'Pylon RS485'
-    longname = 'Pylon-compatible RS485 ASCII'
+    name = 'Pylon RS485 {}'.format(DECODER_VERSION)
+    longname = 'Pylon-compatible RS485 ASCII {}'.format(DECODER_VERSION)
     desc = 'Pylon-compatible BMS/inverter ASCII frames over UART/RS485.'
     license = 'gplv2+'
     inputs = ['uart']
@@ -42,11 +45,11 @@ class Decoder(srd.Decoder):
     )
 
     annotation_rows = (
-        ('frames', 'Frames', (Ann.FRAME,)),
-        ('fields', 'Fields', (Ann.FIELD, Ann.CHECKSUM)),
-        ('payloads', 'Payload', (Ann.PAYLOAD,)),
-        ('decoded-values', 'Decoded', (Ann.DECODED,)),
-        ('warnings', 'Warnings', (Ann.WARNING,)),
+        ('frames', 'Pylon RS485 {}: Frames'.format(DECODER_VERSION), (Ann.FRAME,)),
+        ('fields', 'Pylon RS485 {}: Fields'.format(DECODER_VERSION), (Ann.FIELD, Ann.CHECKSUM)),
+        ('payloads', 'Pylon RS485 {}: Payload'.format(DECODER_VERSION), (Ann.PAYLOAD,)),
+        ('decoded-values', 'Pylon RS485 {}: Decoded'.format(DECODER_VERSION), (Ann.DECODED,)),
+        ('warnings', 'Pylon RS485 {}: Warnings'.format(DECODER_VERSION), (Ann.WARNING,)),
     )
 
     def __init__(self):
@@ -112,7 +115,7 @@ class Decoder(srd.Decoder):
         decoded_texts = describe_info_texts(frame, pending_cid2)
         if frame['info_ascii']:
             self.put_idx(rxtx, info_start, info_end, Ann.PAYLOAD,
-                         [frame['info_ascii'], 'INFO'])
+                         describe_payload_texts(frame, pending_cid2))
             self.put_idx(rxtx, info_start, info_end, Ann.DECODED,
                          decoded_texts)
         else:

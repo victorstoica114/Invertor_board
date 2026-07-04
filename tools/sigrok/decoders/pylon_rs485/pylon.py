@@ -4,6 +4,8 @@
 ## Kept dependency-free so the parser can be unit-tested without PulseView.
 ##
 
+VERSION = 'v2026.07.04a'
+
 REQUEST_NAMES = {
     0x61: 'analog/telemetry',
     0x62: 'alarm/status flags',
@@ -82,6 +84,10 @@ def cell_mv_valid(mv):
 def fmt_cells(cells):
     return ' '.join('C{:02d}={:.3f}V'.format(i + 1, mv / 1000.0)
                     for i, mv in enumerate(cells))
+
+
+def hex_bytes(data):
+    return ' '.join('{:02X}'.format(b) for b in data)
 
 
 def cell_stats(cells):
@@ -205,6 +211,57 @@ def describe_request_payload(cid2, info):
     return 'payload=' + ''.join('{:02X}'.format(b) for b in info)
 
 
+def kelvin_c10_to_c(value):
+    return (value - 2731) / 10.0
+
+
+def describe_61(frame):
+    info = frame.get('info_bytes', [])
+    if len(info) < 33:
+        return None
+
+    temps = [
+        ('MOS', kelvin_c10_to_c(be16(info, 19))),
+        ('T1', kelvin_c10_to_c(be16(info, 21))),
+        ('T2', kelvin_c10_to_c(be16(info, 25))),
+        ('T4', kelvin_c10_to_c(be16(info, 29))),
+        ('T5', kelvin_c10_to_c(be16(info, 31))),
+    ]
+
+    return {
+        'pack_v': be16(info, 0) / 1000.0,
+        'current_a': be16s(info, 2) / 10.0,
+        'soc': info[4],
+        'cycles': be16(info, 5),
+        'soh': info[9],
+        'max_mv': be16(info, 11),
+        'max_idx': be16(info, 13) & 0xff,
+        'min_mv': be16(info, 15),
+        'min_idx': be16(info, 17) & 0xff,
+        'temps': temps,
+        'temp_text': ' '.join('{}={:.1f}C'.format(name, value)
+                              for name, value in temps),
+    }
+
+
+def describe_payload_texts(frame, requested_cid2=None):
+    info = frame.get('info_bytes', [])
+    if not info:
+        return ['INFO empty', 'empty']
+
+    cid2 = frame.get('code')
+    if cid2 == 0x00:
+        cid2 = infer_response_request(frame, requested_cid2)
+
+    raw = hex_bytes(info)
+    if cid2 in REQUEST_NAMES:
+        return ['0x{:02X} payload {}'.format(cid2, raw),
+                '0x{:02X} payload {}B'.format(cid2, len(info)),
+                'payload {}B'.format(len(info)),
+                'INFO']
+    return ['payload {}'.format(raw), 'payload {}B'.format(len(info)), 'INFO']
+
+
 def parse_frame(raw):
     if isinstance(raw, bytes):
         text = raw.decode('ascii', errors='replace')
@@ -321,19 +378,14 @@ def describe_info(frame, requested_cid2=None):
         return '0x63 status=0x{:02X} ({})'.format(status, status63_flags(status))
 
     if cid2 == 0x61 and len(info) >= 33:
-        pack_v = be16(info, 0) / 1000.0
-        current_a = be16s(info, 2) / 10.0
-        soc = info[4]
-        cycles = be16(info, 5)
-        soh = info[9]
-        max_mv = be16(info, 11)
-        max_idx = be16(info, 13) & 0xff
-        min_mv = be16(info, 15)
-        min_idx = be16(info, 17) & 0xff
+        decoded = describe_61(frame)
         return ('0x61 V={:.3f}V I={:.1f}A SOC={}%% SOH={}%% cycles={} '
-                'cell_max={:.3f}V#{} cell_min={:.3f}V#{}').format(
-                    pack_v, current_a, soc, soh, cycles,
-                    max_mv / 1000.0, max_idx, min_mv / 1000.0, min_idx)
+                'cell_max={:.3f}V#{} cell_min={:.3f}V#{} {}').format(
+                    decoded['pack_v'], decoded['current_a'],
+                    decoded['soc'], decoded['soh'], decoded['cycles'],
+                    decoded['max_mv'] / 1000.0, decoded['max_idx'],
+                    decoded['min_mv'] / 1000.0, decoded['min_idx'],
+                    decoded['temp_text'])
 
     if cid2 == 0x62:
         flags = int(frame.get('info_ascii') or '0', 16)
@@ -377,16 +429,14 @@ def describe_info_texts(frame, requested_cid2=None):
                 '0x63']
 
     if cid2 == 0x61 and len(info) >= 33:
-        pack_v = be16(info, 0) / 1000.0
-        soc = info[4]
-        max_mv = be16(info, 11)
-        max_idx = be16(info, 13) & 0xff
-        min_mv = be16(info, 15)
-        min_idx = be16(info, 17) & 0xff
+        decoded = describe_61(frame)
         return [long_text,
                 '0x61 V={:.3f} SOC={} min={:.3f}#{} max={:.3f}#{}'.format(
-                    pack_v, soc, min_mv / 1000.0, min_idx, max_mv / 1000.0, max_idx),
-                '0x61 SOC={} min/max'.format(soc),
+                    decoded['pack_v'], decoded['soc'],
+                    decoded['min_mv'] / 1000.0, decoded['min_idx'],
+                    decoded['max_mv'] / 1000.0, decoded['max_idx']),
+                '0x61 SOC={} T={:.1f}C'.format(decoded['soc'], decoded['temps'][0][1]),
+                '0x61 SOC={} min/max'.format(decoded['soc']),
                 '0x61']
 
     if cid2 == 0x62:

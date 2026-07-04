@@ -67,6 +67,7 @@ typedef struct {
     uart_port_t uart;
     gpio_num_t dirPin;
     const char *ifName;
+    const char *sourceName;
     uint8_t slaveId;
     uint8_t fakeSocPct;
     uint32_t rxBytes;
@@ -78,6 +79,11 @@ static jkbmsRs485GrowattCtx_t g_jkbmsRsGrowattCtx;
 static TaskHandle_t g_jkbmsRsGrowattTaskHandle;
 static can_rs485_growatt_snapshot_t g_canRsGrowattSnapshot;
 static portMUX_TYPE g_canRsGrowattSnapshotMux = portMUX_INITIALIZER_UNLOCKED;
+
+#define GROWATT_SYNTH_FULL_CAP_CAH              4000u
+#define GROWATT_SYNTH_CHARGE_V_LIMIT_CV         5760u
+#define GROWATT_SYNTH_CHARGE_CURRENT_LIMIT_CA   3800u
+#define GROWATT_SYNTH_DISCHARGE_CURRENT_LIMIT_CA 19000u
 
 static int drainUartRx(uart_port_t uart, int maxBytes)
 {
@@ -493,12 +499,40 @@ static uint16_t fallbackCell(uint8_t idx)
     return k_cells[idx];
 }
 
+static uint16_t scaledU16OrDefault(float value, float scale, uint16_t fallback)
+{
+    if (value <= 0.0f || scale <= 0.0f) {
+        return fallback;
+    }
+
+    float scaled = (value * scale) + 0.5f;
+    if (scaled <= 0.0f) {
+        return fallback;
+    }
+    if (scaled > (float)UINT16_MAX) {
+        return UINT16_MAX;
+    }
+    return (uint16_t)scaled;
+}
+
+static uint16_t growattChargeVoltageLimitCv(uint16_t preferredLimitCv, uint16_t packCv)
+{
+    uint16_t limitCv = (preferredLimitCv > 0u) ? preferredLimitCv : GROWATT_SYNTH_CHARGE_V_LIMIT_CV;
+    if (limitCv < packCv) {
+        limitCv = packCv;
+    }
+    return limitCv;
+}
+
 typedef struct {
     uint16_t soc;
     uint16_t soh;
     uint16_t packCv;
     int16_t tempC;
     uint16_t cycles;
+    uint16_t chargeVoltLimitCv;
+    uint16_t chargeCurrentLimitCa;
+    uint16_t dischargeCurrentLimitCa;
     uint16_t cellMaxMv;
     uint16_t cellMinMv;
     uint8_t cellMaxIdx;
@@ -518,6 +552,9 @@ static bool fillSnapshotFromBatteryModel(growattSynthSnapshot_t *snap, uint8_t f
     snap->packCv = 5120u;
     snap->tempC = 25;
     snap->cycles = 0u;
+    snap->chargeVoltLimitCv = GROWATT_SYNTH_CHARGE_V_LIMIT_CV;
+    snap->chargeCurrentLimitCa = GROWATT_SYNTH_CHARGE_CURRENT_LIMIT_CA;
+    snap->dischargeCurrentLimitCa = GROWATT_SYNTH_DISCHARGE_CURRENT_LIMIT_CA;
     snap->cellMaxMv = 3452u;
     snap->cellMinMv = 3448u;
     snap->cellMaxIdx = 4u;
@@ -531,7 +568,7 @@ static bool fillSnapshotFromBatteryModel(growattSynthSnapshot_t *snap, uint8_t f
     if (model.socPct <= 100u) {
         snap->soc = model.socPct;
     }
-    if (model.sohPct <= 100u) {
+    if (model.sohPct > 0u && model.sohPct <= 100u) {
         snap->soh = model.sohPct;
     }
     if (model.temperaturesC[0] > -100.0f) {
@@ -544,6 +581,15 @@ static bool fillSnapshotFromBatteryModel(growattSynthSnapshot_t *snap, uint8_t f
     if (model.cycleCount > 0u) {
         snap->cycles = model.cycleCount;
     }
+    snap->chargeVoltLimitCv = scaledU16OrDefault(model.chargeVoltageLimitV,
+                                                 100.0f,
+                                                 snap->chargeVoltLimitCv);
+    snap->chargeCurrentLimitCa = scaledU16OrDefault(model.chargeCurrentLimitA,
+                                                   100.0f,
+                                                   snap->chargeCurrentLimitCa);
+    snap->dischargeCurrentLimitCa = scaledU16OrDefault(model.dischargeCurrentLimitA,
+                                                      100.0f,
+                                                      snap->dischargeCurrentLimitCa);
     if (model.cellMaxV > 0.0f) {
         uint32_t cellMaxMv = (uint32_t)(model.cellMaxV * 1000.0f + 0.5f);
         snap->cellMaxMv = (cellMaxMv > UINT16_MAX) ? UINT16_MAX : (uint16_t)cellMaxMv;
@@ -634,8 +680,9 @@ static uint16_t synthRegFromSnapshot(const growattSynthSnapshot_t *snap, uint16_
     const uint16_t packCv = snap->packCv;
     const uint16_t tempC = (uint16_t)snap->tempC;
     const uint16_t cycles = snap->cycles;
-    const uint16_t fullCap = 4000u; /* 40.00Ah in 0.01Ah units */
+    const uint16_t fullCap = GROWATT_SYNTH_FULL_CAP_CAH; /* 40.00Ah in 0.01Ah units */
     const uint16_t remCap = (uint16_t)(((uint32_t)fullCap * (uint32_t)soc) / 100u);
+    const uint16_t chargeVoltLimitCv = growattChargeVoltageLimitCv(snap->chargeVoltLimitCv, packCv);
     uint16_t cellMaxMv = snap->cellMaxMv;
     uint16_t cellMinMv = snap->cellMinMv;
     uint8_t cellMaxIdx = snap->cellMaxIdx;
@@ -681,11 +728,11 @@ static uint16_t synthRegFromSnapshot(const growattSynthSnapshot_t *snap, uint16_
         case GROWATT_MB_REG_SOH_PCT:
             return soh;
         case GROWATT_MB_REG_CV_TARGET_CV:
-            return packCv;
+            return chargeVoltLimitCv;
         case GROWATT_MB_REG_ICHG_LIM_CA_TENTATIVE:
-            return 0u;
+            return snap->chargeCurrentLimitCa;
         case GROWATT_MB_REG_IDIS_LIM_CA_TENTATIVE:
-            return 0u;
+            return snap->dischargeCurrentLimitCa;
         case GROWATT_MB_REG_CELL_MAX_MV:
             return cellMaxMv;
         case GROWATT_MB_REG_CELL_MIN_MV:
@@ -714,12 +761,21 @@ static uint16_t synthRegFromSnapshot(const growattSynthSnapshot_t *snap, uint16_
 static uint16_t synthReg(const canRs485GrowattCtx_t *ctx, uint16_t addr)
 {
     const uint16_t soc = ctx->cache.hasSoc ? ctx->cache.socPct : 0u;
-    const uint16_t soh = ctx->cache.hasSoh ? ctx->cache.sohPct : 0u;
+    const uint16_t soh = (ctx->cache.hasSoh && ctx->cache.sohPct > 0u) ? ctx->cache.sohPct : 100u;
     const uint16_t packCv = ctx->cache.hasPackCv ? ctx->cache.packCv : 0u;
     const uint16_t tempC = (uint16_t)(ctx->cache.hasTempC ? ctx->cache.tempC : 0);
     const uint16_t cycles = ctx->cache.hasCycles ? ctx->cache.cycles : 0u;
-    const uint16_t fullCap = ctx->cache.hasSoc ? 4000u : 0u; /* 40.00Ah in 0.01Ah units */
+    const uint16_t fullCap = ctx->cache.hasSoc ? GROWATT_SYNTH_FULL_CAP_CAH : 0u;
     const uint16_t remCap = (fullCap > 0u) ? (uint16_t)(((uint32_t)fullCap * (uint32_t)soc) / 100u) : 0u;
+    const uint16_t chargeVoltLimitCv = growattChargeVoltageLimitCv(
+        ctx->cache.hasLimits ? ctx->cache.chargeVoltLimitCv : 0u,
+        packCv);
+    const uint16_t chargeCurrentLimitCa = ctx->cache.hasLimits ?
+                                          ctx->cache.chargeCurrentLimitCa :
+                                          GROWATT_SYNTH_CHARGE_CURRENT_LIMIT_CA;
+    const uint16_t dischargeCurrentLimitCa = ctx->cache.hasLimits ?
+                                             ctx->cache.dischargeCurrentLimitCa :
+                                             GROWATT_SYNTH_DISCHARGE_CURRENT_LIMIT_CA;
     uint16_t cellMaxMv = ctx->cache.hasCellExtremes ? ctx->cache.cellMaxMv : 0u;
     uint16_t cellMinMv = ctx->cache.hasCellExtremes ? ctx->cache.cellMinMv : 0u;
     uint8_t cellMaxIdx = ctx->cache.hasCellExtremes ? ctx->cache.cellMaxIdx : 0u;
@@ -765,11 +821,11 @@ static uint16_t synthReg(const canRs485GrowattCtx_t *ctx, uint16_t addr)
         case GROWATT_MB_REG_SOH_PCT:
             return soh;
         case GROWATT_MB_REG_CV_TARGET_CV:
-            return ctx->cache.hasLimits ? ctx->cache.chargeVoltLimitCv : packCv;
+            return chargeVoltLimitCv;
         case GROWATT_MB_REG_ICHG_LIM_CA_TENTATIVE:
-            return ctx->cache.hasLimits ? ctx->cache.chargeCurrentLimitCa : 0u;
+            return chargeCurrentLimitCa;
         case GROWATT_MB_REG_IDIS_LIM_CA_TENTATIVE:
-            return ctx->cache.hasLimits ? ctx->cache.dischargeCurrentLimitCa : 0u;
+            return dischargeCurrentLimitCa;
         case GROWATT_MB_REG_CELL_MAX_MV:
             return cellMaxMv;
         case GROWATT_MB_REG_CELL_MIN_MV:
@@ -846,6 +902,9 @@ static void logDecodedRegisterSnapshot(const canRs485GrowattCtx_t *ctx,
     const uint16_t cycles = synthReg(ctx, GROWATT_MB_REG_CYCLE_COUNT_TENTATIVE);
     const uint16_t remCap = synthReg(ctx, GROWATT_MB_REG_REMAIN_CAP_CAH);
     const uint16_t fullCap = synthReg(ctx, GROWATT_MB_REG_FULL_CAP_CAH);
+    const uint16_t chgVoltCv = synthReg(ctx, GROWATT_MB_REG_CV_TARGET_CV);
+    const uint16_t chgCurrentCa = synthReg(ctx, GROWATT_MB_REG_ICHG_LIM_CA_TENTATIVE);
+    const uint16_t disCurrentCa = synthReg(ctx, GROWATT_MB_REG_IDIS_LIM_CA_TENTATIVE);
     const uint16_t cMaxMv = synthReg(ctx, GROWATT_MB_REG_CELL_MAX_MV);
     const uint16_t cMinMv = synthReg(ctx, GROWATT_MB_REG_CELL_MIN_MV);
     const uint16_t cMaxIdx = synthReg(ctx, GROWATT_MB_REG_CELL_MAX_IDX);
@@ -861,7 +920,7 @@ static void logDecodedRegisterSnapshot(const canRs485GrowattCtx_t *ctx,
     ESP_LOGI(EXAMPLE_TAG,
              "CAN->RS485 req#%u on %s start=0x%04X count=%u sent=%s | "
              "SOC=%u%% SOH=%u%% Tavg=%.1fC Tmin/Tmax=%.1f/%.1fC "
-             "Vpack=%.2fV Cycles=%u Rem/FCC=%.2f/%.2fAh "
+             "Vpack=%.2fV CV=%.2fV Ichg=%.2fA Idis=%.2fA Cycles=%u Rem/FCC=%.2f/%.2fAh "
              "Cmax=%.3fV(#%u) Cmin=%.3fV(#%u)",
              (unsigned)ctx->reqCount,
              ctx->ifName,
@@ -874,6 +933,9 @@ static void logDecodedRegisterSnapshot(const canRs485GrowattCtx_t *ctx,
              (double)tempMinC,
              (double)tempMaxC,
              (double)packCv / 100.0,
+             (double)chgVoltCv / 100.0,
+             (double)chgCurrentCa / 100.0,
+             (double)disCurrentCa / 100.0,
              (unsigned)cycles,
              (double)remCap / 100.0,
              (double)fullCap / 100.0,
@@ -1133,7 +1195,7 @@ static void jkbmsRs485GrowattTask(void *pv)
                         bool sent = fresh && sendGrowattResponseFromSnapshot(ctx, &snap, func, start, count);
                         if (sent) {
                             ctx->rspCount++;
-                            const uint16_t fullCap = 4000u;
+                            const uint16_t fullCap = GROWATT_SYNTH_FULL_CAP_CAH;
                             const uint16_t remCap = (uint16_t)(((uint32_t)fullCap * (uint32_t)snap.soc) / 100u);
                             publishCanRsGrowattSnapshot((uint8_t)snap.soc,
                                                         (uint8_t)snap.soh,
@@ -1153,16 +1215,22 @@ static void jkbmsRs485GrowattTask(void *pv)
 
                         if (ctx->reqCount <= 3u || (ctx->reqCount % 25u) == 0u) {
                             ESP_LOGI(EXAMPLE_TAG,
-                                     "JKBMS->RS485 req#%u on %s start=0x%04X count=%u sent=%s | "
-                                     "SOC=%u%% T=%dC Vpack=%.2fV Cmax=%.3fV(#%u) Cmin=%.3fV(#%u)",
+                                     "%s->RS485 Growatt req#%u on %s start=0x%04X count=%u sent=%s | "
+                                     "SOC=%u%% SOH=%u%% T=%dC Vpack=%.2fV CV=%.2fV Ichg=%.2fA Idis=%.2fA "
+                                     "Cmax=%.3fV(#%u) Cmin=%.3fV(#%u)",
+                                     ctx->sourceName,
                                      (unsigned)ctx->reqCount,
                                      ctx->ifName,
                                      (unsigned)start,
                                      (unsigned)count,
                                      sent ? "Y" : "N",
                                      (unsigned)snap.soc,
+                                     (unsigned)snap.soh,
                                      (int)snap.tempC,
                                      (double)snap.packCv / 100.0,
+                                     (double)growattChargeVoltageLimitCv(snap.chargeVoltLimitCv, snap.packCv) / 100.0,
+                                     (double)snap.chargeCurrentLimitCa / 100.0,
+                                     (double)snap.dischargeCurrentLimitCa / 100.0,
                                      (double)snap.cellMaxMv / 1000.0,
                                      (unsigned)snap.cellMaxIdx,
                                      (double)snap.cellMinMv / 1000.0,
@@ -1192,7 +1260,8 @@ static void jkbmsRs485GrowattTask(void *pv)
 
         if ((xTaskGetTickCount() - lastStatsTick) >= pdMS_TO_TICKS(5000)) {
             ESP_LOGI(EXAMPLE_TAG,
-                     "JKBMS->RS485 %s stats: rxBytes=%u req=%u rsp=%u",
+                     "%s->RS485 Growatt %s stats: rxBytes=%u req=%u rsp=%u",
+                     ctx->sourceName,
                      ctx->ifName,
                      (unsigned)ctx->rxBytes,
                      (unsigned)ctx->reqCount,
@@ -1263,19 +1332,21 @@ esp_err_t canRs485GrowattBridgeEnable(uart_port_t inverterUart,
 #endif
 }
 
-esp_err_t jkbmsRs485GrowattBridgeEnable(uart_port_t inverterUart,
-                                        gpio_num_t inverterDir,
-                                        const char *ifName)
+esp_err_t batteryModelRs485GrowattBridgeEnable(uart_port_t inverterUart,
+                                               gpio_num_t inverterDir,
+                                               const char *ifName,
+                                               const char *sourceName)
 {
 #if !CAN_RS485_SOC_TRANSLATOR_ENABLE
     (void)inverterUart;
     (void)inverterDir;
     (void)ifName;
-    ESP_LOGI(EXAMPLE_TAG, "JKBMS->RS485 Growatt translator disabled by config");
+    (void)sourceName;
+    ESP_LOGI(EXAMPLE_TAG, "Battery-model->RS485 Growatt translator disabled by config");
     return ESP_ERR_NOT_SUPPORTED;
 #else
     if (g_jkbmsRsGrowattTaskHandle != NULL) {
-        ESP_LOGI(EXAMPLE_TAG, "JKBMS->RS485 Growatt translator already running");
+        ESP_LOGI(EXAMPLE_TAG, "Battery-model->RS485 Growatt translator already running");
         return ESP_OK;
     }
 
@@ -1283,6 +1354,7 @@ esp_err_t jkbmsRs485GrowattBridgeEnable(uart_port_t inverterUart,
     g_jkbmsRsGrowattCtx.uart = inverterUart;
     g_jkbmsRsGrowattCtx.dirPin = inverterDir;
     g_jkbmsRsGrowattCtx.ifName = (ifName != NULL) ? ifName : "RS485";
+    g_jkbmsRsGrowattCtx.sourceName = (sourceName != NULL) ? sourceName : "BMS";
     g_jkbmsRsGrowattCtx.slaveId = (uint8_t)CAN_RS485_SOC_SLAVE_ID;
     g_jkbmsRsGrowattCtx.fakeSocPct =
         (uint8_t)((CAN_RS485_SOC_FAKE_PCT > 100u) ? 100u : CAN_RS485_SOC_FAKE_PCT);
@@ -1299,17 +1371,28 @@ esp_err_t jkbmsRs485GrowattBridgeEnable(uart_port_t inverterUart,
     if (taskOk != pdPASS) {
         g_jkbmsRsGrowattTaskHandle = NULL;
         memset(&g_jkbmsRsGrowattCtx, 0, sizeof(g_jkbmsRsGrowattCtx));
-        ESP_LOGE(EXAMPLE_TAG, "JKBMS->RS485 Growatt translator task create failed");
+        ESP_LOGE(EXAMPLE_TAG, "Battery-model->RS485 Growatt translator task create failed");
         return ESP_ERR_NO_MEM;
     }
 
     ESP_LOGI(EXAMPLE_TAG,
-             "JKBMS->RS485 Growatt translator enabled (if=%s slave=%u fallbackSOC=%u%%)",
+             "%s->RS485 Growatt translator enabled (if=%s slave=%u fallbackSOC=%u%%)",
+             g_jkbmsRsGrowattCtx.sourceName,
              g_jkbmsRsGrowattCtx.ifName,
              (unsigned)g_jkbmsRsGrowattCtx.slaveId,
              (unsigned)g_jkbmsRsGrowattCtx.fakeSocPct);
     return ESP_OK;
 #endif
+}
+
+esp_err_t jkbmsRs485GrowattBridgeEnable(uart_port_t inverterUart,
+                                        gpio_num_t inverterDir,
+                                        const char *ifName)
+{
+    return batteryModelRs485GrowattBridgeEnable(inverterUart,
+                                                inverterDir,
+                                                ifName,
+                                                "JKBMS");
 }
 
 void canRs485GrowattBridgeStop(void)
