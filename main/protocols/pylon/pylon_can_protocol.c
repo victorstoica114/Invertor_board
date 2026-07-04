@@ -141,7 +141,10 @@ bool pylonCanAnyValid(const pylon_can_frame_t *cache, size_t count)
     return false;
 }
 
-void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, size_t count)
+void pylonCanDecodeSnapshotWithProtocol(const char *ifname,
+                                        const pylon_can_frame_t *cache,
+                                        size_t count,
+                                        const char *protocolLabel)
 {
     const pylon_can_frame_t *f351 = pylonCanFrameById(cache, count, PYLON_CAN_ID_LIMITS_351);
     const pylon_can_frame_t *f355 = pylonCanFrameById(cache, count, PYLON_CAN_ID_SOC_SOH_355);
@@ -284,7 +287,10 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
 
     snap.valid = (f355 != NULL) && (f356 != NULL);
     snprintf(snap.source, sizeof(snap.source), "%s", (ifname != NULL) ? ifname : "CAN1");
-    snprintf(snap.protocol, sizeof(snap.protocol), "CAN_PYLON");
+    snprintf(snap.protocol,
+             sizeof(snap.protocol),
+             "%s",
+             (protocolLabel != NULL && protocolLabel[0] != '\0') ? protocolLabel : "CAN_PYLON");
     snap.currentA = packCurrent;
     snap.packVoltageV = packVolt;
     snap.packPowerW = packVolt * packCurrent;
@@ -434,4 +440,9 @@ void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, 
              ascii376[0] ? ascii376 : "-",
              ascii377[0] ? ascii377 : "-");
     ESP_LOGI(TAG, "  undecoded/tentative: 0x359,0x35A,0x35C,0x372,0x373,0x374-0x377,0x379");
+}
+
+void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, size_t count)
+{
+    pylonCanDecodeSnapshotWithProtocol(ifname, cache, count, "CAN_PYLON");
 }

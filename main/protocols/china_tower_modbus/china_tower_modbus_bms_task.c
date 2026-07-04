@@ -268,6 +268,14 @@ static void chinaTowerPublishBatteryModel(const modbusDecoder_t *decoder,
         model.cellMaxIdx = packet->maxCellIndex;
         model.cellDeltaV = (float)(packet->maxCellMv - packet->minCellMv) / 1000.0f;
     }
+    if (packet->cellCount > 0u) {
+        uint8_t count = packet->cellCount;
+        if (count > UNIVERSAL_BATTERY_MAX_CELLS) {
+            count = UNIVERSAL_BATTERY_MAX_CELLS;
+        }
+        model.cellCount = count;
+        memcpy(model.cellMv, packet->cellMv, (size_t)count * sizeof(model.cellMv[0]));
+    }
 
     batteryModelSet(&model);
 }

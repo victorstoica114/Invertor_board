@@ -265,11 +265,7 @@ typedef struct {
     uint16_t cellMv[JKBMS_MAX_CELLS];
 } cell_decode_candidate_t;
 
-/*
- * Current JK setup used with this bridge is 16S. When pack-derived hint is
- * missing/noisy, keep a stable default to avoid sparse maps drifting to 32 cells.
- */
-#define JKBMS_DEFAULT_CELL_COUNT_HINT 16u
+#define JKBMS_MAX_CELLS_WITHOUT_PHYSICAL_HINT 16u
 
 static bool decodeCellRawWithMode(uint16_t raw, cell_value_mode_t mode, uint16_t *mvOut)
 {
@@ -706,8 +702,6 @@ static bool decodeSocPct(const modbusDecoder_t *decoder, uint8_t *socOut)
 
     if (decoderGetU16(decoder, JKBMS_RT_REG_BALAN_SOC_U8X2, &raw) &&
         decodePctBytePair(raw, false, &cand)) {
-        chosen = cand;
-        have = true;
         if (cand > 0u) {
             if (socOut != NULL) {
                 *socOut = cand;
@@ -718,8 +712,6 @@ static bool decodeSocPct(const modbusDecoder_t *decoder, uint8_t *socOut)
 
     if (decoderGetU16(decoder, (uint16_t)(JKBMS_RT_REG_BALAN_SOC_U8X2 + 1u), &raw) &&
         decodePctBytePair(raw, false, &cand)) {
-        chosen = cand;
-        have = true;
         if (cand > 0u) {
             if (socOut != NULL) {
                 *socOut = cand;
@@ -868,16 +860,16 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
         }
     }
     /*
-     * Do not use max/min index word as cell-count hint. On some JK firmwares
-     * this field is noisy while polling and creates bogus counts (27, 29, ...).
+     * Do not use max/min index word or a fixed default as cell-count hint. On
+     * some JK firmwares those fields are noisy while polling; without a
+     * pack/cell-average hint, trust only the contiguous decoded cell run.
      */
-    if (!exp.hasExpectedCount) {
-        exp.hasExpectedCount = true;
-        exp.expectedCount = JKBMS_DEFAULT_CELL_COUNT_HINT;
-    }
 
     for (size_t si = 0u; si < (sizeof(k_strides) / sizeof(k_strides[0])); si++) {
         for (size_t oi = 0u; oi < (sizeof(k_offsets) / sizeof(k_offsets[0])); oi++) {
+            if (!exp.hasExpectedCount && k_offsets[oi] != 0u) {
+                continue;
+            }
             for (int mode = CELL_VALUE_RAW; mode <= CELL_VALUE_SWAP_DIV10; mode++) {
                 cell_decode_candidate_t candidate = {0};
                 evaluateCellDecodeCandidate(decoder,
@@ -896,15 +888,19 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
     uint8_t targetCellCount = 0u;
     const uint8_t hintCount =
         (exp.hasExpectedCount && exp.expectedCount > 0u) ? exp.expectedCount : 0u;
-    const uint8_t highestSeen = bestCandidate.highestValidIdx;
     if (hintCount > 0u) {
-        /* Prefer physical cell-count hint (packV/cellAvg or index hints). */
+        /* Prefer physical cell-count hint derived from pack voltage and cell average. */
         targetCellCount = hintCount;
+    } else if (bestCandidate.headCount >= 2u) {
+        targetCellCount = bestCandidate.headCount;
     } else {
-        targetCellCount = highestSeen;
+        targetCellCount = bestCandidate.highestValidIdx;
     }
     if (targetCellCount > JKBMS_MAX_CELLS) {
         targetCellCount = JKBMS_MAX_CELLS;
+    }
+    if (hintCount == 0u && targetCellCount > JKBMS_MAX_CELLS_WITHOUT_PHYSICAL_HINT) {
+        targetCellCount = JKBMS_MAX_CELLS_WITHOUT_PHYSICAL_HINT;
     }
     out->cellCount = targetCellCount;
     memset(out->cellMv, 0, sizeof(out->cellMv));

@@ -151,6 +151,20 @@ void test_pylon_synthetic_63_uses_explicit_generic_charge_discharge_flags(void)
     TEST_ASSERT_EQUAL_UINT8(0xC0u, hexByteAt(info63, 8));
 }
 
+void test_pylon_synthetic_63_china_tower_zero_status_is_permissive(void)
+{
+    char info63[32] = {0};
+
+    configureSyntheticRoute(PROTOCOL_RS485_CHINA_TOWER);
+    setValidModel();
+    g_pylonBridgeTestModel.protocolState = 0u;
+    g_pylonBridgeTestModel.chargeEnabled = false;
+    g_pylonBridgeTestModel.dischargeEnabled = false;
+
+    TEST_ASSERT_TRUE(pylonRs485BridgeBuildSyntheticInfo63ForTest(info63, sizeof(info63)));
+    TEST_ASSERT_EQUAL_UINT8(0xC0u, hexByteAt(info63, 8));
+}
+
 void test_pylon_synthetic_63_native_sources_preserve_protocol_status_byte(void)
 {
     char info63[32] = {0};
@@ -177,24 +191,96 @@ void test_pylon_synthetic_63_preserves_victron_protocol_status_byte(void)
     TEST_ASSERT_EQUAL_UINT8(0xC0u, hexByteAt(info63, 8));
 }
 
-void test_pylon_synthetic_telemetry_preserves_deye_state_flags_from_model(void)
+void test_pylon_synthetic_63_preserves_sma_protocol_status_byte(void)
+{
+    char info63[32] = {0};
+
+    configureNativeCanRoute(PROTOCOL_CAN_SMA);
+    setValidModel();
+    g_pylonBridgeTestModel.protocolState = 0x80u;
+    g_pylonBridgeTestModel.chargeEnabled = true;
+    g_pylonBridgeTestModel.dischargeEnabled = false;
+
+    TEST_ASSERT_TRUE(pylonRs485BridgeBuildSyntheticInfo63ForTest(info63, sizeof(info63)));
+    TEST_ASSERT_EQUAL_UINT8(0x80u, hexByteAt(info63, 8));
+}
+
+void test_pylon_synthetic_63_preserves_sofar_protocol_status_byte(void)
+{
+    char info63[32] = {0};
+
+    configureNativeCanRoute(PROTOCOL_CAN_SOFAR);
+    setValidModel();
+    g_pylonBridgeTestModel.protocolState = 0xC0u;
+    g_pylonBridgeTestModel.chargeEnabled = true;
+    g_pylonBridgeTestModel.dischargeEnabled = true;
+
+    TEST_ASSERT_TRUE(pylonRs485BridgeBuildSyntheticInfo63ForTest(info63, sizeof(info63)));
+    TEST_ASSERT_EQUAL_UINT8(0xC0u, hexByteAt(info63, 8));
+}
+
+void test_pylon_synthetic_63_sofar_missing_status_defaults_to_c0(void)
+{
+    char info63[32] = {0};
+
+    configureNativeCanRoute(PROTOCOL_CAN_SOFAR);
+    setValidModel();
+    g_pylonBridgeTestModel.protocolState = 0u;
+    g_pylonBridgeTestModel.chargeEnabled = false;
+    g_pylonBridgeTestModel.dischargeEnabled = false;
+    g_pylonBridgeTestModel.balanceEnabled = false;
+
+    TEST_ASSERT_TRUE(pylonRs485BridgeBuildSyntheticInfo63ForTest(info63, sizeof(info63)));
+    TEST_ASSERT_EQUAL_UINT8(0xC0u, hexByteAt(info63, 8));
+}
+
+void test_pylon_synthetic_deye_route_does_not_overwrite_source_telemetry(void)
 {
     configureNativeCanRoute(PROTOCOL_CAN_DEYE);
     setValidModel();
-    g_pylonBridgeTestModel.protocolState = 0x40u;
-    g_pylonBridgeTestModel.chargeEnabled = false;
-    g_pylonBridgeTestModel.dischargeEnabled = true;
-    g_pylonBridgeTestModel.balanceEnabled = false;
+
+    g_pylonBridgeLastTelemetry.valid = true;
+    snprintf(g_pylonBridgeLastTelemetry.protocol,
+             sizeof(g_pylonBridgeLastTelemetry.protocol),
+             "%s",
+             "CAN_DEYE");
+    g_pylonBridgeLastTelemetry.pylonStatus63 = 0x40u;
+    snprintf(g_pylonBridgeLastTelemetry.stateFlags,
+             sizeof(g_pylonBridgeLastTelemetry.stateFlags),
+             "%s",
+             "charge=OFF, discharge=ON, balance=OFF");
 
     pylonRs485BridgeRefreshSyntheticCacheForTest();
 
     TEST_ASSERT_TRUE(g_pylonBridgeLastTelemetry.valid);
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, 72.7f, g_pylonBridgeLastTelemetry.packVoltageV);
+    TEST_ASSERT_EQUAL_STRING("CAN_DEYE", g_pylonBridgeLastTelemetry.protocol);
     TEST_ASSERT_EQUAL_UINT8(0x40u, g_pylonBridgeLastTelemetry.pylonStatus63);
-    TEST_ASSERT_EQUAL_UINT8(0x40u, g_pylonBridgeLastTelemetry.deyeStatus35C);
     TEST_ASSERT_TRUE(strstr(g_pylonBridgeLastTelemetry.stateFlags, "charge=OFF") != NULL);
     TEST_ASSERT_TRUE(strstr(g_pylonBridgeLastTelemetry.stateFlags, "discharge=ON") != NULL);
     TEST_ASSERT_TRUE(strstr(g_pylonBridgeLastTelemetry.stateFlags, "balance=OFF") != NULL);
+}
+
+void test_pylon_synthetic_sofar_route_does_not_overwrite_source_telemetry(void)
+{
+    configureNativeCanRoute(PROTOCOL_CAN_SOFAR);
+    setValidModel();
+
+    g_pylonBridgeLastTelemetry.valid = true;
+    snprintf(g_pylonBridgeLastTelemetry.protocol,
+             sizeof(g_pylonBridgeLastTelemetry.protocol),
+             "%s",
+             "CAN_SOFAR");
+    g_pylonBridgeLastTelemetry.packVoltageV = 56.26f;
+    g_pylonBridgeLastTelemetry.socPct = 70u;
+    g_pylonBridgeLastTelemetry.pylonStatus63 = 0xC0u;
+
+    pylonRs485BridgeRefreshSyntheticCacheForTest();
+
+    TEST_ASSERT_TRUE(g_pylonBridgeLastTelemetry.valid);
+    TEST_ASSERT_EQUAL_STRING("CAN_SOFAR", g_pylonBridgeLastTelemetry.protocol);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 56.26f, g_pylonBridgeLastTelemetry.packVoltageV);
+    TEST_ASSERT_EQUAL_UINT8(70u, g_pylonBridgeLastTelemetry.socPct);
+    TEST_ASSERT_EQUAL_UINT8(0xC0u, g_pylonBridgeLastTelemetry.pylonStatus63);
 }
 
 void test_pylon_synthetic_deye_route_does_not_overwrite_source_decoded_log(void)
@@ -382,14 +468,76 @@ void test_pylon_synthetic_61_native_can_sources_project_pack_voltage_and_current
     TEST_ASSERT_EQUAL_UINT8(87u, hexByteAt(info61, 4));
 }
 
+void test_pylon_synthetic_61_can_source_without_cells_uses_pack_derived_safe_extremes(void)
+{
+    char info61[128] = {0};
+
+    configureNativeCanRoute(PROTOCOL_CAN_SOFAR);
+    setValidModel();
+    g_pylonBridgeTestModel.packVoltageV = 56.22f;
+    g_pylonBridgeTestModel.cellMaxV = 0.0f;
+    g_pylonBridgeTestModel.cellMinV = 0.0f;
+    g_pylonBridgeTestModel.cellMaxIdx = 0u;
+    g_pylonBridgeTestModel.cellMinIdx = 0u;
+    g_pylonBridgeTestModel.cellCount = 0u;
+
+    TEST_ASSERT_TRUE(pylonRs485BridgeBuildSyntheticInfo61ForTest(info61, sizeof(info61)));
+    TEST_ASSERT_EQUAL_UINT16(5622u, hexBe16At(info61, 0));
+    TEST_ASSERT_EQUAL_UINT16(3514u, hexBe16At(info61, 11));
+    TEST_ASSERT_EQUAL_UINT16(1u, hexBe16At(info61, 13));
+    TEST_ASSERT_EQUAL_UINT16(3514u, hexBe16At(info61, 15));
+    TEST_ASSERT_EQUAL_UINT16(1u, hexBe16At(info61, 17));
+}
+
+void test_pylon_synthetic_42_projects_model_cell_list(void)
+{
+    char info42[160] = {0};
+
+    configureSyntheticRoute(PROTOCOL_RS485_CHINA_TOWER);
+    setValidModel();
+    g_pylonBridgeTestModel.packVoltageV = 57.16f;
+    g_pylonBridgeTestModel.cellCount = 4u;
+    g_pylonBridgeTestModel.cellMv[0] = 3576u;
+    g_pylonBridgeTestModel.cellMv[1] = 3571u;
+    g_pylonBridgeTestModel.cellMv[2] = 3573u;
+    g_pylonBridgeTestModel.cellMv[3] = 3572u;
+
+    TEST_ASSERT_TRUE(pylonRs485BridgeBuildSyntheticInfo42ForTest(info42, sizeof(info42)));
+    TEST_ASSERT_EQUAL_UINT8(1u, hexByteAt(info42, 0));
+    TEST_ASSERT_EQUAL_UINT8(4u, hexByteAt(info42, 1));
+    TEST_ASSERT_EQUAL_UINT16(3576u, hexBe16At(info42, 2));
+    TEST_ASSERT_EQUAL_UINT16(3571u, hexBe16At(info42, 4));
+    TEST_ASSERT_EQUAL_UINT16(3573u, hexBe16At(info42, 6));
+    TEST_ASSERT_EQUAL_UINT16(3572u, hexBe16At(info42, 8));
+    TEST_ASSERT_EQUAL_UINT8(0u, hexByteAt(info42, 10));
+
+    pylonRs485BridgeRefreshSyntheticCacheForTest();
+    TEST_ASSERT_TRUE(g_pylonBridgeLastTelemetry.valid);
+    TEST_ASSERT_EQUAL_UINT8(4u, g_pylonBridgeLastTelemetry.cellCount);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 3.576f, g_pylonBridgeLastTelemetry.cellVoltagesV[0]);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 3.571f, g_pylonBridgeLastTelemetry.cellVoltagesV[1]);
+}
+
+void test_pylon_synthetic_42_rejects_missing_cell_list(void)
+{
+    char info42[160] = {0};
+
+    configureSyntheticRoute(PROTOCOL_RS485_CHINA_TOWER);
+    setValidModel();
+
+    TEST_ASSERT_FALSE(pylonRs485BridgeBuildSyntheticInfo42ForTest(info42, sizeof(info42)));
+}
+
 void test_pylon_synthetic_payloads_reject_missing_model(void)
 {
     char info61[128] = {0};
+    char info42[160] = {0};
     char info63[32] = {0};
 
     configureSyntheticRoute(PROTOCOL_RS485_WOW);
 
     TEST_ASSERT_FALSE(pylonRs485BridgeBuildSyntheticInfo61ForTest(info61, sizeof(info61)));
+    TEST_ASSERT_FALSE(pylonRs485BridgeBuildSyntheticInfo42ForTest(info42, sizeof(info42)));
     TEST_ASSERT_FALSE(pylonRs485BridgeBuildSyntheticInfo63ForTest(info63, sizeof(info63)));
 }
 
@@ -436,6 +584,14 @@ void test_pylon_route_supports_115200_variants(void)
     settings.bms_protocol = PROTOCOL_CAN_GOODWE;
 
     TEST_ASSERT_TRUE(pylonRs485BridgeSupportsRoute(&settings));
+
+    settings.bms_protocol = PROTOCOL_CAN_SOFAR;
+
+    TEST_ASSERT_TRUE(pylonRs485BridgeSupportsRoute(&settings));
+
+    settings.bms_protocol = PROTOCOL_CAN_SMA;
+
+    TEST_ASSERT_TRUE(pylonRs485BridgeSupportsRoute(&settings));
 }
 
 void test_pylon_probe_in_bridge_mode_waits_for_recent_inverter_traffic(void)
@@ -467,9 +623,13 @@ int main(void)
     UNITY_BEGIN();
     RUN_TEST(test_pylon_synthetic_63_generic_sources_default_to_c0_and_ignore_balance);
     RUN_TEST(test_pylon_synthetic_63_uses_explicit_generic_charge_discharge_flags);
+    RUN_TEST(test_pylon_synthetic_63_china_tower_zero_status_is_permissive);
     RUN_TEST(test_pylon_synthetic_63_native_sources_preserve_protocol_status_byte);
     RUN_TEST(test_pylon_synthetic_63_preserves_victron_protocol_status_byte);
-    RUN_TEST(test_pylon_synthetic_telemetry_preserves_deye_state_flags_from_model);
+    RUN_TEST(test_pylon_synthetic_63_preserves_sofar_protocol_status_byte);
+    RUN_TEST(test_pylon_synthetic_63_sofar_missing_status_defaults_to_c0);
+    RUN_TEST(test_pylon_synthetic_deye_route_does_not_overwrite_source_telemetry);
+    RUN_TEST(test_pylon_synthetic_sofar_route_does_not_overwrite_source_telemetry);
     RUN_TEST(test_pylon_synthetic_deye_route_does_not_overwrite_source_decoded_log);
     RUN_TEST(test_pylon_synthetic_jkbms_can_route_does_not_overwrite_source_telemetry);
     RUN_TEST(test_pylon_native_source_still_publishes_pylon_decoded_log);
@@ -480,6 +640,9 @@ int main(void)
     RUN_TEST(test_pylon_synthetic_can_route_does_not_reuse_stale_rs485_cell_list);
     RUN_TEST(test_pylon_synthetic_61_generic_sources_project_percentages_only);
     RUN_TEST(test_pylon_synthetic_61_native_can_sources_project_pack_voltage_and_current);
+    RUN_TEST(test_pylon_synthetic_61_can_source_without_cells_uses_pack_derived_safe_extremes);
+    RUN_TEST(test_pylon_synthetic_42_projects_model_cell_list);
+    RUN_TEST(test_pylon_synthetic_42_rejects_missing_cell_list);
     RUN_TEST(test_pylon_synthetic_payloads_reject_missing_model);
     RUN_TEST(test_pylon_route_supports_115200_variants);
     RUN_TEST(test_pylon_probe_in_bridge_mode_waits_for_recent_inverter_traffic);

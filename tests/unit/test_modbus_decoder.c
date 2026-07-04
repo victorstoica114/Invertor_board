@@ -322,6 +322,58 @@ void test_modbus_decoder_uses_fresh_request_after_stale_one(void)
     TEST_ASSERT_EQUAL_HEX16(0xBEEF, value);
 }
 
+void test_modbus_decoder_resyncs_after_turnaround_garbage(void)
+{
+    uint8_t frame[] = {
+        0xFF, 0xF7, 0xFF,
+        0x01,
+        0x03,
+        0x04,
+        0x0D, 0x79,
+        0x0D, 0x7A,
+        0x00, 0x00
+    };
+    fill_modbus_crc(&frame[3], sizeof(frame) - 3);
+
+    modbusDecoderRecordRequest(&g_testDecoder, 0x01, 0x03, 0x0071, 2, 1000);
+    modbusDecoderFeed(&g_testDecoder, frame, sizeof(frame), 2000);
+    modbusDecoderFlush(&g_testDecoder);
+
+    uint16_t c1 = 0;
+    uint16_t c2 = 0;
+    TEST_ASSERT_TRUE(modbusDecoderGetCachedReg(&g_testDecoder, 0x0071, &c1));
+    TEST_ASSERT_TRUE(modbusDecoderGetCachedReg(&g_testDecoder, 0x0072, &c2));
+    TEST_ASSERT_EQUAL_UINT16(3449, c1);
+    TEST_ASSERT_EQUAL_UINT16(3450, c2);
+}
+
+void test_modbus_decoder_recovers_large_stream_with_current_timestamp(void)
+{
+    uint8_t stream[220];
+    memset(stream, 0xFF, sizeof(stream));
+
+    uint8_t response[] = {
+        0x01,
+        0x03,
+        0x04,
+        0x0D, 0x79,
+        0x0D, 0x7A,
+        0x00, 0x00
+    };
+    fill_modbus_crc(response, sizeof(response));
+    memcpy(&stream[200], response, sizeof(response));
+
+    modbusDecoderRecordRequest(&g_testDecoder, 0x01, 0x03, 0x0071, 2, 100000);
+    modbusDecoderFeed(&g_testDecoder, stream, sizeof(stream), 101000);
+
+    uint16_t c1 = 0;
+    uint16_t c2 = 0;
+    TEST_ASSERT_TRUE(modbusDecoderGetCachedReg(&g_testDecoder, 0x0071, &c1));
+    TEST_ASSERT_TRUE(modbusDecoderGetCachedReg(&g_testDecoder, 0x0072, &c2));
+    TEST_ASSERT_EQUAL_UINT16(3449, c1);
+    TEST_ASSERT_EQUAL_UINT16(3450, c2);
+}
+
 void test_modbus_decoder_auto_maps_voltronic_status_even_with_wrong_request(void)
 {
     uint8_t response[3 + (48 * 2) + 2] = { 0 };
@@ -387,6 +439,8 @@ int main(void)
     RUN_TEST(test_modbus_decoder_request_recording);
     RUN_TEST(test_modbus_decoder_drops_stale_request_match);
     RUN_TEST(test_modbus_decoder_uses_fresh_request_after_stale_one);
+    RUN_TEST(test_modbus_decoder_resyncs_after_turnaround_garbage);
+    RUN_TEST(test_modbus_decoder_recovers_large_stream_with_current_timestamp);
     RUN_TEST(test_modbus_decoder_auto_maps_voltronic_status_even_with_wrong_request);
     RUN_TEST(test_modbus_decoder_crc_error);
 

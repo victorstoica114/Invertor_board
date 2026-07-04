@@ -8,6 +8,7 @@ extern "C" {
 #endif
 
 #define UNIVERSAL_BATTERY_TEMP_SENSORS 5
+#define UNIVERSAL_BATTERY_MAX_CELLS 32
 
 typedef struct {
     bool valid;
@@ -25,6 +26,8 @@ typedef struct {
     uint8_t cellMaxIdx;
     uint8_t cellMinIdx;
     float cellDeltaV;
+    uint8_t cellCount;
+    uint16_t cellMv[UNIVERSAL_BATTERY_MAX_CELLS];
     float temperaturesC[UNIVERSAL_BATTERY_TEMP_SENSORS];
     bool chargeEnabled;
     bool dischargeEnabled;

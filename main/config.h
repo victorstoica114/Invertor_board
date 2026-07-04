@@ -103,6 +103,11 @@
  * source alive between valid 0x61/0x63 replies while still failing safe. */
 #define PYLON_RS485_SOURCE_STALE_MS 10000u
 
+/* Pylon-compatible CAN profiles may publish the required 0x355/0x356 frames
+ * at roughly 5s cadence. Keep the synthetic RS485 responder alive between
+ * those frames without relaxing the global bridge fail-safe. */
+#define CAN_PYLON_LIKE_SOURCE_STALE_MS 10000u
+
 /* Telemetry cache max age before UI hides stale values. */
 #define WEB_TELEMETRY_STALE_MS 10000u
 
@@ -147,6 +152,28 @@
 #define PROTOCOL_RS485_DALY 21
 #define PROTOCOL_CAN_DALY 22
 #define PROTOCOL_ID_MAX PROTOCOL_CAN_DALY
+
+static inline bool bridgeProtocolIsCanPylonLike(uint8_t protocol)
+{
+    switch (protocol) {
+        case PROTOCOL_CAN_PYLON:
+        case PROTOCOL_CAN_DEYE:
+        case PROTOCOL_CAN_GOODWE:
+        case PROTOCOL_CAN_SOFAR:
+        case PROTOCOL_CAN_SMA:
+        case PROTOCOL_CAN_VICTRON:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static inline uint32_t bridgeProtocolCanSourceStaleMs(uint8_t protocol)
+{
+    return bridgeProtocolIsCanPylonLike(protocol)
+               ? CAN_PYLON_LIKE_SOURCE_STALE_MS
+               : BRIDGE_SOURCE_STALE_MS;
+}
 
 static inline uint8_t bridgeProtocolCanonical(uint8_t protocol)
 {
@@ -212,9 +239,15 @@ static inline uint32_t bridgeProtocolCanBitrate(uint8_t protocol)
 
 /* --- Growatt tasks --- */
 #define GROWATT_BMS_MODBUS_SLAVE_ADDR  GROWATT_MODBUS_DEFAULT_SLAVE_ADDR
-#define GROWATT_BMS_MODBUS_GAP_US      5000
-#define GROWATT_BMS_QUERY_PERIOD_MS    250
+/*
+ * Growatt/JK 006 responses at 9600 bps can span several uart_read_bytes()
+ * calls. Keep the software frame gap comfortably above the 10 ms read timeout
+ * so one long Modbus response is not split into incomplete/CRC-bad fragments.
+ */
+#define GROWATT_BMS_MODBUS_GAP_US      50000
+#define GROWATT_BMS_QUERY_PERIOD_MS    400
 #define GROWATT_BMS_PUBLISH_PERIOD_MS  250
+#define GROWATT_BMS_SOURCE_STALE_MS    5000u
 #define GROWATT_BMS_TASK_STACK         4096
 #define GROWATT_BMS_TASK_PRIORITY      10
 
@@ -227,6 +260,7 @@ static inline uint32_t bridgeProtocolCanBitrate(uint8_t protocol)
 #define JKBMS_BMS_MODBUS_GAP_US        5000
 #define JKBMS_BMS_QUERY_PERIOD_MS      250
 #define JKBMS_BMS_PUBLISH_PERIOD_MS    250
+#define JKBMS_BMS_SOURCE_STALE_MS      10000u
 #define JKBMS_BMS_TASK_STACK           6144
 #define JKBMS_BMS_TASK_PRIORITY        10
 

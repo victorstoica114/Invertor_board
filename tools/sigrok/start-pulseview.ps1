@@ -86,7 +86,11 @@ if ($SettingsFile) {
     $arguments += $resolvedSettings
 }
 
-Start-Process -FilePath $PulseViewExe -ArgumentList $arguments -WorkingDirectory (Split-Path -Parent $PulseViewExe)
+if ($arguments.Count -gt 0) {
+    Start-Process -FilePath $PulseViewExe -ArgumentList $arguments -WorkingDirectory (Split-Path -Parent $PulseViewExe)
+} else {
+    Start-Process -FilePath $PulseViewExe -WorkingDirectory (Split-Path -Parent $PulseViewExe)
+}
 
 Write-Host "PulseView started with SIGROKDECODE_DIR=$bundleDir"
 if ($SettingsFile) {

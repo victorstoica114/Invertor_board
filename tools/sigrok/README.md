@@ -30,6 +30,11 @@ Available PulseView/libsigrokdecode protocol decoders:
 - `pylon_rs485`: Pylon-compatible RS485 ASCII frames, stacked above `uart`
 - `pylon_can`: Pylon-compatible Classic CAN frames, standalone CAN decoder
 - `growatt_rs485`: Growatt RS485 Modbus RTU frames, stacked above `uart`
+- `china_tower_modbus`: China Tower / JK 008 RS485 Modbus RTU frames,
+  stacked above `uart`; current visible name is
+  `China Tower Modbus v2026.07.03a`
+- `pace_modbus`: PACE RS485 Modbus V1.3 frames, stacked above `uart`;
+  current visible name is `PACE Modbus v2026.07.04a`
 - `growatt_can`: Growatt-compatible Classic CAN frames, standalone CAN decoder
 - `deye_can`: Deye-compatible Classic CAN frames, standalone CAN decoder;
   current visible name is `Deye CAN v2026.07.03a`
@@ -37,6 +42,10 @@ Available PulseView/libsigrokdecode protocol decoders:
   current visible name is `GoodWe CAN v2026.07.03a`
 - `victron_can`: Victron-compatible Classic CAN frames, standalone CAN decoder;
   current visible name is `Victron CAN v2026.07.03a`
+- `sma_can`: SMA Sunny Island-compatible Classic CAN frames, standalone CAN
+  decoder; current visible name is `SMA CAN v2026.07.04a`
+- `sofar_can`: Sofar-compatible Classic CAN frames, standalone CAN decoder;
+  current visible name is `Sofar CAN v2026.07.04a`
 - `jkbms_modbus`: JK BMS RS485 Modbus poller frames, stacked above `uart`;
   current visible name is `JKBMS Modbus v2026.07.02b`
 - `jkbms_rs485_native`: JK native binary RS485 frames, stacked above `uart`
@@ -241,6 +250,88 @@ Copy-Item -Recurse tools\sigrok\decoders\growatt_rs485 "$env:ProgramData\libsigr
 .\tools\sigrok\install-pulseview-decoders.ps1
 ```
 
+## China Tower Modbus RS485 Decoder
+
+The `decoders/china_tower_modbus` directory is a PulseView/libsigrokdecode
+protocol decoder for China Tower shared battery cabinet Modbus RTU traffic, as
+used by JK app UART profile `008 - China tower shared battery cabinet V2.0`.
+Its current visible PulseView name is `China Tower Modbus v2026.07.03a`.
+
+It stacks on top of the built-in `uart` decoder:
+
+```text
+logic -> uart -> china_tower_modbus
+```
+
+Typical China Tower / JK 008 RS485 settings:
+
+- baud: `9600`
+- data bits: `8`
+- parity: `none`
+- stop bits: `1`
+- bit order: `lsb-first`
+- line inversion: depends on the probe point/transceiver output
+
+The decoder follows the ESP32 map in
+`main/protocols/china_tower_modbus/china_tower_modbus_registers_map.h` and
+decodes the currently used poll blocks:
+
+- summary block `0x0000..0x000C`: pack voltage, cell count, SOC, T1/T2/MOS
+  temperatures, with unknown words left visible as raw registers
+- cell block `0x0009..0x0018`: per-cell millivolts for up to 16 cells
+- flags block `0x0019..0x001B`: warning, protection, and status bitfields
+
+On Windows, copy the whole decoder directory alongside the other custom
+decoders, or run the installer script:
+
+```powershell
+Copy-Item -Recurse tools\sigrok\decoders\china_tower_modbus "$env:ProgramData\libsigrokdecode\decoders\china_tower_modbus"
+.\tools\sigrok\install-pulseview-decoders.ps1
+```
+
+## PACE Modbus RS485 Decoder
+
+The `decoders/pace_modbus` directory is a PulseView/libsigrokdecode protocol
+decoder for PACE RS485 Modbus V1.3 traffic. Its current visible PulseView name
+is `PACE Modbus v2026.07.04a`.
+
+It stacks on top of the built-in `uart` decoder:
+
+```text
+logic -> uart -> pace_modbus
+```
+
+Typical PACE RS485 settings:
+
+- baud: `9600`
+- data bits: `8`
+- parity: `none`
+- stop bits: `1`
+- bit order: `lsb-first`
+- line inversion: depends on the probe point/transceiver output
+
+The decoder follows the ESP32 map in
+`main/protocols/pace_modbus/pace_modbus_registers_map.h` and decodes the
+currently used poll blocks:
+
+- runtime block `0x0000..0x000C`: current, pack voltage, `SOC`, `SOH`,
+  remaining/full/design capacity, cycles, warning/protection/status flags, and
+  balance status
+- cell/temperature block `0x000F..0x0024`: per-cell millivolts for 16 cells,
+  four battery temperature registers, MOS temperature, and environment
+  temperature
+
+Unknown words are kept visible as raw registers. Warning/protection bitfields
+are shown as raw masks until a reliable PACE bit-name map is validated.
+
+On Windows, copy the whole decoder directory alongside the other custom
+decoders, or run the installer script:
+
+```powershell
+Copy-Item -Recurse tools\sigrok\decoders\pace_modbus "$env:ProgramData\libsigrokdecode\decoders\pace_modbus"
+.\tools\sigrok\install-pulseview-decoders.ps1
+```
+
 ## Growatt CAN Decoder
 
 The `decoders/growatt_can` directory is a PulseView/libsigrokdecode protocol
@@ -401,6 +492,90 @@ decoders, or run the installer script:
 
 ```powershell
 Copy-Item -Recurse tools\sigrok\decoders\victron_can "$env:ProgramData\libsigrokdecode\decoders\victron_can"
+.\tools\sigrok\install-pulseview-decoders.ps1
+```
+
+## SMA CAN Decoder
+
+The `decoders/sma_can` directory is a PulseView/libsigrokdecode protocol
+decoder for SMA Sunny Island-compatible low-voltage Classic CAN frames. Its
+current visible PulseView name is `SMA CAN v2026.07.04a`. It is standalone on
+the CAN RX logic signal and internally reuses the built-in CAN decoder, so add
+it directly from the decoder selector.
+
+Typical SMA CAN settings:
+
+- CAN RX/H: the analyzer channel connected to the CAN transceiver `RXD` logic
+  signal, to digitized `CANL`, or to digitized `CANH` depending on `Input mode`
+- CANL: optional second analyzer channel, only used by `CANH/CANL digital diff`
+- nominal bitrate: `500000`
+- fast bitrate: unused for Classic CAN; leave the default or set it to
+  `500000`
+- sample point: start with `70%`; if annotations look unstable, try `75%` or
+  `80%`
+- input mode:
+  - `rx/canl-direct`: default. Use with transceiver `RXD`, or with `CANL` if
+    the logic-analyzer threshold turns recessive into `1` and dominant into `0`.
+  - `canh-inverted`: use with `CANH` when the analyzer shows recessive as `0`
+    and dominant as `1`.
+  - `canh-canl-diff`: use CH0 as `CANH` and the optional `CANL` channel as
+    CH1. This works with digitized bus wires, not with analog differential
+    voltages; the analyzer thresholds still matter.
+
+The decoder follows the ESP32 SMA map in
+`main/protocols/sma/sma_registers_map.h`: `0x351` exposes charge/discharge
+limits, `0x355` exposes SOC/SOH, and `0x356` exposes pack voltage, current, and
+temperature. SMA frames `0x359`, `0x35A`, `0x35E`, and `0x35F` are annotated as
+raw/ASCII/u16 values until their exact vendor-specific meaning is confirmed on
+captures.
+
+On Windows, copy the whole decoder directory alongside the other custom
+decoders, or run the installer script:
+
+```powershell
+Copy-Item -Recurse tools\sigrok\decoders\sma_can "$env:ProgramData\libsigrokdecode\decoders\sma_can"
+.\tools\sigrok\install-pulseview-decoders.ps1
+```
+
+## Sofar CAN Decoder
+
+The `decoders/sofar_can` directory is a PulseView/libsigrokdecode protocol
+decoder for Sofar-compatible low-voltage Classic CAN frames. Its current
+visible PulseView name is `Sofar CAN v2026.07.04a`. It is standalone on the
+CAN RX logic signal and internally reuses the built-in CAN decoder, so add it
+directly from the decoder selector.
+
+Typical Sofar CAN settings:
+
+- CAN RX/H: the analyzer channel connected to the CAN transceiver `RXD` logic
+  signal, to digitized `CANL`, or to digitized `CANH` depending on `Input mode`
+- CANL: optional second analyzer channel, only used by `CANH/CANL digital diff`
+- nominal bitrate: `500000`
+- fast bitrate: unused for Classic CAN; leave the default or set it to
+  `500000`
+- sample point: start with `70%`; if annotations look unstable, try `75%` or
+  `80%`
+- input mode:
+  - `rx/canl-direct`: default. Use with transceiver `RXD`, or with `CANL` if
+    the logic-analyzer threshold turns recessive into `1` and dominant into `0`.
+  - `canh-inverted`: use with `CANH` when the analyzer shows recessive as `0`
+    and dominant as `1`.
+  - `canh-canl-diff`: use CH0 as `CANH` and the optional `CANL` channel as
+    CH1. This works with digitized bus wires, not with analog differential
+    voltages; the analyzer thresholds still matter.
+
+The decoder follows the ESP32 Sofar map in
+`main/protocols/sofar/sofar_registers_map.h`: `0x351` exposes charge/discharge
+limits, `0x355` exposes SOC/SOH, and `0x356` exposes pack voltage, current, and
+temperature. It also annotates the observed Pylon/Deye-like support frames
+`0x359`, `0x35C`, `0x35E`, `0x35F`, `0x370`, and `0x371`, keeping unknown
+payload fields visible as raw hex or raw `u16` words.
+
+On Windows, copy the whole decoder directory alongside the other custom
+decoders, or run the installer script:
+
+```powershell
+Copy-Item -Recurse tools\sigrok\decoders\sofar_can "$env:ProgramData\libsigrokdecode\decoders\sofar_can"
 .\tools\sigrok\install-pulseview-decoders.ps1
 ```
 

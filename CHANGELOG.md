@@ -62,6 +62,9 @@ The goal is practical maintenance:
 - PulseView/libsigrokdecode `JKBMS Modbus` protocol decoder under `tools/sigrok/decoders/jkbms_modbus`, including JK app profile `001/013` Modbus RTU traffic, request/response tracking, CRC validation, runtime register annotations, cell-voltage blocks, pack/SOC/temperature/capacity fields, and host regression tests.
 - PulseView/libsigrokdecode `JKBMS RS485 Native` protocol decoder under `tools/sigrok/decoders/jkbms_rs485_native`, including JK `4E 57` binary read-all frames, data-ID annotations, all-cell voltage list decoding, pack/SOC/temperature/status/alarm fields, and host regression tests.
 - PulseView/libsigrokdecode `JKBMS CAN` protocol decoder under `tools/sigrok/decoders/jkbms_can`, including JK native CAN V2.0 frame IDs `0x02F4`, `0x04F4`, `0x05F4`, `0x07F4`, extended `0x18E*28F4` cell-voltage frames, `0x18F228F4` temperatures, raw CANH/CANL input modes, and host regression tests.
+- PulseView/libsigrokdecode `PACE Modbus` protocol decoder under `tools/sigrok/decoders/pace_modbus`, including PACE RS485 Modbus V1.3 request/response tracking, CRC validation, runtime registers, all-cell voltage block, temperature registers, and host regression tests.
+- PulseView/libsigrokdecode `SMA CAN` protocol decoder under `tools/sigrok/decoders/sma_can`, including SMA Sunny Island-compatible CAN IDs `0x351`, `0x355`, `0x356`, raw/ASCII annotations for `0x359`, `0x35A`, `0x35E`, `0x35F`, LA2016 raw CANH/CANL input modes, visible version tag, and host regression tests.
+- PulseView/libsigrokdecode `Sofar CAN` protocol decoder under `tools/sigrok/decoders/sofar_can`, including Sofar-compatible CAN IDs `0x351`, `0x355`, `0x356`, observed support frames `0x359`, `0x35C`, `0x35E`, `0x35F`, `0x370`, `0x371`, LA2016 raw CANH/CANL input modes, visible version tag, and host regression tests.
 
 ### Changed
 

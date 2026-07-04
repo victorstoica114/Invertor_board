@@ -17,6 +17,7 @@ void pylonRs485BridgeStop(void);
 
 #ifdef HOST_TEST
 bool pylonRs485BridgeBuildSyntheticInfo61ForTest(char *out, size_t outSize);
+bool pylonRs485BridgeBuildSyntheticInfo42ForTest(char *out, size_t outSize);
 bool pylonRs485BridgeBuildSyntheticInfo63ForTest(char *out, size_t outSize);
 void pylonRs485BridgeResetForTest(void);
 void pylonRs485BridgeRefreshSyntheticCacheForTest(void);

@@ -19,6 +19,10 @@ typedef struct {
 
 bool pylonCanAnyValid(const pylon_can_frame_t *cache, size_t count);
 void pylonCanDecodeSnapshot(const char *ifname, const pylon_can_frame_t *cache, size_t count);
+void pylonCanDecodeSnapshotWithProtocol(const char *ifname,
+                                        const pylon_can_frame_t *cache,
+                                        size_t count,
+                                        const char *protocolLabel);
 
 #ifdef __cplusplus
 }

@@ -249,7 +249,8 @@ static bool reqQueuePopForResp(modbusDecoder_t *d,
 
     reqQueuePruneExpired(d, respTsUs);
 
-    for (uint8_t i = 0u; i < d->reqQSize; i++) {
+    for (uint8_t n = 0u; n < d->reqQSize; n++) {
+        const uint8_t i = (uint8_t)(d->reqQSize - 1u - n);
         const uint8_t idx = (uint8_t)((d->reqQHead + i) % MODBUS_DECODER_REQ_QUEUE_LEN);
         if (d->reqQSlave[idx] != slave || d->reqQFunc[idx] != func) {
             continue;
@@ -978,15 +979,18 @@ static int normalizeWideByteCountResp03Frame(const uint8_t *src,
     return normLen;
 }
 
-static void decodeFrame(modbusDecoder_t *d, const uint8_t *f, int len)
+static int decodeFrame(modbusDecoder_t *d, const uint8_t *f, int len, bool fallbackLog)
 {
     if (len < 4) {
-        printFrameGeneric(d, f, len, false);
-        return;
+        if (fallbackLog) {
+            printFrameGeneric(d, f, len, false);
+        }
+        return 0;
     }
 
     /* Handle concatenated RTU frames (e.g. echoed request + response in one buffer). */
     int off = 0;
+    int consumedTo = 0;
     bool decodedAny = false;
     while ((len - off) >= 4) {
         const uint8_t *cur = &f[off];
@@ -1010,6 +1014,7 @@ static void decodeFrame(modbusDecoder_t *d, const uint8_t *f, int len)
                 if (normLen > 0) {
                     printResp03(d, normalized, normLen, true);
                     off += wideRespLen;
+                    consumedTo = off;
                     decodedAny = true;
                     continue;
                 }
@@ -1028,6 +1033,7 @@ static void decodeFrame(modbusDecoder_t *d, const uint8_t *f, int len)
                 if (normLen > 0) {
                     printResp03(d, normalized, normLen, true);
                     off += wideRespLen;
+                    consumedTo = off;
                     decodedAny = true;
                     continue;
                 }
@@ -1037,6 +1043,7 @@ static void decodeFrame(modbusDecoder_t *d, const uint8_t *f, int len)
         if (rem >= 8 && isReq03Frame(cur, 8)) {
             printReq03(d, cur, 8, true);
             off += 8;
+            consumedTo = off;
             decodedAny = true;
             continue;
         }
@@ -1046,6 +1053,7 @@ static void decodeFrame(modbusDecoder_t *d, const uint8_t *f, int len)
             normalizeVoltronic03Frame(cur, 8, normalized, sizeof(normalized));
             printReq03(d, normalized, 8, true);
             off += 8;
+            consumedTo = off;
             decodedAny = true;
             continue;
         }
@@ -1054,6 +1062,7 @@ static void decodeFrame(modbusDecoder_t *d, const uint8_t *f, int len)
             if (isExceptionRespFrame(cur, 5)) {
                 printExceptionResp(d, cur, 5, true);
                 off += 5;
+                consumedTo = off;
                 decodedAny = true;
                 continue;
             }
@@ -1062,6 +1071,7 @@ static void decodeFrame(modbusDecoder_t *d, const uint8_t *f, int len)
             if (respLen >= 5 && respLen <= rem && isResp03Frame(cur, respLen)) {
                 printResp03(d, cur, respLen, true);
                 off += respLen;
+                consumedTo = off;
                 decodedAny = true;
                 continue;
             }
@@ -1071,6 +1081,7 @@ static void decodeFrame(modbusDecoder_t *d, const uint8_t *f, int len)
                 normalizeVoltronic03Frame(cur, respLen, normalized, sizeof(normalized));
                 printResp03(d, normalized, respLen, true);
                 off += respLen;
+                consumedTo = off;
                 decodedAny = true;
                 continue;
             }
@@ -1087,6 +1098,7 @@ static void decodeFrame(modbusDecoder_t *d, const uint8_t *f, int len)
                 if (normLen > 0) {
                     printResp03(d, normalized, normLen, true);
                     off += wideRespLen;
+                    consumedTo = off;
                     decodedAny = true;
                     continue;
                 }
@@ -1104,6 +1116,7 @@ static void decodeFrame(modbusDecoder_t *d, const uint8_t *f, int len)
                 if (normLen > 0) {
                     printResp03(d, normalized, normLen, true);
                     off += wideRespLen;
+                    consumedTo = off;
                     decodedAny = true;
                     continue;
                 }
@@ -1121,6 +1134,7 @@ static void decodeFrame(modbusDecoder_t *d, const uint8_t *f, int len)
                 if (normLen > 0) {
                     printResp03(d, normalized, normLen, true);
                     off += wordRespLen;
+                    consumedTo = off;
                     decodedAny = true;
                     continue;
                 }
@@ -1138,17 +1152,22 @@ static void decodeFrame(modbusDecoder_t *d, const uint8_t *f, int len)
                 if (normLen > 0) {
                     printResp03(d, normalized, normLen, true);
                     off += wordRespLen;
+                    consumedTo = off;
                     decodedAny = true;
                     continue;
                 }
             }
         }
 
-        break;
+        off++;
     }
 
-    if (decodedAny && off == len) {
-        return;
+    if (decodedAny) {
+        return consumedTo;
+    }
+
+    if (!fallbackLog) {
+        return 0;
     }
 
     bool crcOk = modbusCheckCrc(f, len);
@@ -1203,6 +1222,8 @@ static void decodeFrame(modbusDecoder_t *d, const uint8_t *f, int len)
     } else {
         printFrameGeneric(d, f, len, crcOk);
     }
+
+    return 0;
 }
 
 void modbusDecoderInit(modbusDecoder_t *d, const char *ifName, uint32_t gapUs)
@@ -1236,7 +1257,7 @@ void modbusDecoderRecordRequest(modbusDecoder_t *d,
 static void finalizeIfAny(modbusDecoder_t *d)
 {
     if (d->len > 0) {
-        decodeFrame(d, d->buf, d->len);
+        (void)decodeFrame(d, d->buf, d->len, true);
         d->len = 0;
     }
 }
@@ -1254,16 +1275,35 @@ void modbusDecoderFeed(modbusDecoder_t *d, const uint8_t *data, int len, int64_t
         }
     }
 
+    d->lastByteUs = rxUs;
+    d->haveLastByte = true;
+
     for (int i = 0; i < len; i++) {
         if (d->len >= sizeof(d->buf)) {
-            ESP_LOGW(EXAMPLE_TAG, "Decoder on %s overflow, dropping frame", d->ifName);
+            if (decodeFrame(d, d->buf, d->len, false) > 0) {
+                ESP_LOGW(EXAMPLE_TAG,
+                         "Decoder on %s recovered valid Modbus frame before overflow",
+                         d->ifName);
+            } else {
+                ESP_LOGW(EXAMPLE_TAG, "Decoder on %s overflow, dropping frame", d->ifName);
+            }
             d->len = 0;
         }
         d->buf[d->len++] = data[i];
     }
 
-    d->lastByteUs = rxUs;
-    d->haveLastByte = true;
+    if (d->len > 192u) {
+        const int consumed = decodeFrame(d, d->buf, d->len, false);
+        if (consumed > 0) {
+            if (consumed < (int)d->len) {
+                const uint16_t remaining = (uint16_t)((int)d->len - consumed);
+                memmove(d->buf, &d->buf[consumed], remaining);
+                d->len = remaining;
+            } else {
+                d->len = 0;
+            }
+        }
+    }
 }
 
 void modbusDecoderFlush(modbusDecoder_t *d)

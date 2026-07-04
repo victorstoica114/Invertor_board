@@ -71,7 +71,7 @@ void test_jkbms_cache_without_bms_response_is_not_fresh(void)
 void test_jkbms_cache_is_fresh_inside_source_window(void)
 {
     const int64_t sourceUs = 500000LL;
-    const int64_t maxAgeUs = (int64_t)BRIDGE_SOURCE_STALE_MS * 1000LL;
+    const int64_t maxAgeUs = (int64_t)JKBMS_BMS_SOURCE_STALE_MS * 1000LL;
     int64_t newestUs = 0;
 
     feed_one_register_response(0x1200u, 0x1234u, sourceUs - 1000LL, sourceUs);
@@ -85,7 +85,7 @@ void test_jkbms_cache_is_fresh_inside_source_window(void)
 void test_jkbms_cache_expires_after_source_window(void)
 {
     const int64_t sourceUs = 700000LL;
-    const int64_t maxAgeUs = (int64_t)BRIDGE_SOURCE_STALE_MS * 1000LL;
+    const int64_t maxAgeUs = (int64_t)JKBMS_BMS_SOURCE_STALE_MS * 1000LL;
     int64_t newestUs = 0;
 
     feed_one_register_response(0x1200u, 0x5678u, sourceUs - 1000LL, sourceUs);

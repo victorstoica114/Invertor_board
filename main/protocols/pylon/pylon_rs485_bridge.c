@@ -170,6 +170,8 @@ static bool pylonCanSyntheticSourceModeEnabled(const bridge_runtime_settings_t *
            ((settings->bms_protocol == PROTOCOL_CAN_JKBMS_250K) ||
             (settings->bms_protocol == PROTOCOL_CAN_GROWATT) ||
             (settings->bms_protocol == PROTOCOL_CAN_GOODWE) ||
+            (settings->bms_protocol == PROTOCOL_CAN_SOFAR) ||
+            (settings->bms_protocol == PROTOCOL_CAN_SMA) ||
             (settings->bms_protocol == PROTOCOL_CAN_VICTRON) ||
             (settings->bms_protocol == PROTOCOL_CAN_DEYE) ||
             (settings->bms_protocol == PROTOCOL_CAN_DALY)) &&
@@ -240,9 +242,12 @@ static bool pylonSourceUsesNativePayloadEncoding(const bridge_runtime_settings_t
             bridgeProtocolIsRs485Pylon(settings->bms_protocol) ||
             (settings->bms_protocol == PROTOCOL_RS485_GROWATT) ||
             (settings->bms_protocol == PROTOCOL_RS485_VOLTRONIC) ||
+            (settings->bms_protocol == PROTOCOL_RS485_CHINA_TOWER) ||
             (settings->bms_protocol == PROTOCOL_RS485_DALY) ||
             (settings->bms_protocol == PROTOCOL_CAN_DALY) ||
             (settings->bms_protocol == PROTOCOL_CAN_GOODWE) ||
+            (settings->bms_protocol == PROTOCOL_CAN_SOFAR) ||
+            (settings->bms_protocol == PROTOCOL_CAN_SMA) ||
             (settings->bms_protocol == PROTOCOL_CAN_VICTRON) ||
             (settings->bms_protocol == PROTOCOL_CAN_DEYE));
 }
@@ -255,6 +260,10 @@ static uint32_t pylonSyntheticModelStaleMs(const bridge_runtime_settings_t *sett
         }
         if (settings->bms_protocol == PROTOCOL_CAN_DALY) {
             return DALY_CAN_SOURCE_STALE_MS;
+        }
+        if ((settings->bms_line == LINE_CAN) &&
+            bridgeProtocolIsCanPylonLike(settings->bms_protocol)) {
+            return CAN_PYLON_LIKE_SOURCE_STALE_MS;
         }
         if ((settings->bms_line == LINE_RS485) &&
             bridgeProtocolIsRs485Pylon(settings->bms_protocol)) {
@@ -374,9 +383,7 @@ static bool pylonShouldPublishTelemetrySnapshot(const bridge_runtime_settings_t 
      * races with the source telemetry and makes the web UI alternate between
      * source telemetry and responder telemetry.
      */
-    if (pylonCanSyntheticSourceModeEnabled(settings) &&
-        ((settings->bms_protocol == PROTOCOL_CAN_JKBMS_250K) ||
-         (settings->bms_protocol == PROTOCOL_CAN_GROWATT))) {
+    if (pylonCanSyntheticSourceModeEnabled(settings)) {
         return false;
     }
 
@@ -845,6 +852,149 @@ static uint16_t scaledU16OrDefault(float value, float scale, uint16_t fallback)
     return (uint16_t)scaled;
 }
 
+static bool pylonCellMvLooksUsable(uint16_t mv)
+{
+    return mv >= 1500u && mv <= 5000u;
+}
+
+static bool pylonCellVoltageLooksUsable(float volts)
+{
+    return volts >= 1.5f && volts <= 5.0f;
+}
+
+static uint8_t pylonInferSeriesCellCount(const universal_battery_model_t *model)
+{
+    if (model != NULL &&
+        model->cellCount >= 4u &&
+        model->cellCount <= PYLON_RS485_MAX_CELLS) {
+        return model->cellCount;
+    }
+    if (model == NULL || model->packVoltageV <= 0.0f) {
+        return 16u;
+    }
+
+    if (model->packVoltageV >= 44.0f) {
+        return 16u;
+    }
+    if (model->packVoltageV >= 22.0f) {
+        return 8u;
+    }
+    if (model->packVoltageV >= 10.0f) {
+        return 4u;
+    }
+    return 16u;
+}
+
+static bool pylonModelCellListStats(const universal_battery_model_t *model,
+                                    uint16_t *maxMv,
+                                    uint16_t *minMv,
+                                    uint8_t *maxIdx,
+                                    uint8_t *minIdx)
+{
+    uint16_t localMax = 0u;
+    uint16_t localMin = UINT16_MAX;
+    uint8_t localMaxIdx = 1u;
+    uint8_t localMinIdx = 1u;
+
+    if (model == NULL || model->cellCount == 0u ||
+        model->cellCount > PYLON_RS485_MAX_CELLS) {
+        return false;
+    }
+
+    for (uint8_t i = 0u; i < model->cellCount; i++) {
+        const uint16_t mv = model->cellMv[i];
+        if (!pylonCellMvLooksUsable(mv)) {
+            continue;
+        }
+        if (mv > localMax) {
+            localMax = mv;
+            localMaxIdx = (uint8_t)(i + 1u);
+        }
+        if (mv < localMin) {
+            localMin = mv;
+            localMinIdx = (uint8_t)(i + 1u);
+        }
+    }
+
+    if (localMax == 0u || localMin == UINT16_MAX || localMax < localMin) {
+        return false;
+    }
+
+    if (maxMv != NULL) *maxMv = localMax;
+    if (minMv != NULL) *minMv = localMin;
+    if (maxIdx != NULL) *maxIdx = localMaxIdx;
+    if (minIdx != NULL) *minIdx = localMinIdx;
+    return true;
+}
+
+static bool pylonModelCellExtremesForInfo61(const universal_battery_model_t *model,
+                                            uint16_t *maxMv,
+                                            uint16_t *minMv,
+                                            uint8_t *maxIdx,
+                                            uint8_t *minIdx)
+{
+    uint16_t localMaxMv = 0u;
+    uint16_t localMinMv = 0u;
+    uint8_t localMaxIdx = 1u;
+    uint8_t localMinIdx = 1u;
+
+    if (pylonModelCellListStats(model, &localMaxMv, &localMinMv, &localMaxIdx, &localMinIdx)) {
+        if (maxMv != NULL) *maxMv = localMaxMv;
+        if (minMv != NULL) *minMv = localMinMv;
+        if (maxIdx != NULL) *maxIdx = localMaxIdx;
+        if (minIdx != NULL) *minIdx = localMinIdx;
+        return true;
+    }
+
+    if (model == NULL) {
+        return false;
+    }
+
+    if (pylonCellVoltageLooksUsable(model->cellMaxV) &&
+        pylonCellVoltageLooksUsable(model->cellMinV) &&
+        model->cellMaxV >= model->cellMinV) {
+        localMaxMv = (uint16_t)(model->cellMaxV * 1000.0f + 0.5f);
+        localMinMv = (uint16_t)(model->cellMinV * 1000.0f + 0.5f);
+        localMaxIdx = (model->cellMaxIdx >= 1u && model->cellMaxIdx <= PYLON_RS485_MAX_CELLS)
+                      ? model->cellMaxIdx
+                      : 1u;
+        localMinIdx = (model->cellMinIdx >= 1u && model->cellMinIdx <= PYLON_RS485_MAX_CELLS)
+                      ? model->cellMinIdx
+                      : 1u;
+
+        if (maxMv != NULL) *maxMv = localMaxMv;
+        if (minMv != NULL) *minMv = localMinMv;
+        if (maxIdx != NULL) *maxIdx = localMaxIdx;
+        if (minIdx != NULL) *minIdx = localMinIdx;
+        return true;
+    }
+
+    /*
+     * Several CAN BMS profiles expose only pack-level telemetry. For the
+     * inverter-facing Pylon 0x61 response, replace the unsafe template cell
+     * extrema with a neutral pack-derived value instead of advertising stale
+     * 4.7V/4.5V extrema.
+     */
+    const uint8_t seriesCells = pylonInferSeriesCellCount(model);
+    if (model->packVoltageV > 0.0f && seriesCells > 0u) {
+        const float nominalMv = ((model->packVoltageV * 1000.0f) / (float)seriesCells) + 0.5f;
+        if (nominalMv >= 1500.0f && nominalMv <= 5000.0f) {
+            localMaxMv = (uint16_t)nominalMv;
+            localMinMv = (uint16_t)nominalMv;
+            localMaxIdx = 1u;
+            localMinIdx = 1u;
+
+            if (maxMv != NULL) *maxMv = localMaxMv;
+            if (minMv != NULL) *minMv = localMinMv;
+            if (maxIdx != NULL) *maxIdx = localMaxIdx;
+            if (minIdx != NULL) *minIdx = localMinIdx;
+            return true;
+        }
+    }
+
+    return false;
+}
+
 static uint8_t pylonStatusFromModelOrSummary(const universal_battery_model_t *model)
 {
     uint8_t status = (uint8_t)(s_pylonSummary.status_63 & 0xFFu);
@@ -976,8 +1126,8 @@ static bool buildCanDerivedInfo61(char *out, size_t outSize)
     bool nativePayloadSource = pylonSourceUsesNativePayloadEncoding(&settings);
     uint8_t bytes[sizeof(template61)];
     uint16_t kelvinTemp = 0;
-    uint16_t maxMv = 0;
-    uint16_t minMv = 0;
+    uint16_t maxMv = 0u;
+    uint16_t minMv = 0u;
     uint8_t maxIdx = 3u;
     uint8_t minIdx = 12u;
 
@@ -1031,23 +1181,12 @@ static bool buildCanDerivedInfo61(char *out, size_t outSize)
      * those fields is safer than projecting incompatible values directly.
      */
     if (nativePayloadSource) {
-        maxMv = (uint16_t)(model.cellMaxV > 0.0f ? (model.cellMaxV * 1000.0f) : 0.0f);
-        minMv = (uint16_t)(model.cellMinV > 0.0f ? (model.cellMinV * 1000.0f) : 0.0f);
-        if (maxMv > 0u) {
+        if (pylonModelCellExtremesForInfo61(&model, &maxMv, &minMv, &maxIdx, &minIdx)) {
             putBe16(&bytes[11], maxMv);
-        }
-        if (minMv > 0u) {
             putBe16(&bytes[15], minMv);
+            putBe16(&bytes[13], maxIdx);
+            putBe16(&bytes[17], minIdx);
         }
-
-        if (model.cellMaxIdx >= 1u && model.cellMaxIdx <= 16u) {
-            maxIdx = model.cellMaxIdx;
-        }
-        if (model.cellMinIdx >= 1u && model.cellMinIdx <= 16u) {
-            minIdx = model.cellMinIdx;
-        }
-        putBe16(&bytes[13], maxIdx);
-        putBe16(&bytes[17], minIdx);
 
         if (modelTempValid(model.temperaturesC[0])) {
             kelvinTemp = (uint16_t)(model.temperaturesC[0] * 10.0f + 2731.0f);
@@ -1079,13 +1218,56 @@ static bool buildCanDerivedInfo61(char *out, size_t outSize)
     return out[0] != '\0';
 }
 
+static bool buildCanDerivedInfo42(char *out, size_t outSize)
+{
+    universal_battery_model_t model;
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+    uint8_t bytes[2u + (UNIVERSAL_BATTERY_MAX_CELLS * 2u) + 1u];
+    uint8_t count = 0u;
+    size_t pos = 0u;
+
+    if (out == NULL || outSize == 0u) {
+        return false;
+    }
+    out[0] = '\0';
+
+    pylonGetBatteryModelForSettings(&settings, &model);
+    if (!model.valid || model.cellCount == 0u) {
+        return false;
+    }
+
+    count = model.cellCount;
+    if (count > UNIVERSAL_BATTERY_MAX_CELLS) {
+        count = UNIVERSAL_BATTERY_MAX_CELLS;
+    }
+    if (count > PYLON_RS485_MAX_CELLS) {
+        count = PYLON_RS485_MAX_CELLS;
+    }
+
+    bytes[pos++] = 1u;     /* one pack */
+    bytes[pos++] = count;  /* cells in this pack */
+    for (uint8_t i = 0u; i < count; i++) {
+        const uint16_t mv = model.cellMv[i];
+        if (!pylonCellVoltageMvValid(mv)) {
+            return false;
+        }
+        putBe16(&bytes[pos], mv);
+        pos += 2u;
+    }
+    bytes[pos++] = 0u;     /* no temperatures in synthetic 0x42 */
+
+    encodeHexAscii(bytes, (int)pos, out, outSize);
+    return out[0] != '\0';
+}
+
 static bool buildCanDerivedInfo63(char *out, size_t outSize)
 {
     static const uint8_t template63[9] = {0x05, 0xE0, 0xB1, 0x80, 0x00, 0x00, 0x07, 0x6C, 0x40};
     universal_battery_model_t model;
     bridge_runtime_settings_t settings = runtimeSettingsGet();
     bool forceStaticPayload = pylonCanToRs485ModeEnabled(&settings) && PYLON_CAN_RS485_FORCE_FAKE_ENABLE;
-    bool nativeStatusSource = pylonSourceUsesNativePayloadEncoding(&settings);
+    bool nativeStatusSource = pylonSourceUsesNativePayloadEncoding(&settings) &&
+                              (settings.bms_protocol != PROTOCOL_RS485_CHINA_TOWER);
     uint8_t bytes[sizeof(template63)];
     const char *reason = "template";
     int64_t nowUs = esp_timer_get_time();
@@ -1114,15 +1296,17 @@ static bool buildCanDerivedInfo63(char *out, size_t outSize)
         if ((model.protocolState & 0x40u) != 0u || model.dischargeEnabled) {
             haveExplicitChargeDischarge = true;
         }
-        if (!nativeStatusSource && !haveExplicitChargeDischarge) {
+        if (!haveExplicitChargeDischarge) {
             /*
              * Generic sources like JK do not expose native Pylon enable bits.
              * Treat missing charge/discharge flags as "unknown", not "OFF".
              * Also avoid projecting generic "balance active" into Pylon 0x63,
              * because the web fake path that works uses a plain 0xC0 status.
+             * The same fallback is needed for CAN profiles such as SOFAR where
+             * pack/SOC frames can arrive before a charge/discharge status frame.
              */
             status = 0xC0u;
-            reason = "generic_default_c0_ignore_balance";
+            reason = nativeStatusSource ? "native_default_c0_no_status" : "generic_default_c0_ignore_balance";
         } else {
             reason = "derived_from_flags";
         }
@@ -1140,6 +1324,11 @@ static bool buildCanDerivedInfo63(char *out, size_t outSize)
 bool pylonRs485BridgeBuildSyntheticInfo61ForTest(char *out, size_t outSize)
 {
     return buildCanDerivedInfo61(out, outSize);
+}
+
+bool pylonRs485BridgeBuildSyntheticInfo42ForTest(char *out, size_t outSize)
+{
+    return buildCanDerivedInfo42(out, outSize);
 }
 
 bool pylonRs485BridgeBuildSyntheticInfo63ForTest(char *out, size_t outSize)
@@ -1209,6 +1398,7 @@ bool pylonRs485BridgeProbeShouldWaitForQuietForTest(uint8_t mode,
 static void maybeRefreshSyntheticCacheFromUniversal(void)
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
+    char info42[sizeof(s_pylonCache.info42)] = {0};
     char info61[sizeof(s_pylonCache.info61)] = {0};
     char info63[sizeof(s_pylonCache.info63)] = {0};
     int64_t nowUs = esp_timer_get_time();
@@ -1223,6 +1413,13 @@ static void maybeRefreshSyntheticCacheFromUniversal(void)
             if (buildCanDerivedInfo61(info61, sizeof(info61))) {
                 snprintf(s_pylonCache.info61, sizeof(s_pylonCache.info61), "%s", info61);
                 s_pylonCache.valid61 = true;
+            }
+            if (buildCanDerivedInfo42(info42, sizeof(info42))) {
+                snprintf(s_pylonCache.info42, sizeof(s_pylonCache.info42), "%s", info42);
+                s_pylonCache.valid42 = true;
+            } else {
+                s_pylonCache.valid42 = false;
+                pylonSummaryClearCellList();
             }
 
             snprintf(s_pylonCache.info62, sizeof(s_pylonCache.info62), "00000000");
@@ -1247,14 +1444,19 @@ static void maybeRefreshSyntheticCacheFromUniversal(void)
         bool old61 = s_pylonCache.valid61;
         bool old62 = s_pylonCache.valid62;
         bool old63 = s_pylonCache.valid63;
+        bool old42 = s_pylonCache.valid42;
+        s_pylonCache.valid42 = false;
         s_pylonCache.valid61 = false;
         s_pylonCache.valid62 = false;
         s_pylonCache.valid63 = false;
         memset(&s_pylonSummary, 0, sizeof(s_pylonSummary));
-        bridgeSetTelemetrySnapshot(NULL);
+        if (pylonShouldPublishTelemetrySnapshot(&settings)) {
+            bridgeSetTelemetrySnapshot(NULL);
+        }
         if (pylonDiagLogsEnabled() && ((nowUs - s_lastCacheBuildDiagUs) >= 1000000LL)) {
             ESP_LOGW(EXAMPLE_TAG,
-                     "PYLON synthetic cache cleared: source not fresh (v61=%s v62=%s v63=%s)",
+                     "PYLON synthetic cache cleared: source not fresh (v42=%s v61=%s v62=%s v63=%s)",
+                     old42 ? "YES" : "NO",
                      old61 ? "YES" : "NO",
                      old62 ? "YES" : "NO",
                      old63 ? "YES" : "NO");
@@ -1276,6 +1478,16 @@ static void maybeRefreshSyntheticCacheFromUniversal(void)
 
     snprintf(s_pylonCache.info62, sizeof(s_pylonCache.info62), "00000000");
     s_pylonCache.valid62 = true;
+
+    if (buildCanDerivedInfo42(info42, sizeof(info42))) {
+        snprintf(s_pylonCache.info42, sizeof(s_pylonCache.info42), "%s", info42);
+        s_pylonCache.valid42 = true;
+        updateSummary42();
+        telemetryFromSummary();
+    } else {
+        s_pylonCache.valid42 = false;
+        pylonSummaryClearCellList();
+    }
 
     if (buildCanDerivedInfo63(info63, sizeof(info63))) {
         snprintf(s_pylonCache.info63, sizeof(s_pylonCache.info63), "%s", info63);
@@ -1423,7 +1635,47 @@ static void telemetryFromSummary(void)
     snap.cellMaxIdx = useModelTelemetry ? model.cellMaxIdx : s_pylonSummary.max_cell_idx;
     snap.cellMinIdx = useModelTelemetry ? model.cellMinIdx : s_pylonSummary.min_cell_idx;
     snap.deltaV = useModelTelemetry ? model.cellDeltaV : (snap.cellMaxV - snap.cellMinV);
-    if (allowSummaryCellList && s_pylonSummary.cell_count > 0u) {
+    if (useModelTelemetry && model.cellCount > 0u) {
+        uint16_t minMv = UINT16_MAX;
+        uint16_t maxMv = 0u;
+        uint8_t minIdx = 0u;
+        uint8_t maxIdx = 0u;
+        uint32_t sumMv = 0u;
+        uint8_t counted = 0u;
+        snap.cellCount = model.cellCount;
+        if (snap.cellCount > UNIVERSAL_BATTERY_MAX_CELLS) {
+            snap.cellCount = UNIVERSAL_BATTERY_MAX_CELLS;
+        }
+        if (snap.cellCount > 32u) {
+            snap.cellCount = 32u;
+        }
+        for (uint8_t i = 0u; i < snap.cellCount; i++) {
+            const uint16_t mv = model.cellMv[i];
+            if (!pylonCellVoltageMvValid(mv)) {
+                continue;
+            }
+            snap.cellVoltagesV[i] = (float)mv / 1000.0f;
+            sumMv += mv;
+            counted++;
+            if (mv < minMv) {
+                minMv = mv;
+                minIdx = (uint8_t)(i + 1u);
+            }
+            if (mv > maxMv) {
+                maxMv = mv;
+                maxIdx = (uint8_t)(i + 1u);
+            }
+        }
+        if (counted > 0u) {
+            snap.cellMinV = (float)minMv / 1000.0f;
+            snap.cellMaxV = (float)maxMv / 1000.0f;
+            snap.cellMinIdx = minIdx;
+            snap.cellMaxIdx = maxIdx;
+            snap.deltaV = (float)(maxMv - minMv) / 1000.0f;
+            snap.cellDiffV = snap.deltaV;
+            snap.cellAvgV = ((float)sumMv / (float)counted) / 1000.0f;
+        }
+    } else if (allowSummaryCellList && s_pylonSummary.cell_count > 0u) {
         uint16_t minMv = 0u;
         uint16_t maxMv = 0u;
         uint8_t minIdx = 0u;

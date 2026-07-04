@@ -280,6 +280,22 @@ static bool canInterfaceIsRuntimeBms(const char *ifname)
     return strcmp(name, (settings.bms_port == 1u) ? "CAN1" : "CAN2") == 0;
 }
 
+static const char *canPylonLikeProtocolLabel(int protocol)
+{
+    switch (protocol) {
+        case PROTOCOL_CAN_SOFAR:
+            return "CAN_SOFAR";
+        case PROTOCOL_CAN_SMA:
+            return "CAN_SMA";
+        case PROTOCOL_CAN_VICTRON:
+            return "CAN_VICTRON";
+        case PROTOCOL_CAN_GOODWE:
+            return "CAN_GOODWE";
+        default:
+            return "CAN_PYLON";
+    }
+}
+
 static bool canPylonCacheHasRequiredFrames(const pylon_can_frame_t *cache, int protocol)
 {
     const pylon_can_frame_t *f351 = NULL;
@@ -342,11 +358,8 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
     int protocol = canProtocolForIf(name);
     bool deyeProtocol = protocol == PROTOCOL_CAN_DEYE;
     bool goodweProtocol = protocol == PROTOCOL_CAN_GOODWE;
-    bool victronProtocol = protocol == PROTOCOL_CAN_VICTRON;
     bool deyeLikeProtocol = deyeProtocol || goodweProtocol;
-    bool pylonLikeProtocol = (protocol == PROTOCOL_CAN_PYLON) ||
-                             deyeLikeProtocol ||
-                             victronProtocol;
+    bool pylonLikeProtocol = bridgeProtocolIsCanPylonLike((uint8_t)protocol);
     pylon_can_frame_t local[PYLON_CAN_CACHE_COUNT];
     pylon_can_frame_t *src = NULL;
     const pylon_can_frame_t *f351 = NULL;
@@ -362,7 +375,7 @@ static void canUpdateUniversalModelFromPylonCache(const char *ifname)
     bool haveTempRange = false;
     universal_battery_model_t model = {0};
     uint32_t nowMs = (uint32_t)(esp_timer_get_time() / 1000LL);
-    const uint32_t maxAgeMs = BRIDGE_SOURCE_STALE_MS;
+    const uint32_t maxAgeMs = bridgeProtocolCanSourceStaleMs((uint8_t)protocol);
 
     if (!pylonLikeProtocol) {
         return;
@@ -1865,7 +1878,9 @@ void canDecoderPrintCachedSnapshot(const char *ifname)
     bool anyPylon = false;
     bool anyJkbms = false;
     uint32_t nowMs = (uint32_t)(esp_timer_get_time() / 1000LL);
+    int protocol = canProtocolForIf(name);
     const uint32_t maxAgeMs = BRIDGE_SOURCE_STALE_MS;
+    const uint32_t pylonMaxAgeMs = bridgeProtocolCanSourceStaleMs((uint8_t)protocol);
 
     canBmsCachedFrame_t *src = canBmsCacheForIf(name);
     pylon_can_frame_t *pylonSrc = canPylonCacheForIf(name);
@@ -1890,13 +1905,11 @@ void canDecoderPrintCachedSnapshot(const char *ifname)
     portEXIT_CRITICAL(&g_canBmsCacheMux);
 
     canInvalidateStaleGrowattFrames(local, CAN_BMS_CACHE_COUNT, nowMs, maxAgeMs);
-    canInvalidateStalePylonFrames(pylonLocal, PYLON_CAN_CACHE_COUNT, nowMs, maxAgeMs);
+    canInvalidateStalePylonFrames(pylonLocal, PYLON_CAN_CACHE_COUNT, nowMs, pylonMaxAgeMs);
     canInvalidateStaleJkbmsFrames(jkbmsLocal, JKBMS_CAN_CACHE_COUNT, nowMs, maxAgeMs);
 
     anyPylon = pylonCanAnyValid(pylonLocal, PYLON_CAN_CACHE_COUNT);
     if (anyPylon) {
-        int protocol = canProtocolForIf(name);
-
         if (!canPylonCacheHasRequiredFrames(pylonLocal, protocol)) {
             canClearStaleSourceTelemetry(name, "Pylon-like required CAN frames are stale or incomplete");
             return;
@@ -1905,13 +1918,13 @@ void canDecoderPrintCachedSnapshot(const char *ifname)
         if (protocol == PROTOCOL_CAN_DEYE) {
             deyeCanDecodeSnapshot(name, pylonLocal, PYLON_CAN_CACHE_COUNT);
         } else {
-            pylonCanDecodeSnapshot(name, pylonLocal, PYLON_CAN_CACHE_COUNT);
+            pylonCanDecodeSnapshotWithProtocol(name,
+                                               pylonLocal,
+                                               PYLON_CAN_CACHE_COUNT,
+                                               canPylonLikeProtocolLabel(protocol));
         }
         return;
-    } else if (canProtocolForIf(name) == PROTOCOL_CAN_PYLON ||
-               canProtocolForIf(name) == PROTOCOL_CAN_DEYE ||
-               canProtocolForIf(name) == PROTOCOL_CAN_GOODWE ||
-               canProtocolForIf(name) == PROTOCOL_CAN_VICTRON) {
+    } else if (bridgeProtocolIsCanPylonLike((uint8_t)protocol)) {
         canClearStaleSourceTelemetry(name, "no fresh Pylon-like CAN frames");
         return;
     }
@@ -1982,7 +1995,9 @@ bool canDecoderTryGetSocPct(const char *ifname, uint8_t *socOut)
     pylon_can_frame_t *pylonSrc = canPylonCacheForIf(name);
     jkbms_can_frame_t *jkbmsSrc = canJkbmsCacheForIf(name);
     uint32_t nowMs = (uint32_t)(esp_timer_get_time() / 1000LL);
+    int protocol = canProtocolForIf(name);
     const uint32_t maxAgeMs = BRIDGE_SOURCE_STALE_MS;
+    const uint32_t pylonMaxAgeMs = bridgeProtocolCanSourceStaleMs((uint8_t)protocol);
     if (src == NULL) {
         return false;
     }
@@ -2008,10 +2023,10 @@ bool canDecoderTryGetSocPct(const char *ifname, uint8_t *socOut)
 
     canInvalidateStaleGrowattFrames(local, CAN_BMS_CACHE_COUNT, nowMs, maxAgeMs);
     canInvalidateStaleGrowattFrames(goodweLocal, GOODWE_CAN_CACHE_COUNT, nowMs, maxAgeMs);
-    canInvalidateStalePylonFrames(pylonLocal, PYLON_CAN_CACHE_COUNT, nowMs, maxAgeMs);
+    canInvalidateStalePylonFrames(pylonLocal, PYLON_CAN_CACHE_COUNT, nowMs, pylonMaxAgeMs);
     canInvalidateStaleJkbmsFrames(jkbmsLocal, JKBMS_CAN_CACHE_COUNT, nowMs, maxAgeMs);
 
-    if (canProtocolForIf(name) == PROTOCOL_CAN_JKBMS_250K &&
+    if (protocol == PROTOCOL_CAN_JKBMS_250K &&
         jkbmsCanTryGetSocPct(jkbmsLocal, JKBMS_CAN_CACHE_COUNT, socOut)) {
         return true;
     }
@@ -2030,7 +2045,7 @@ bool canDecoderTryGetSocPct(const char *ifname, uint8_t *socOut)
 
     {
         const canBmsCachedFrame_t *f457 = canGoodweFrameById(goodweLocal, GOODWE_CAN_ID_SOC_SOH_457);
-        if (canProtocolForIf(name) == PROTOCOL_CAN_GOODWE &&
+        if (protocol == PROTOCOL_CAN_GOODWE &&
             f457 != NULL && f457->dlc >= 2u) {
             *socOut = clampPctFromDeciPct(can_le16(&f457->data[GOODWE_CAN_457_OFF_SOC_DECIPCT]));
             return true;

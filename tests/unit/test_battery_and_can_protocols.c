@@ -129,6 +129,30 @@ void test_pylon_can_any_valid_handles_empty_cache(void)
     TEST_ASSERT_TRUE(pylonCanAnyValid(cache, PYLON_CAN_CACHE_COUNT));
 }
 
+void test_pylon_can_decode_snapshot_uses_supplied_protocol_label(void)
+{
+    pylon_can_frame_t cache[PYLON_CAN_CACHE_COUNT] = {0};
+    uint8_t f355[4] = {0};
+    uint8_t f356[6] = {0};
+
+    write_le16(&f355[0], 70u);
+    write_le16(&f355[2], 100u);
+    write_le16(&f356[0], 5619u);
+    write_le16s(&f356[2], 0);
+    write_le16(&f356[4], 247u);
+
+    set_cache_frame(cache, PYLON_CAN_CACHE_COUNT, PYLON_CAN_ID_SOC_SOH_355, f355, sizeof(f355));
+    set_cache_frame(cache, PYLON_CAN_CACHE_COUNT, PYLON_CAN_ID_PACK_356, f356, sizeof(f356));
+
+    pylonCanDecodeSnapshotWithProtocol("CAN1", cache, PYLON_CAN_CACHE_COUNT, "CAN_SOFAR");
+
+    TEST_ASSERT_TRUE(g_snapshotSet);
+    TEST_ASSERT_TRUE(g_lastSnapshot.valid);
+    TEST_ASSERT_EQUAL_STRING("CAN_SOFAR", g_lastSnapshot.protocol);
+    TEST_ASSERT_EQUAL_UINT8(70u, g_lastSnapshot.socPct);
+    TEST_ASSERT_EQUAL_UINT8(100u, g_lastSnapshot.sohPct);
+}
+
 void test_pylon_can_decode_snapshot_populates_snapshot_and_model(void)
 {
     pylon_can_frame_t cache[PYLON_CAN_CACHE_COUNT] = {0};
@@ -624,6 +648,7 @@ int main(void)
     UNITY_BEGIN();
 
     RUN_TEST(test_pylon_can_any_valid_handles_empty_cache);
+    RUN_TEST(test_pylon_can_decode_snapshot_uses_supplied_protocol_label);
     RUN_TEST(test_pylon_can_decode_snapshot_populates_snapshot_and_model);
     RUN_TEST(test_pylon_can_decode_jk_extension_cell_extremes);
     RUN_TEST(test_deye_can_decode_snapshot_populates_snapshot_and_model);
