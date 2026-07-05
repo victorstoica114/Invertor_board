@@ -43,7 +43,7 @@ static uint32_t bridgeTelemetryStaleMs(uint8_t bmsProtocol)
     if (bmsProtocol == PROTOCOL_RS485_DALY) {
         return DALY_RS485_SOURCE_STALE_MS;
     }
-    if (bmsProtocol == PROTOCOL_CAN_DALY) {
+    if (bridgeProtocolIsCanDaly(bmsProtocol)) {
         return DALY_CAN_SOURCE_STALE_MS;
     }
     if (bridgeProtocolIsRs485Pylon(bmsProtocol)) {
@@ -113,6 +113,8 @@ static const char *protocolToStr(uint8_t protocol)
             return "DALY_RS485";
         case PROTOCOL_CAN_DALY:
             return "DALY_CAN";
+        case PROTOCOL_CAN_DALY_500K:
+            return "DALY_CAN_500K";
         default:
             return "UNKNOWN";
     }
@@ -1354,6 +1356,7 @@ static const char *bridgeBmsTaskDebugName(uint8_t protocol)
             return "SEPLOS";
         case PROTOCOL_RS485_DALY:
         case PROTOCOL_CAN_DALY:
+        case PROTOCOL_CAN_DALY_500K:
             return "DALY";
         default:
             return "GROWATT";
@@ -1382,6 +1385,7 @@ static const char *bridgeBmsTaskSourceName(uint8_t protocol)
         case PROTOCOL_RS485_DALY:
             return "DALY_RS485_TASK";
         case PROTOCOL_CAN_DALY:
+        case PROTOCOL_CAN_DALY_500K:
             return "DALY_CAN_TASK";
         default:
             return "GROWATT_BMS_TASK";
@@ -1419,7 +1423,7 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
            (settings.bms_protocol == PROTOCOL_CAN_VICTRON) ||
            (settings.bms_protocol == PROTOCOL_CAN_GROWATT) ||
            (settings.bms_protocol == PROTOCOL_CAN_JKBMS_250K) ||
-           (settings.bms_protocol == PROTOCOL_CAN_DALY)) &&
+           bridgeProtocolIsCanDaly(settings.bms_protocol)) &&
           bridgeProtocolIsRs485Pylon(settings.inverter_protocol)));
 
     if (pylonRs485Route) {
@@ -1595,7 +1599,7 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
             }
             return;
         }
-    } else if (settings.bms_protocol == PROTOCOL_CAN_DALY) {
+    } else if (bridgeProtocolIsCanDaly(settings.bms_protocol)) {
         daly_rs485_snapshot_t snapshot = {0};
         bool haveSnapshot = dalyCanBmsTaskGetLatestSnapshot(&snapshot);
         hasPacket = dalyCanBmsTaskGetLatestPacket(&packet);
@@ -1607,7 +1611,10 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
                      snapshot.hasSocDeciPct ? (unsigned)(snapshot.socDeciPct / 10u) : 0u,
                      snapshot.hasSocDeciPct ? (unsigned)(snapshot.socDeciPct % 10u) : 0u,
                      snapshot.hasPackVoltageCv ? ((double)snapshot.packVoltageCv / 100.0) : 0.0);
-            fillTelemetryFromDalySnapshot(&snapshot, out, "DALY_CAN_TASK", "DALY_CAN");
+            fillTelemetryFromDalySnapshot(&snapshot,
+                                          out,
+                                          "DALY_CAN_TASK",
+                                          protocolToStr(settings.bms_protocol));
             if (srcUpdatedMs == 0u && snapshot.timestampUs > 0) {
                 srcUpdatedMs = (uint32_t)(snapshot.timestampUs / 1000ULL);
             }

@@ -151,7 +151,8 @@
 #define PROTOCOL_RS485_SEPLOS_19200 20
 #define PROTOCOL_RS485_DALY 21
 #define PROTOCOL_CAN_DALY 22
-#define PROTOCOL_ID_MAX PROTOCOL_CAN_DALY
+#define PROTOCOL_CAN_DALY_500K 23
+#define PROTOCOL_ID_MAX PROTOCOL_CAN_DALY_500K
 
 static inline bool bridgeProtocolIsCanPylonLike(uint8_t protocol)
 {
@@ -215,10 +216,19 @@ static inline bool bridgeProtocolIsCanJkbms250k(uint8_t protocol)
     return protocol == PROTOCOL_CAN_JKBMS_250K;
 }
 
+static inline bool bridgeProtocolIsCanDaly(uint8_t protocol)
+{
+    return (protocol == PROTOCOL_CAN_DALY) ||
+           (protocol == PROTOCOL_CAN_DALY_500K);
+}
+
 static inline uint32_t bridgeProtocolCanBitrate(uint8_t protocol)
 {
     if (protocol == PROTOCOL_CAN_DALY) {
         return CAN_JKBMS_250K_BITRATE;
+    }
+    if (protocol == PROTOCOL_CAN_DALY_500K) {
+        return CAN_DEFAULT_BITRATE;
     }
     return bridgeProtocolIsCanJkbms250k(protocol) ? CAN_JKBMS_250K_BITRATE : CAN_DEFAULT_BITRATE;
 }
@@ -322,7 +332,7 @@ static inline uint32_t bridgeProtocolCanBitrate(uint8_t protocol)
 /* --- Daly CAN proprietary protocol task --- */
 #define DALY_CAN_BMS_ID                    1u
 #define DALY_CAN_QUERY_PERIOD_MS           120
-#define DALY_CAN_RESPONSE_TIMEOUT_MS       220
+#define DALY_CAN_RESPONSE_TIMEOUT_MS       350
 #define DALY_CAN_TX_TIMEOUT_MS             50
 #define DALY_CAN_PUBLISH_PERIOD_MS         500
 #define DALY_CAN_SOURCE_STALE_MS           10000

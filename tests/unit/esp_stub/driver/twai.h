@@ -4,6 +4,12 @@
 
 typedef void *twai_handle_t;
 
+typedef enum {
+    TWAI_MODE_NORMAL = 0,
+    TWAI_MODE_NO_ACK,
+    TWAI_MODE_LISTEN_ONLY,
+} twai_mode_t;
+
 typedef struct {
     uint32_t identifier;
     uint8_t data_length_code;

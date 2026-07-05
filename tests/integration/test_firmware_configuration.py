@@ -112,6 +112,7 @@ def test_protocol_constants_in_config_h():
         'PROTOCOL_RS485_SEPLOS_19200',
         'PROTOCOL_RS485_DALY',
         'PROTOCOL_CAN_DALY',
+        'PROTOCOL_CAN_DALY_500K',
     ]
 
     for protocol in expected_protocols:

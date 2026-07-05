@@ -51,7 +51,7 @@ static uint32_t sourceStaleMsForSettings(const bridge_runtime_settings_t *settin
         if (settings->bms_protocol == PROTOCOL_RS485_DALY) {
             return DALY_RS485_SOURCE_STALE_MS;
         }
-        if (settings->bms_protocol == PROTOCOL_CAN_DALY) {
+        if (bridgeProtocolIsCanDaly(settings->bms_protocol)) {
             return DALY_CAN_SOURCE_STALE_MS;
         }
         if ((settings->bms_line == LINE_RS485) &&

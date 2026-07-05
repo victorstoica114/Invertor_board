@@ -253,6 +253,25 @@ void test_route_jkbms_rs485_to_can_growatt_starts_bms_poller_and_can_sender(void
     TEST_ASSERT_EQUAL(0, g_routeStubPylonInverterStartCount);
 }
 
+void test_route_growatt_can_to_can_growatt_uses_direct_passthrough(void)
+{
+    bridge_runtime_settings_t settings = {0};
+
+    settings.mode = MODE_BRIDGE;
+    settings.bms_line = LINE_CAN;
+    settings.bms_protocol = PROTOCOL_CAN_GROWATT;
+    settings.bms_port = 1;
+    settings.inverter_line = LINE_CAN;
+    settings.inverter_protocol = PROTOCOL_CAN_GROWATT;
+    settings.inverter_port = 2;
+
+    TEST_ASSERT_EQUAL(ESP_OK, orchestratorStartFromRuntime(&settings));
+    TEST_ASSERT_EQUAL(1, g_routeStubCanForwardStartCount);
+    TEST_ASSERT_EQUAL(0, g_routeStubGrowattInverterStartCount);
+    TEST_ASSERT_EQUAL(0, g_routeStubCanRs485GrowattTranslatorStartCount);
+    TEST_ASSERT_EQUAL(0, g_routeStubPylonBridgeEnableCount);
+}
+
 void test_route_jkbms_can_to_rs485_growatt_starts_can_rs485_translator(void)
 {
     bridge_runtime_settings_t settings = {0};
@@ -528,6 +547,49 @@ void test_route_daly_rs485_to_can_pylon_starts_can_sender(void)
     TEST_ASSERT_EQUAL(0, g_routeStubCanForwardStartCount);
 }
 
+/**
+ * Test: Daly CAN native poller can feed a Pylon CAN inverter sender.
+ */
+void test_route_daly_can_to_can_pylon_starts_can_poller_and_sender(void)
+{
+    bridge_runtime_settings_t settings = {0};
+
+    settings.mode = MODE_BRIDGE;
+    settings.bms_line = LINE_CAN;
+    settings.bms_protocol = PROTOCOL_CAN_DALY;
+    settings.bms_port = 1;
+    settings.inverter_line = LINE_CAN;
+    settings.inverter_protocol = PROTOCOL_CAN_PYLON;
+    settings.inverter_port = 2;
+
+    TEST_ASSERT_EQUAL(ESP_OK, orchestratorStartFromRuntime(&settings));
+    TEST_ASSERT_EQUAL(0, g_routeStubDalyRs485BmsStartCount);
+    TEST_ASSERT_EQUAL(1, g_routeStubDalyCanBmsStartCount);
+    TEST_ASSERT_EQUAL(1, g_routeStubPylonInverterStartCount);
+    TEST_ASSERT_EQUAL(0, g_routeStubPylonBridgeEnableCount);
+    TEST_ASSERT_EQUAL(0, g_routeStubCanForwardStartCount);
+}
+
+void test_route_daly_can_500k_to_can_pylon_starts_can_poller_and_sender(void)
+{
+    bridge_runtime_settings_t settings = {0};
+
+    settings.mode = MODE_BRIDGE;
+    settings.bms_line = LINE_CAN;
+    settings.bms_protocol = PROTOCOL_CAN_DALY_500K;
+    settings.bms_port = 1;
+    settings.inverter_line = LINE_CAN;
+    settings.inverter_protocol = PROTOCOL_CAN_PYLON;
+    settings.inverter_port = 2;
+
+    TEST_ASSERT_EQUAL(ESP_OK, orchestratorStartFromRuntime(&settings));
+    TEST_ASSERT_EQUAL(0, g_routeStubDalyRs485BmsStartCount);
+    TEST_ASSERT_EQUAL(1, g_routeStubDalyCanBmsStartCount);
+    TEST_ASSERT_EQUAL(1, g_routeStubPylonInverterStartCount);
+    TEST_ASSERT_EQUAL(0, g_routeStubPylonBridgeEnableCount);
+    TEST_ASSERT_EQUAL(0, g_routeStubCanForwardStartCount);
+}
+
 void test_route_pylon_rs485_to_can_pylon_starts_probe_and_can_sender(void)
 {
     bridge_runtime_settings_t settings = {0};
@@ -751,7 +813,8 @@ void test_protocol_constants_defined(void)
     TEST_ASSERT_EQUAL_UINT8(20, PROTOCOL_RS485_SEPLOS_19200);
     TEST_ASSERT_EQUAL_UINT8(21, PROTOCOL_RS485_DALY);
     TEST_ASSERT_EQUAL_UINT8(22, PROTOCOL_CAN_DALY);
-    TEST_ASSERT_EQUAL_UINT8(PROTOCOL_CAN_DALY, PROTOCOL_ID_MAX);
+    TEST_ASSERT_EQUAL_UINT8(23, PROTOCOL_CAN_DALY_500K);
+    TEST_ASSERT_EQUAL_UINT8(PROTOCOL_CAN_DALY_500K, PROTOCOL_ID_MAX);
     TEST_ASSERT_EQUAL_UINT32(9600u, bridgeProtocolRs485Baudrate(PROTOCOL_RS485_JKBMS));
     TEST_ASSERT_EQUAL_UINT32(115200u, bridgeProtocolRs485Baudrate(PROTOCOL_RS485_JKBMS_115200));
     TEST_ASSERT_EQUAL_UINT32(9600u, bridgeProtocolRs485Baudrate(PROTOCOL_RS485_PYLON));
@@ -761,10 +824,13 @@ void test_protocol_constants_defined(void)
     TEST_ASSERT_EQUAL_UINT32(9600u, bridgeProtocolRs485Baudrate(PROTOCOL_RS485_DALY));
     TEST_ASSERT_EQUAL_UINT32(250000u, bridgeProtocolCanBitrate(PROTOCOL_CAN_JKBMS_250K));
     TEST_ASSERT_EQUAL_UINT32(250000u, bridgeProtocolCanBitrate(PROTOCOL_CAN_DALY));
+    TEST_ASSERT_EQUAL_UINT32(500000u, bridgeProtocolCanBitrate(PROTOCOL_CAN_DALY_500K));
     TEST_ASSERT_EQUAL_UINT32(500000u, bridgeProtocolCanBitrate(PROTOCOL_CAN_PYLON));
     TEST_ASSERT_TRUE(bridgeProtocolIsRs485JkbmsModbus(PROTOCOL_RS485_JKBMS_115200));
     TEST_ASSERT_TRUE(bridgeProtocolIsRs485Pylon(PROTOCOL_RS485_PYLON_115200));
     TEST_ASSERT_TRUE(bridgeProtocolIsCanJkbms250k(PROTOCOL_CAN_JKBMS_250K));
+    TEST_ASSERT_TRUE(bridgeProtocolIsCanDaly(PROTOCOL_CAN_DALY));
+    TEST_ASSERT_TRUE(bridgeProtocolIsCanDaly(PROTOCOL_CAN_DALY_500K));
 }
 
 /**
@@ -831,6 +897,8 @@ int main(void)
     RUN_TEST(test_route_seplos_rs485_to_rs485_pylon_starts_responder);
     RUN_TEST(test_route_seplos_19200_to_rs485_pylon_115200_starts_responder);
     RUN_TEST(test_route_daly_rs485_to_can_pylon_starts_can_sender);
+    RUN_TEST(test_route_daly_can_to_can_pylon_starts_can_poller_and_sender);
+    RUN_TEST(test_route_daly_can_500k_to_can_pylon_starts_can_poller_and_sender);
     RUN_TEST(test_route_pylon_rs485_to_can_pylon_starts_probe_and_can_sender);
     RUN_TEST(test_route_can_pylon_to_can_pylon_starts_direct_forward);
     RUN_TEST(test_route_jkbms_native_to_rs485_pylon_valid);

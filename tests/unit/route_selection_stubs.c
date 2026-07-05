@@ -217,9 +217,11 @@ bool dalyRs485BmsTaskGetLatestSnapshot(daly_rs485_snapshot_t *outSnapshot)
     return false;
 }
 
-esp_err_t dalyCanBmsTaskStart(QueueHandle_t outQueue)
+esp_err_t dalyCanBmsTaskStart(QueueHandle_t outQueue,
+                              const bridge_runtime_settings_t *settings)
 {
     (void)outQueue;
+    (void)settings;
     g_routeStubDalyCanBmsStartCount++;
     return ESP_OK;
 }
@@ -327,7 +329,7 @@ bool pylonRs485BridgeSupportsRoute(const bridge_runtime_settings_t *settings)
              (settings->bms_protocol == PROTOCOL_CAN_GOODWE) ||
              (settings->bms_protocol == PROTOCOL_CAN_VICTRON) ||
              (settings->bms_protocol == PROTOCOL_CAN_DEYE) ||
-             (settings->bms_protocol == PROTOCOL_CAN_DALY) ||
+             bridgeProtocolIsCanDaly(settings->bms_protocol) ||
              (settings->bms_protocol == PROTOCOL_CAN_JKBMS_250K)) &&
             bridgeProtocolIsRs485Pylon(settings->inverter_protocol));
 }

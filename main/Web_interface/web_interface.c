@@ -109,6 +109,7 @@ static const char *protocolToStr(int protocol)
         case PROTOCOL_CAN_VICTRON: return "CAN_VICTRON";
         case PROTOCOL_CAN_JKBMS_250K: return "JKBMS_CAN_250K";
         case PROTOCOL_CAN_DALY: return "DALY_CAN";
+        case PROTOCOL_CAN_DALY_500K: return "DALY_CAN_500K";
         case PROTOCOL_RS485_JKBMS: return "JKBMS_MODBUS";
         case PROTOCOL_RS485_JKBMS_115200: return "JKBMS_MODBUS_115200";
         case PROTOCOL_RS485_PACE: return "PACE_RS485_MODBUS";
@@ -534,7 +535,7 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "function sel(id,val,opts){return '<select id=\"'+id+'\">'+opts.map(o=>'<option value=\"'+o.value+'\"'+(String(o.value)===String(val)?' selected':'')+'>'+o.label+'</option>').join('')+'</select>';}"
         "const modeOpts=[{value:1,label:'sniffer'},{value:2,label:'forward'},{value:3,label:'bridge'}];"
         "const lineOpts=[{value:1,label:'CAN'},{value:2,label:'RS485'}];"
-        "const bmsCanProtoOpts=[{value:22,label:'DALY_CAN (Native Poller, 250K)'},{value:18,label:'JK BMS CAN Protocol (250K) V2.0'},{value:1,label:'CAN_GROWATT (CAN BMS)'},{value:4,label:'CAN_PYLON'},{value:5,label:'CAN_DEYE'},{value:7,label:'CAN_GOODWE'},{value:8,label:'CAN_SOFAR'},{value:9,label:'CAN_SMA'},{value:10,label:'CAN_VICTRON'}];"
+        "const bmsCanProtoOpts=[{value:22,label:'DALY_CAN (Native Poller, 250K)'},{value:23,label:'DALY_CAN_500K (Native Poller, 500K)'},{value:18,label:'JK BMS CAN Protocol (250K) V2.0'},{value:1,label:'CAN_GROWATT (CAN BMS)'},{value:4,label:'CAN_PYLON'},{value:5,label:'CAN_DEYE'},{value:7,label:'CAN_GOODWE'},{value:8,label:'CAN_SOFAR'},{value:9,label:'CAN_SMA'},{value:10,label:'CAN_VICTRON'}];"
         "const bmsRsProtoOpts=[{value:2,label:'RS485_GROWATT (Modbus Poller)'},{value:6,label:'JKBMS_MODBUS (RS485 Poller, 9600)'},{value:16,label:'JKBMS_MODBUS (RS485 Poller, 115200)'},{value:12,label:'JKBMS_RS485_NATIVE (Native Poller)'},{value:21,label:'DALY_RS485 (Native Poller, 9600)'},{value:19,label:'SEPLOS_RS485 (Native Poller, 9600)'},{value:20,label:'SEPLOS_RS485 (Native Poller, 19200)'},{value:11,label:'PACE_RS485_MODBUS_V1.3 (Modbus Poller)'},{value:13,label:'VOLTRONIC_MODBUS'},{value:14,label:'CHINA_TOWER_MODBUS / JK 008 (RS485 Poller)'},{value:15,label:'WOW_MODBUS / JK 009 (RS485 Poller)'},{value:3,label:'RS485_PYLON (9600)'},{value:17,label:'RS485_PYLON (115200)'}];"
         "const invCanProtoOpts=[{value:1,label:'CAN_GROWATT'},{value:4,label:'CAN_PYLON'},{value:5,label:'CAN_DEYE'},{value:7,label:'CAN_GOODWE'},{value:8,label:'CAN_SOFAR'},{value:9,label:'CAN_SMA'},{value:10,label:'CAN_VICTRON'}];"
         "const invRsProtoOpts=[{value:2,label:'RS485_GROWATT'},{value:3,label:'RS485_PYLON (9600)'},{value:17,label:'RS485_PYLON (115200)'}];"
@@ -594,10 +595,12 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "else if(bl===2&&bp===2){txt='Testing RS485_GROWATT poller on RS485_'+bport+'.';}"
         "else if(bl===1&&bp===1&&il===2&&ip===2){txt='Special route active: CAN_GROWATT -> RS485_GROWATT translator.';}"
         "else if(bl===1&&bp===1&&il===2&&(ip===3||ip===17)){txt='Special route active: CAN_GROWATT -> '+protoLabel(ip)+' responder.';}"
+        "else if(bl===1&&bp===1&&il===1&&ip===1&&bport!==iport){txt='Route: CAN_GROWATT direct pass-through (CAN_'+bport+' <-> CAN_'+iport+').';}"
         "else if(bl===1&&bp===4&&il===2&&ip===2){txt='Special route active: CAN_PYLON -> RS485_GROWATT translator.';}"
         "else if(bl===1&&bp===4&&il===2&&(ip===3||ip===17)){txt='Special route active: CAN_PYLON -> '+protoLabel(ip)+' translator.';}"
-        "else if(bl===1&&bp===22&&il===2&&(ip===3||ip===17)){txt='Special route active: DALY_CAN (CAN_'+bport+') -> '+protoLabel(ip)+' responder (RS485_'+iport+').';}"
-        "else if(bl===1&&bp===22){txt='Testing DALY_CAN native poller on CAN_'+bport+'.';}"
+        "else if(bl===1&&(bp===22||bp===23)&&il===2&&(ip===3||ip===17)){txt='Special route active: '+protoLabel(bp)+' (CAN_'+bport+') -> '+protoLabel(ip)+' responder (RS485_'+iport+').';}"
+        "else if(bl===1&&(bp===22||bp===23)&&il===1&&ip===4&&bport!==iport){txt='Special route active: '+protoLabel(bp)+' (CAN_'+bport+') -> CAN_PYLON sender (CAN_'+iport+', 500k).';}"
+        "else if(bl===1&&(bp===22||bp===23)){txt='Testing '+protoLabel(bp)+' on CAN_'+bport+'.';}"
         "else if(bl===1&&bp===18&&il===2&&ip===2){txt='Special route active: JK BMS CAN 250K -> RS485_GROWATT translator.';}"
         "else if(bl===1&&bp===18&&il===2&&(ip===3||ip===17)){txt='Special route active: JK BMS CAN 250K -> '+protoLabel(ip)+' responder.';}"
         "else if(bl===1&&bp===18){txt='Testing JK BMS CAN 250K V2.0 on CAN_'+bport+'.';}"

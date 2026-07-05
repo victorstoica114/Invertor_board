@@ -163,8 +163,8 @@ static esp_err_t startBmsTask(protocol_id_t protocol, QueueHandle_t outQueue)
             return seplosRs485BmsTaskStart(outQueue);
         case PROTOCOL_ID_DALY: {
             bridge_runtime_settings_t settings = runtimeSettingsGet();
-            if (settings.bms_line == LINE_CAN && settings.bms_protocol == PROTOCOL_CAN_DALY) {
-                return dalyCanBmsTaskStart(outQueue);
+            if (settings.bms_line == LINE_CAN && bridgeProtocolIsCanDaly(settings.bms_protocol)) {
+                return dalyCanBmsTaskStart(outQueue, &settings);
             }
             return dalyRs485BmsTaskStart(outQueue);
         }
@@ -216,6 +216,7 @@ static protocol_id_t protocolIdFromUiProtocol(uint8_t protocol)
         case PROTOCOL_RS485_SEPLOS_19200:
             return PROTOCOL_ID_SEPLOS;
         case PROTOCOL_CAN_DALY:
+        case PROTOCOL_CAN_DALY_500K:
         case PROTOCOL_RS485_DALY:
             return PROTOCOL_ID_DALY;
         default:
@@ -514,8 +515,22 @@ static bool isCanDalyToRsPylonRoute(const bridge_runtime_settings_t *settings)
 
     return (settings->bms_line == LINE_CAN) &&
            (settings->inverter_line == LINE_RS485) &&
-           (settings->bms_protocol == PROTOCOL_CAN_DALY) &&
+           bridgeProtocolIsCanDaly(settings->bms_protocol) &&
            bridgeProtocolIsRs485Pylon(settings->inverter_protocol);
+}
+
+static bool isCanDalyToCanPylonRoute(const bridge_runtime_settings_t *settings)
+{
+    if (settings == NULL) {
+        return false;
+    }
+
+    return (settings->mode == MODE_BRIDGE) &&
+           (settings->bms_line == LINE_CAN) &&
+           (settings->inverter_line == LINE_CAN) &&
+           (settings->bms_port != settings->inverter_port) &&
+           bridgeProtocolIsCanDaly(settings->bms_protocol) &&
+           (settings->inverter_protocol == PROTOCOL_CAN_PYLON);
 }
 
 static bool isCanDirectPassthroughRoute(const bridge_runtime_settings_t *settings)
@@ -691,10 +706,11 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
     const bool rsSeplosToRsPylon = isRsSeplosToRsPylonRoute(settings);
     const bool rsDalyToRsPylon = isRsDalyToRsPylonRoute(settings);
     const bool canDalyToRsPylon = isCanDalyToRsPylonRoute(settings);
+    const bool canDalyToCanPylon = isCanDalyToCanPylonRoute(settings);
     const bool canDirectPassthrough = isCanDirectPassthroughRoute(settings);
     const bool pylonRs485Route = pylonRs485BridgeSupportsRoute(settings);
     ESP_LOGI(EXAMPLE_TAG,
-             "Orchestrator runtime start: bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) canToRsGrowatt=%s rsJkbmsToRsGrowatt=%s rsWowToRsGrowatt=%s rsGrowattToRsGrowatt=%s rsPylonToRsGrowatt=%s rsPylonToCanGrowatt=%s rsJkbmsToCanGrowatt=%s rsJkbmsToRsPylon=%s rsGrowattToRsPylon=%s rsPaceToRsPylon=%s rsVoltronicToRsPylon=%s rsChinaTowerToRsPylon=%s rsWowToRsPylon=%s rsSeplosToRsPylon=%s rsDalyToRsPylon=%s canDalyToRsPylon=%s canDirect=%s pylonRs485=%s",
+             "Orchestrator runtime start: bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) canToRsGrowatt=%s rsJkbmsToRsGrowatt=%s rsWowToRsGrowatt=%s rsGrowattToRsGrowatt=%s rsPylonToRsGrowatt=%s rsPylonToCanGrowatt=%s rsJkbmsToCanGrowatt=%s rsJkbmsToRsPylon=%s rsGrowattToRsPylon=%s rsPaceToRsPylon=%s rsVoltronicToRsPylon=%s rsChinaTowerToRsPylon=%s rsWowToRsPylon=%s rsSeplosToRsPylon=%s rsDalyToRsPylon=%s canDalyToRsPylon=%s canDalyToCanPylon=%s canDirect=%s pylonRs485=%s",
              (unsigned)settings->bms_line,
              (unsigned)settings->bms_protocol,
              (unsigned)settings->bms_port,
@@ -717,6 +733,7 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
              rsSeplosToRsPylon ? "YES" : "NO",
              rsDalyToRsPylon ? "YES" : "NO",
              canDalyToRsPylon ? "YES" : "NO",
+             canDalyToCanPylon ? "YES" : "NO",
              canDirectPassthrough ? "YES" : "NO",
              pylonRs485Route ? "YES" : "NO");
 
@@ -1324,7 +1341,7 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
             return ESP_ERR_NO_MEM;
         }
 
-        esp_err_t err = dalyCanBmsTaskStart(g_orchestratorCtx.bmsQueue);
+        esp_err_t err = dalyCanBmsTaskStart(g_orchestratorCtx.bmsQueue, settings);
         if (err != ESP_OK) {
             ESP_LOGW(EXAMPLE_TAG,
                      "Daly CAN BMS task failed for CAN->RS485 Pylon route (err=0x%x)",
@@ -1339,6 +1356,71 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
                  "Orchestrator started Daly CAN->RS485 Pylon route: BMS(CAN%u) -> Inverter(%s:%u)",
                  (unsigned)settings->bms_port,
                  rsNameByPort(settings->inverter_port),
+                 (unsigned)settings->inverter_port);
+        return ESP_OK;
+    }
+
+    if (canDalyToCanPylon) {
+        if (g_orchestratorTaskHandle != NULL || g_orchestratorCtx.canRs485TranslatorActive) {
+            ESP_LOGW(EXAMPLE_TAG, "Orchestrator already running");
+            return ESP_ERR_INVALID_STATE;
+        }
+
+        memset(&g_orchestratorCtx, 0, sizeof(g_orchestratorCtx));
+        g_orchestratorCtx.bmsProtocol = PROTOCOL_ID_DALY;
+        g_orchestratorCtx.inverterProtocol = PROTOCOL_ID_PYLON;
+
+        g_orchestratorCtx.bmsQueue =
+            xQueueCreate(ORCHESTRATOR_BMS_QUEUE_LEN, sizeof(bms_decoded_packet_t));
+        if (g_orchestratorCtx.bmsQueue == NULL) {
+            orchestratorReset(&g_orchestratorCtx);
+            return ESP_ERR_NO_MEM;
+        }
+
+        g_orchestratorCtx.inverterQueue =
+            xQueueCreate(ORCHESTRATOR_INVERTER_QUEUE_LEN, sizeof(bms_decoded_packet_t));
+        if (g_orchestratorCtx.inverterQueue == NULL) {
+            orchestratorReset(&g_orchestratorCtx);
+            return ESP_ERR_NO_MEM;
+        }
+
+        esp_err_t err = dalyCanBmsTaskStart(g_orchestratorCtx.bmsQueue, settings);
+        if (err != ESP_OK) {
+            ESP_LOGW(EXAMPLE_TAG,
+                     "Daly CAN BMS task failed for CAN->CAN Pylon route (err=0x%x)",
+                     (unsigned)err);
+            orchestratorReset(&g_orchestratorCtx);
+            return err;
+        }
+
+        err = pylonInverterTaskStart(g_orchestratorCtx.inverterQueue);
+        if (err != ESP_OK) {
+            ESP_LOGW(EXAMPLE_TAG,
+                     "Pylon CAN inverter task failed for Daly CAN->CAN Pylon route (err=0x%x)",
+                     (unsigned)err);
+            (void)dalyCanBmsTaskStop();
+            orchestratorReset(&g_orchestratorCtx);
+            return err;
+        }
+
+        BaseType_t ok = xTaskCreate(orchestratorTask,
+                                    "orchestrator",
+                                    ORCHESTRATOR_TASK_STACK,
+                                    &g_orchestratorCtx,
+                                    ORCHESTRATOR_TASK_PRIORITY,
+                                    &g_orchestratorTaskHandle);
+        if (ok != pdPASS) {
+            ESP_LOGE(EXAMPLE_TAG, "Failed to create Daly CAN->CAN Pylon orchestrator task");
+            (void)pylonInverterTaskStop();
+            (void)dalyCanBmsTaskStop();
+            orchestratorReset(&g_orchestratorCtx);
+            return ESP_ERR_NO_MEM;
+        }
+
+        ESP_LOGI(EXAMPLE_TAG,
+                 "Orchestrator started Daly CAN->CAN Pylon route: BMS(CAN%u, %lu bps) -> Inverter(CAN%u, 500k)",
+                 (unsigned)settings->bms_port,
+                 (unsigned long)bridgeProtocolCanBitrate(settings->bms_protocol),
                  (unsigned)settings->inverter_port);
         return ESP_OK;
     }
