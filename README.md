@@ -665,6 +665,36 @@ Shared data structures:
 - `bridgeTelemetrySnapshot_t` in `main/Web_interface/web_bridge_api.h`
 - web-facing telemetry snapshot
 
+## Web Interface
+
+The ESP32 serves a responsive, dependency-free web UI directly from the
+firmware. It is organized into three tabs: `Telemetry`, `Settings`, and `Logs`.
+The page refreshes runtime data through the JSON/text endpoints documented in
+the next section.
+
+The telemetry view summarizes the active source and protocol, pack voltage,
+current and power, SOC/SOH, cycle count, cell extrema and delta, temperatures,
+individual cell voltages, and decoded protections, alarms, and warnings.
+
+![Web UI Telemetry tab with pack, cell, and temperature data](pics/web-ui-telemetry.png)
+
+The settings view selects the runtime mode, BMS/inverter lines and protocols,
+physical ports, Wi-Fi credentials, and web-server port. Its route preview is
+updated before `Apply`; accepted settings are saved in NVS and applied at
+runtime.
+
+![Web UI Settings tab with bridge route selection](pics/web-ui-settings.png)
+
+The logs view exposes the latest protocol-aware decoded snapshot for field
+diagnostics, including frame families, cell values, pack data, limits,
+temperatures, alarms, and protocol status when supplied by the active decoder.
+
+![Web UI Logs tab with decoded Pylon data](pics/web-ui-logs.png)
+
+> **Note:** The Telemetry and Logs screenshots use an injected diagnostic
+> dataset so all UI regions are populated. They demonstrate the interface
+> layout and are not a recording of a live BMS/inverter transaction.
+
 ## Web API
 
 Implemented endpoints:
