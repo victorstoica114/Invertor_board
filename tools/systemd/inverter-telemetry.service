@@ -1,0 +1,18 @@
+[Unit]
+Description=Inverter boards telemetry collector
+After=network-online.target uwb-hotspot.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/pi/Documents/Inverter_Board
+ExecStart=/usr/bin/python3 /home/pi/Documents/Inverter_Board/tools/telemetry_collector.py
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+UMask=0077
+StandardOutput=append:/home/pi/Documents/Inverter_Board/data/telemetry_collector.log
+StandardError=append:/home/pi/Documents/Inverter_Board/data/telemetry_collector.log
+
+[Install]
+WantedBy=default.target

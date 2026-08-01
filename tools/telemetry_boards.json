@@ -1,0 +1,18 @@
+{
+  "interval_seconds": 30,
+  "request_timeout_seconds": 5,
+  "lease_file": "/var/lib/uwb-hotspot/dnsmasq.leases",
+  "database": "data/telemetry.sqlite3",
+  "boards": [
+    {
+      "id": "inverter-board-1",
+      "hostname": "inverter-board-1",
+      "mac": "58:8c:81:3a:d6:90"
+    },
+    {
+      "id": "inverter-board-2",
+      "hostname": "inverter-board-2",
+      "mac": "58:8c:81:5d:1b:94"
+    }
+  ]
+}
