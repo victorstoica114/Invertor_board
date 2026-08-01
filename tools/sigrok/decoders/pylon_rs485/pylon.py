@@ -4,7 +4,7 @@
 ## Kept dependency-free so the parser can be unit-tested without PulseView.
 ##
 
-VERSION = 'v2026.07.04a'
+VERSION = 'v2026.08.01a'
 
 REQUEST_NAMES = {
     0x61: 'analog/telemetry',
@@ -230,7 +230,7 @@ def describe_61(frame):
 
     return {
         'pack_v': be16(info, 0) / 1000.0,
-        'current_a': be16s(info, 2) / 10.0,
+        'current_a': be16s(info, 2) / 100.0,
         'soc': info[4],
         'cycles': be16(info, 5),
         'soh': info[9],
@@ -379,7 +379,7 @@ def describe_info(frame, requested_cid2=None):
 
     if cid2 == 0x61 and len(info) >= 33:
         decoded = describe_61(frame)
-        return ('0x61 V={:.3f}V I={:.1f}A SOC={}%% SOH={}%% cycles={} '
+        return ('0x61 V={:.3f}V I={:.2f}A SOC={}%% SOH={}%% cycles={} '
                 'cell_max={:.3f}V#{} cell_min={:.3f}V#{} {}').format(
                     decoded['pack_v'], decoded['current_a'],
                     decoded['soc'], decoded['soh'], decoded['cycles'],

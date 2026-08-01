@@ -11,6 +11,7 @@ FUNCTION_NAMES = {
 
 BASE_RUNTIME = 0x1200
 MAX_CELLS = 32
+REGISTER_ADDRESS_STEP = 2
 
 REG_CELL0_MV = 0x1200
 REG_CELL31_MV = 0x123E
@@ -48,23 +49,23 @@ REGISTER_NAMES = {
     REG_MAX_MIN_CELL_IDX: 'max_min_cell_idx',
     REG_TEMP_MOS_DECIC: 'temp_mos_deciC',
     REG_PACK_VOLT_MV_U32: 'pack_voltage_mV_hi',
-    REG_PACK_VOLT_MV_U32 + 1: 'pack_voltage_mV_lo',
+    REG_PACK_VOLT_MV_U32 + REGISTER_ADDRESS_STEP: 'pack_voltage_mV_lo',
     REG_PACK_WATT_MW_U32: 'pack_power_mW_hi',
-    REG_PACK_WATT_MW_U32 + 1: 'pack_power_mW_lo',
+    REG_PACK_WATT_MW_U32 + REGISTER_ADDRESS_STEP: 'pack_power_mW_lo',
     REG_PACK_CURRENT_MA_I32: 'pack_current_mA_hi',
-    REG_PACK_CURRENT_MA_I32 + 1: 'pack_current_mA_lo',
+    REG_PACK_CURRENT_MA_I32 + REGISTER_ADDRESS_STEP: 'pack_current_mA_lo',
     REG_TEMP_BAT1_DECIC: 'temp_bat1_deciC',
     REG_TEMP_BAT2_DECIC: 'temp_bat2_deciC',
     REG_ALARM_STATUS_CANDIDATE_U32: 'alarm_status_candidate_hi',
-    REG_ALARM_STATUS_CANDIDATE_U32 + 1: 'alarm_status_candidate_lo',
+    REG_ALARM_STATUS_CANDIDATE_U32 + REGISTER_ADDRESS_STEP: 'alarm_status_candidate_lo',
     REG_BALANCE_CURRENT_MA_I16: 'balance_current_mA',
     REG_BALANCE_SOC_U8X2: 'balance_soc_u8x2',
     REG_REMAIN_MAH_I32: 'remaining_mAh_hi',
-    REG_REMAIN_MAH_I32 + 1: 'remaining_mAh_lo',
+    REG_REMAIN_MAH_I32 + REGISTER_ADDRESS_STEP: 'remaining_mAh_lo',
     REG_FULL_MAH_U32: 'full_mAh_hi',
-    REG_FULL_MAH_U32 + 1: 'full_mAh_lo',
+    REG_FULL_MAH_U32 + REGISTER_ADDRESS_STEP: 'full_mAh_lo',
     REG_CYCLES_U32: 'cycles_hi',
-    REG_CYCLES_U32 + 1: 'cycles_lo',
+    REG_CYCLES_U32 + REGISTER_ADDRESS_STEP: 'cycles_lo',
     REG_SOH_PRECHARGE_U8X2: 'soh_precharge_u8x2',
 }
 
@@ -147,10 +148,11 @@ def decode_pct_byte_pair(raw, prefer_high=False):
 
 
 def best_u32(values, reg, min_value=0, max_value=0xFFFFFFFF):
-    if reg not in values or reg + 1 not in values:
+    low_reg = reg + REGISTER_ADDRESS_STEP
+    if reg not in values or low_reg not in values:
         return None
     a = values[reg]
-    b = values[reg + 1]
+    b = values[low_reg]
     candidates = (u32_ab(a, b), u32_ab(b, a))
     valid = [value for value in candidates if min_value <= value <= max_value]
     if not valid:
@@ -159,10 +161,11 @@ def best_u32(values, reg, min_value=0, max_value=0xFFFFFFFF):
 
 
 def best_i32(values, reg, abs_limit=0x7FFFFFFF):
-    if reg not in values or reg + 1 not in values:
+    low_reg = reg + REGISTER_ADDRESS_STEP
+    if reg not in values or low_reg not in values:
         return None
     a = values[reg]
-    b = values[reg + 1]
+    b = values[low_reg]
     candidates = (i32_from_u32(u32_ab(a, b)), i32_from_u32(u32_ab(b, a)))
     valid = [value for value in candidates if -abs_limit <= value <= abs_limit]
     if not valid:
@@ -188,8 +191,7 @@ def decode_soc_from_values(values):
     chosen = None
     for addr, prefer_high, allow_zero in (
         (REG_BALANCE_SOC_U8X2, False, False),
-        (REG_BALANCE_SOC_U8X2 + 1, False, False),
-        (REG_SOH_PRECHARGE_U8X2, True, True),
+        (REG_SOH_PRECHARGE_U8X2, True, False),
     ):
         if addr not in values:
             continue
@@ -262,17 +264,17 @@ def summarize_known_runtime_values(values):
                 parts.append('{}={:.1f}C'.format(label, temp))
 
     if (REG_ALARM_STATUS_CANDIDATE_U32 in values and
-            REG_ALARM_STATUS_CANDIDATE_U32 + 1 in values):
+            REG_ALARM_STATUS_CANDIDATE_U32 + REGISTER_ADDRESS_STEP in values):
         alarm = best_u32(values, REG_ALARM_STATUS_CANDIDATE_U32, 0, 0xFFFFFFFF)
         if alarm is not None:
             parts.append('alarm_candidate=0x{:08X}'.format(alarm))
 
-    if REG_FULL_MAH_U32 in values and REG_FULL_MAH_U32 + 1 in values:
+    if REG_FULL_MAH_U32 in values and REG_FULL_MAH_U32 + REGISTER_ADDRESS_STEP in values:
         full = best_u32(values, REG_FULL_MAH_U32, 0, 500000000)
         if full is not None:
             parts.append('full={:.2f}Ah'.format(full / 1000.0))
 
-    if REG_CYCLES_U32 in values and REG_CYCLES_U32 + 1 in values:
+    if REG_CYCLES_U32 in values and REG_CYCLES_U32 + REGISTER_ADDRESS_STEP in values:
         cycles = best_u32(values, REG_CYCLES_U32, 0, 1000000)
         if cycles is not None:
             parts.append('cycles={}'.format(cycles))
@@ -340,7 +342,7 @@ def describe_register(addr, value, values_by_addr=None):
         combined = best_u32(values, addr, 1000, 200000)
         if combined is not None:
             return 'pack_v={:.3f}V'.format(combined / 1000.0)
-        lo = values.get(addr + 1)
+        lo = values.get(addr + REGISTER_ADDRESS_STEP)
         return 'pack_v raw_hi=0x{:04X} raw_lo={}'.format(
             value, '0x{:04X}'.format(lo) if lo is not None else '-')
     if addr == REG_PACK_CURRENT_MA_I32:
@@ -394,7 +396,7 @@ def parse_response(raw, request, crc, expected_crc, crc_ok):
     regs = []
     start = request.get('start') if request else None
     for idx in range(byte_count // 2):
-        addr = (start + idx) if start is not None else None
+        addr = (start + (idx * REGISTER_ADDRESS_STEP)) if start is not None else None
         regs.append({
             'addr': addr,
             'value': be16(raw, 3 + (idx * 2)),

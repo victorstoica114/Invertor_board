@@ -55,14 +55,10 @@ def test_parse_jkbms_modbus_runtime_poll_request():
 def test_parse_jkbms_modbus_cell_response_with_request_context():
     req = parse_frame(build_request(0x01, 0x03, 0x1200, 0x0010))
     regs = [
-        3571, 0,
-        3572, 0,
-        3570, 0,
-        3573, 0,
-        3571, 0,
-        3572, 0,
-        3571, 0,
-        3570, 0,
+        3571, 3572, 3570, 3573,
+        3571, 3572, 3571, 3570,
+        3571, 3572, 3570, 3571,
+        3572, 3571, 3570, 3571,
     ]
     frame = parse_frame(build_response(0x01, 0x03, regs), req)
     decoded = describe_frame(frame)
@@ -71,38 +67,38 @@ def test_parse_jkbms_modbus_cell_response_with_request_context():
     assert frame["crc_ok"]
     assert frame["start"] == 0x1200
     assert frame["registers"][0]["addr"] == 0x1200
-    assert frame["registers"][-1]["addr"] == 0x120F
-    assert "cells stride2 count=8" in decoded
+    assert frame["registers"][-1]["addr"] == 0x121E
+    assert "cells stride2 count=16" in decoded
     assert "C01=3.571V" in decoded
     assert "C04=3.573V" in decoded
     assert "min=3.570V#3" in decoded
     assert "max=3.573V#4" in decoded
-    assert "regs=0x1200..0x120F" in frame_summary(frame, "RX")
+    assert "regs=0x1200..0x121E" in frame_summary(frame, "RX")
 
 
 def test_parse_jkbms_modbus_pack_status_response():
     req = parse_frame(build_request(0x01, 0x03, 0x128A, 0x0028))
     regs = [0] * 40
     regs[0] = 306       # 0x128A MOS temp, deci-C
-    regs[6] = 0         # 0x1290 pack voltage high word
-    regs[7] = 57150     # 0x1291 pack voltage low word, mV
-    regs[14] = 0        # 0x1298 pack current high word
-    regs[15] = 0        # 0x1299 pack current low word, mA
-    regs[18] = 309      # 0x129C battery temp 1, deci-C
-    regs[20] = 304      # 0x129E battery temp 2, deci-C
-    regs[28] = 0x0064   # 0x12A6 balance/SOC byte pair
-    regs[34] = 0x0004   # 0x12AC full capacity high word
-    regs[35] = 0x5CC0   # 0x12AD full capacity low word: 285.888 Ah
-    regs[38] = 0        # 0x12B0 cycles high word
-    regs[39] = 40       # 0x12B1 cycles low word
+    regs[3] = 0         # 0x1290 pack voltage high word
+    regs[4] = 57150     # 0x1292 pack voltage low word, mV
+    regs[7] = 0xFFFF    # 0x1298 pack current high word
+    regs[8] = 0xFB3E    # 0x129A pack current low word: -1218 mA
+    regs[9] = 309       # 0x129C battery temp 1, deci-C
+    regs[10] = 304      # 0x129E battery temp 2, deci-C
+    regs[14] = 0x0064   # 0x12A6 balance/SOC byte pair
+    regs[17] = 0x0004   # 0x12AC full capacity high word
+    regs[18] = 0x5CC0   # 0x12AE full capacity low word: 285.888 Ah
+    regs[19] = 0        # 0x12B0 cycles high word
+    regs[20] = 40       # 0x12B2 cycles low word
 
     frame = parse_frame(build_response(0x01, 0x03, regs), req)
     decoded = describe_frame(frame)
 
     assert frame["type"] == "response"
-    assert frame["registers"][6]["addr"] == 0x1290
+    assert frame["registers"][3]["addr"] == 0x1290
     assert "pack_v=57.150V" in decoded
-    assert "pack_i=+0.000A" in decoded
+    assert "pack_i=-1.218A" in decoded
     assert "SOC=100%" in decoded
     assert "MOS=30.6C" in decoded
     values = {reg["addr"]: reg["value"] for reg in frame["registers"]}
@@ -154,8 +150,8 @@ def test_sigrok_jkbms_modbus_decoder_tracks_request_and_response(monkeypatch):
 
     req = build_request(0x01, 0x03, 0x1200, 0x0010)
     rsp = build_response(0x01, 0x03, [
-        3571, 0, 3572, 0, 3570, 0, 3573, 0,
-        3571, 0, 3572, 0, 3571, 0, 3570, 0,
+        3571, 3572, 3570, 3573, 3571, 3572, 3571, 3570,
+        3571, 3572, 3570, 3571, 3572, 3571, 3570, 3571,
     ])
     stream = req + rsp
     for idx, byte in enumerate(stream):
@@ -164,8 +160,8 @@ def test_sigrok_jkbms_modbus_decoder_tracks_request_and_response(monkeypatch):
     texts = [item[3][1][0] for item in decoder.captured if item[2] == stub_sigrokdecode.OUTPUT_ANN]
 
     assert any("JKBMS Modbus req slave=0x01" in text for text in texts)
-    assert any("JKBMS Modbus rsp slave=0x01" in text and "regs=0x1200..0x120F" in text for text in texts)
-    assert any("cells stride2 count=8" in text for text in texts)
+    assert any("JKBMS Modbus rsp slave=0x01" in text and "regs=0x1200..0x121E" in text for text in texts)
+    assert any("cells stride2 count=16" in text for text in texts)
 
 
 def test_sigrok_jkbms_modbus_decoder_ignores_short_idle_fragments(monkeypatch):
@@ -214,22 +210,22 @@ def test_parse_jkbms_modbus_live_compact_cell_block():
     decoded = describe_frame(frame)
 
     assert frame["registers"][0]["addr"] == 0x1210
-    assert "cells compact count=16" in decoded
-    assert "C17=3.570V" in decoded
-    assert "C18=3.569V" in decoded
-    assert "C22=3.571V" in decoded
-    assert "min=3.569V#18" in decoded
-    assert "max=3.571V#22" in decoded
+    assert "cells stride2 count=16" in decoded
+    assert "C09=3.570V" in decoded
+    assert "C10=3.569V" in decoded
+    assert "C14=3.571V" in decoded
+    assert "min=3.569V#10" in decoded
+    assert "max=3.571V#14" in decoded
 
 
 def test_jkbms_modbus_runtime_summary_avoids_false_pack_power():
     req = parse_frame(build_request(0x01, 0x03, 0x128A, 0x0028))
     regs = [0] * 40
-    regs[10] = 0x0008   # 0x1294 high word can combine into a plausible but false power
-    regs[11] = 0x00D4   # 524.5 W if interpreted without context
-    regs[14] = 0x0000   # 0x1298 current high
-    regs[15] = 0x0063   # 0x1299 current low: 99 mA, near idle
-    regs[28] = 0x0000   # 0x12A6 secondary balance/SOC word can be a zero placeholder
+    regs[5] = 0x0008    # 0x1294 high word can combine into a plausible but false power
+    regs[6] = 0x00D4    # 0x1296 low word: 524.5 W if interpreted without context
+    regs[7] = 0x0000    # 0x1298 current high
+    regs[8] = 0x0063    # 0x129A current low: 99 mA, near idle
+    regs[14] = 0x0000   # 0x12A6 balance/SOC word can be a zero placeholder
 
     frame = parse_frame(build_response(0x01, 0x03, regs), req)
     decoded = describe_frame(frame)
@@ -243,12 +239,12 @@ def test_jkbms_modbus_runtime_summary_avoids_false_pack_power():
 def test_jkbms_modbus_runtime_summary_does_not_invent_pack_power():
     req = parse_frame(build_request(0x01, 0x03, 0x128A, 0x0028))
     regs = [0] * 40
-    regs[6] = 0x0000
-    regs[7] = 57121      # 0x1290..0x1291 pack voltage, mV
-    regs[10] = 0x0008
-    regs[11] = 0x00D4    # 0x1294..0x1295 looks like false 524.5 W
-    regs[14] = 0x0000
-    regs[15] = 0x0063    # 0x1298..0x1299 pack current, mA
+    regs[3] = 0x0000
+    regs[4] = 57121      # 0x1290 / 0x1292 pack voltage, mV
+    regs[5] = 0x0008
+    regs[6] = 0x00D4     # 0x1294 / 0x1296 looks like false 524.5 W
+    regs[7] = 0x0000
+    regs[8] = 0x0063     # 0x1298 / 0x129A pack current, mA
 
     frame = parse_frame(build_response(0x01, 0x03, regs), req)
     decoded = describe_frame(frame)
@@ -262,9 +258,9 @@ def test_jkbms_modbus_runtime_summary_does_not_invent_pack_power():
 def test_jkbms_modbus_register_rows_keep_suspect_power_and_balance_as_candidates():
     values = {
         0x1294: 0x0008,
-        0x1295: 0x00D4,
+        0x1296: 0x00D4,
         0x12A0: 0x2343,
-        0x12A1: 0x6400,
+        0x12A2: 0x6400,
     }
 
     assert describe_register(0x1294, values[0x1294], values) == "pack_p_candidate=+524.5W"
@@ -275,8 +271,8 @@ def test_jkbms_modbus_register_rows_keep_suspect_power_and_balance_as_candidates
 def test_jkbms_modbus_runtime_summary_marks_alarm_status_as_candidate():
     req = parse_frame(build_request(0x01, 0x03, 0x128A, 0x0028))
     regs = [0] * 40
-    regs[22] = 0x2343   # 0x12A0, live no-alarm candidate observed on JK Modbus
-    regs[23] = 0x6400   # 0x12A1
+    regs[11] = 0x2343   # 0x12A0, live no-alarm candidate observed on JK Modbus
+    regs[12] = 0x6400   # 0x12A2
 
     frame = parse_frame(build_response(0x01, 0x03, regs), req)
     decoded = describe_frame(frame)
@@ -304,4 +300,4 @@ def test_jkbms_modbus_does_not_promote_impossible_compact_cell_indexes():
 
     assert "C54" not in decoded
     assert "C59" not in decoded
-    assert "regs 0x1230..0x123F" in decoded
+    assert "C30=3.574V" in decoded

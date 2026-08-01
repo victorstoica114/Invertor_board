@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stddef.h>
+#include <stdbool.h>
 #include <stdint.h>
 
 typedef struct {
@@ -97,3 +98,10 @@ typedef struct {
 
 extern const jkbms_modbus_poll_block_t g_jkbmsModbusPollBlocks[];
 extern const size_t g_jkbmsModbusPollBlocksCount;
+
+/*
+ * JK documents runtime addresses as byte offsets even though each Modbus
+ * response item is a 16-bit word. The generic cache stores response items at
+ * start + word_index, so translate a documented runtime address before lookup.
+ */
+bool jkbmsModbusRuntimeCacheAddress(uint16_t protocolAddress, uint16_t *cacheAddressOut);

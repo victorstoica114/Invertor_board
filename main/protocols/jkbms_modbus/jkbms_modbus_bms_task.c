@@ -184,10 +184,21 @@ static bool decoderGetU16(const modbusDecoder_t *decoder, uint16_t reg, uint16_t
     return modbusDecoderGetCachedReg(decoder, reg, out);
 }
 
-static bool decoderGetI16(const modbusDecoder_t *decoder, uint16_t reg, int16_t *out)
+static bool decoderGetRuntimeU16(const modbusDecoder_t *decoder, uint16_t reg, uint16_t *out)
 {
-    uint16_t raw = 0;
-    if (!modbusDecoderGetCachedReg(decoder, reg, &raw)) {
+    uint16_t cacheAddress = 0u;
+
+    if (!jkbmsModbusRuntimeCacheAddress(reg, &cacheAddress)) {
+        return false;
+    }
+
+    return decoderGetU16(decoder, cacheAddress, out);
+}
+
+static bool decoderGetRuntimeI16(const modbusDecoder_t *decoder, uint16_t reg, int16_t *out)
+{
+    uint16_t raw = 0u;
+    if (!decoderGetRuntimeU16(decoder, reg, &raw)) {
         return false;
     }
 
@@ -197,14 +208,14 @@ static bool decoderGetI16(const modbusDecoder_t *decoder, uint16_t reg, int16_t 
     return true;
 }
 
-static bool decoderGetU32(const modbusDecoder_t *decoder, uint16_t reg, uint32_t *out)
+static bool decoderGetRuntimeU32(const modbusDecoder_t *decoder, uint16_t reg, uint32_t *out)
 {
     uint16_t hi = 0;
     uint16_t lo = 0;
-    if (!modbusDecoderGetCachedReg(decoder, reg, &hi)) {
+    if (!decoderGetRuntimeU16(decoder, reg, &hi)) {
         return false;
     }
-    if (!modbusDecoderGetCachedReg(decoder, (uint16_t)(reg + 1u), &lo)) {
+    if (!decoderGetRuntimeU16(decoder, (uint16_t)(reg + 2u), &lo)) {
         return false;
     }
 
@@ -636,7 +647,8 @@ static bool decodeU32Best(const modbusDecoder_t *decoder,
 {
     uint16_t a = 0u;
     uint16_t b = 0u;
-    if (!decoderGetU16(decoder, reg, &a) || !decoderGetU16(decoder, (uint16_t)(reg + 1u), &b)) {
+    if (!decoderGetRuntimeU16(decoder, reg, &a) ||
+        !decoderGetRuntimeU16(decoder, (uint16_t)(reg + 2u), &b)) {
         return false;
     }
 
@@ -667,7 +679,8 @@ static bool decodeI32Best(const modbusDecoder_t *decoder,
 {
     uint16_t a = 0u;
     uint16_t b = 0u;
-    if (!decoderGetU16(decoder, reg, &a) || !decoderGetU16(decoder, (uint16_t)(reg + 1u), &b)) {
+    if (!decoderGetRuntimeU16(decoder, reg, &a) ||
+        !decoderGetRuntimeU16(decoder, (uint16_t)(reg + 2u), &b)) {
         return false;
     }
 
@@ -700,17 +713,7 @@ static bool decodeSocPct(const modbusDecoder_t *decoder, uint8_t *socOut)
     bool have = false;
     uint8_t cand = 0u;
 
-    if (decoderGetU16(decoder, JKBMS_RT_REG_BALAN_SOC_U8X2, &raw) &&
-        decodePctBytePair(raw, false, &cand)) {
-        if (cand > 0u) {
-            if (socOut != NULL) {
-                *socOut = cand;
-            }
-            return true;
-        }
-    }
-
-    if (decoderGetU16(decoder, (uint16_t)(JKBMS_RT_REG_BALAN_SOC_U8X2 + 1u), &raw) &&
+    if (decoderGetRuntimeU16(decoder, JKBMS_RT_REG_BALAN_SOC_U8X2, &raw) &&
         decodePctBytePair(raw, false, &cand)) {
         if (cand > 0u) {
             if (socOut != NULL) {
@@ -721,7 +724,7 @@ static bool decodeSocPct(const modbusDecoder_t *decoder, uint8_t *socOut)
     }
 
     /* Some JK firmwares expose SOC in high byte of SOH/PRECHARGE word. */
-    if (decoderGetU16(decoder, JKBMS_RT_REG_SOH_PRECHARGE_U8X2, &raw) &&
+    if (decoderGetRuntimeU16(decoder, JKBMS_RT_REG_SOH_PRECHARGE_U8X2, &raw) &&
         decodePctBytePair(raw, true, &cand)) {
         chosen = cand;
         have = true;
@@ -748,7 +751,7 @@ static bool decodeSohPrecharge(const modbusDecoder_t *decoder,
                                uint8_t *prechargeOut)
 {
     uint16_t raw = 0u;
-    if (!decoderGetU16(decoder, JKBMS_RT_REG_SOH_PRECHARGE_U8X2, &raw)) {
+    if (!decoderGetRuntimeU16(decoder, JKBMS_RT_REG_SOH_PRECHARGE_U8X2, &raw)) {
         return false;
     }
 
@@ -1023,15 +1026,18 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
     }
 
     int16_t i16 = 0;
-    if (decoderGetI16(decoder, JKBMS_RT_REG_TEMP_MOS_DECIC, &i16) && normalizeSignedDeciC(i16, &i16)) {
+    if (decoderGetRuntimeI16(decoder, JKBMS_RT_REG_TEMP_MOS_DECIC, &i16) &&
+        normalizeSignedDeciC(i16, &i16)) {
         out->hasTempMosC = true;
         out->tempMosC = i16;
     }
-    if (decoderGetI16(decoder, JKBMS_RT_REG_TEMP_BAT1_DECIC, &i16) && normalizeSignedDeciC(i16, &i16)) {
+    if (decoderGetRuntimeI16(decoder, JKBMS_RT_REG_TEMP_BAT1_DECIC, &i16) &&
+        normalizeSignedDeciC(i16, &i16)) {
         out->hasTempBat1C = true;
         out->tempBat1C = i16;
     }
-    if (decoderGetI16(decoder, JKBMS_RT_REG_TEMP_BAT2_DECIC, &i16) && normalizeSignedDeciC(i16, &i16)) {
+    if (decoderGetRuntimeI16(decoder, JKBMS_RT_REG_TEMP_BAT2_DECIC, &i16) &&
+        normalizeSignedDeciC(i16, &i16)) {
         out->hasTempBat2C = true;
         out->tempBat2C = i16;
     }
@@ -1042,7 +1048,7 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
         out->packCurrentMa = i32;
     }
 
-    if (decoderGetI16(decoder, JKBMS_RT_REG_BALAN_CURRENT_MA_I16, &i16) &&
+    if (decoderGetRuntimeI16(decoder, JKBMS_RT_REG_BALAN_CURRENT_MA_I16, &i16) &&
         i16 >= -5000 && i16 <= 5000) {
         out->hasBalanceCurrentMa = true;
         out->balanceCurrentMa = i16;
@@ -1072,7 +1078,7 @@ static bool buildDecodedSnapshot(const modbusDecoder_t *decoder, jkbms_modbus_sn
         out->cycles = u32;
     }
 
-    if (decoderGetU32(decoder, JKBMS_RT_REG_ALARM_U32, &u32)) {
+    if (decoderGetRuntimeU32(decoder, JKBMS_RT_REG_ALARM_U32, &u32)) {
         out->hasAlarmCandidateBits = true;
         out->alarmCandidateBits = u32;
         if (jkbmsModbusAlarmBitsAreValidated(u32)) {

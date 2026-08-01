@@ -37,7 +37,7 @@ and `.pyc` files.
 Available PulseView/libsigrokdecode protocol decoders:
 
 - `pylon_rs485`: Pylon-compatible RS485 ASCII frames, stacked above `uart`;
-  current visible name is `Pylon RS485 v2026.07.04a`
+  current visible name is `Pylon RS485 v2026.08.01a`
 - `pylon_can`: Pylon-compatible Classic CAN frames, standalone CAN decoder
 - `growatt_rs485`: Growatt RS485 Modbus RTU frames, stacked above `uart`
 - `china_tower_modbus`: China Tower / JK 008 RS485 Modbus RTU frames,
@@ -63,7 +63,7 @@ Available PulseView/libsigrokdecode protocol decoders:
 - `sofar_can`: Sofar-compatible Classic CAN frames, standalone CAN decoder;
   current visible name is `Sofar CAN v2026.07.04a`
 - `jkbms_modbus`: JK BMS RS485 Modbus poller frames, stacked above `uart`;
-  current visible name is `JKBMS Modbus v2026.07.02b`
+  current visible name is `JKBMS Modbus v2026.08.01a`
 - `jkbms_rs485_native`: JK native binary RS485 frames, stacked above `uart`
 - `jkbms_can`: JK native CAN V2.0 frames, standalone CAN decoder;
   current visible name is `JKBMS CAN v2026.07.03a`
@@ -677,6 +677,10 @@ JK runtime register map used by this firmware:
 - MOS and battery temperatures around `0x128A`
 - pack voltage/current/power, `SOC`, capacity, cycles, `SOH`, and alarm fields
   around `0x1290..0x12B8`
+
+JK runtime addresses are byte offsets, so each returned 16-bit word advances
+the annotated address by `0x0002`. This is especially important for signed
+32-bit pack current at `0x1298 / 0x129A`.
 
 For the currently tested bridge route, decode the BMS side with
 `JKBMS Modbus` at `115200 8N1` and the inverter side with `Growatt RS485` at

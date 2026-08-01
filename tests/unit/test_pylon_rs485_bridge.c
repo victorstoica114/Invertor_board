@@ -401,6 +401,19 @@ void test_pylon_info42_cell_information_updates_all_cell_telemetry(void)
     TEST_ASSERT_TRUE(strstr(g_pylonBridgeLastDecodedLog, "#11=3.570V") != NULL);
 }
 
+void test_pylon_info61_current_uses_10ma_units(void)
+{
+    const char *info61 =
+        "D11AFE98620000000064640D1A00010D070001"
+        "0BBA0BBD00010BB900010BCC0BCC00010BCC00010BBA0BBD00010BB90001";
+
+    configurePylonRs485ToCanRoute();
+
+    TEST_ASSERT_TRUE(pylonRs485BridgeCacheInfoForTest(0x61u, info61));
+    TEST_ASSERT_TRUE(g_pylonBridgeLastTelemetry.valid);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, -3.60f, g_pylonBridgeLastTelemetry.currentA);
+}
+
 void test_pylon_synthetic_can_route_does_not_reuse_stale_rs485_cell_list(void)
 {
     const char *info61 =
@@ -464,8 +477,12 @@ void test_pylon_synthetic_61_native_can_sources_project_pack_voltage_and_current
 
     TEST_ASSERT_TRUE(pylonRs485BridgeBuildSyntheticInfo61ForTest(info61, sizeof(info61)));
     TEST_ASSERT_EQUAL_UINT16(7270u, hexBe16At(info61, 0));
-    TEST_ASSERT_EQUAL_UINT16(123u, hexBe16At(info61, 2));
+    TEST_ASSERT_EQUAL_UINT16(1230u, hexBe16At(info61, 2));
     TEST_ASSERT_EQUAL_UINT8(87u, hexByteAt(info61, 4));
+
+    g_pylonBridgeTestModel.packCurrentA = -3.60f;
+    TEST_ASSERT_TRUE(pylonRs485BridgeBuildSyntheticInfo61ForTest(info61, sizeof(info61)));
+    TEST_ASSERT_EQUAL_UINT16(0xFE98u, hexBe16At(info61, 2));
 }
 
 void test_pylon_synthetic_61_can_source_without_cells_uses_pack_derived_safe_extremes(void)
@@ -637,6 +654,7 @@ int main(void)
     RUN_TEST(test_pylon_cached_responder_builds_supplemental_handshake_payloads);
     RUN_TEST(test_pylon_synthetic_cache_clear_removes_telemetry_when_model_not_fresh);
     RUN_TEST(test_pylon_info42_cell_information_updates_all_cell_telemetry);
+    RUN_TEST(test_pylon_info61_current_uses_10ma_units);
     RUN_TEST(test_pylon_synthetic_can_route_does_not_reuse_stale_rs485_cell_list);
     RUN_TEST(test_pylon_synthetic_61_generic_sources_project_percentages_only);
     RUN_TEST(test_pylon_synthetic_61_native_can_sources_project_pack_voltage_and_current);

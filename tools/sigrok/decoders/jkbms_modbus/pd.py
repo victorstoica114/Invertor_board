@@ -17,7 +17,7 @@ except Exception:
 
 RX = 0
 TX = 1
-DECODER_VERSION = 'v2026.07.02b'
+DECODER_VERSION = 'v2026.08.01a'
 
 
 class Ann:
