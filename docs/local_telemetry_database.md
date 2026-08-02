@@ -73,14 +73,16 @@ sample time, and latest error for each BMS.
 ## Periodic Git snapshots
 
 `tools/telemetry_snapshot_push.py` uses the SQLite Backup API to create a
-consistent copy even while the collector is writing. It publishes only these
-generated files to the orphan `telemetry-data` branch:
+consistent copy even while the collector is writing. The `telemetry-data`
+branch starts from `main`, then keeps periodic database commits separate from
+the firmware branch. It publishes only these generated files under the
+`telemetry-data/` directory:
 
 - `telemetry.sqlite3`
 - `metadata.json`
 - a short branch README and Git attributes
 
-The worktree is kept outside the project at
+The dedicated worktree is kept outside the project at
 `~/.local/share/inverter-telemetry-data`, so the automation never switches the
 firmware checkout away from `main`. The publisher skips a new commit when the
 logical database contents have not changed and refuses files above the safe
@@ -91,6 +93,8 @@ Run one publication manually:
 ```bash
 python3 tools/telemetry_snapshot_push.py
 ```
+
+If the data branch does not exist yet, the publisher creates it from `main`.
 
 The user timer templates are:
 

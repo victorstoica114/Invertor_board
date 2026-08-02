@@ -25,16 +25,18 @@ DEFAULT_LOCK: Final[Path] = (
     Path.home() / ".local" / "state" / "inverter-telemetry-push.lock"
 )
 DEFAULT_BRANCH: Final[str] = "telemetry-data"
+DEFAULT_BASE_BRANCH: Final[str] = "main"
 DEFAULT_REMOTE: Final[str] = "origin"
+DATA_DIRECTORY: Final[str] = "telemetry-data"
 SNAPSHOT_NAME: Final[str] = "telemetry.sqlite3"
 METADATA_NAME: Final[str] = "metadata.json"
 MAX_GITHUB_FILE_BYTES: Final[int] = 95 * 1024 * 1024
 
 README_CONTENT: Final[str] = """# Inverter telemetry data
 
-This orphan branch contains the consistent SQLite snapshot generated on the
-Raspberry Pi. It is intentionally separate from the firmware source history on
-`main`.
+This directory contains the consistent SQLite snapshot generated on the
+Raspberry Pi. The `telemetry-data` branch starts from `main`, while subsequent
+database commits remain isolated on that branch.
 
 - `telemetry.sqlite3`: complete SQLite snapshot created with the SQLite Backup API
 - `metadata.json`: schema version, sample counts, latest source data, size and SHA-256
@@ -84,7 +86,11 @@ def git(repository: Path, *arguments: str, check: bool = True) -> subprocess.Com
 
 
 def ensure_worktree(
-    repository: Path, worktree: Path, branch: str, remote: str
+    repository: Path,
+    worktree: Path,
+    branch: str,
+    base_branch: str,
+    remote: str,
 ) -> None:
     if (worktree / ".git").exists():
         current_branch = git(worktree, "symbolic-ref", "--short", "HEAD").stdout.strip()
@@ -148,13 +154,13 @@ def ensure_worktree(
             repository,
             "worktree",
             "add",
-            "--orphan",
             "-b",
             branch,
             "--lock",
             "--reason",
             "automated telemetry snapshots",
             str(worktree),
+            base_branch,
         )
 
 
@@ -237,7 +243,7 @@ def create_snapshot(source: Path, destination: Path) -> dict[str, Any]:
         {
             "format_version": 1,
             "generated_at_utc": utc_now(),
-            "database_file": SNAPSHOT_NAME,
+            "database_file": f"{DATA_DIRECTORY}/{SNAPSHOT_NAME}",
             "size_bytes": size_bytes,
             "sha256": sha256_file(destination),
         }
@@ -306,33 +312,36 @@ def publish_snapshot(
     source_database: Path,
     worktree: Path,
     branch: str,
+    base_branch: str,
     remote: str,
 ) -> dict[str, Any]:
-    ensure_worktree(repository, worktree, branch, remote)
+    ensure_worktree(repository, worktree, branch, base_branch, remote)
     synchronize_remote(worktree, branch, remote)
 
+    data_directory = worktree / DATA_DIRECTORY
     for temporary_name in (f"{SNAPSHOT_NAME}.next", f"{METADATA_NAME}.tmp"):
-        (worktree / temporary_name).unlink(missing_ok=True)
+        (data_directory / temporary_name).unlink(missing_ok=True)
     dirty = git(worktree, "status", "--porcelain").stdout.strip()
     if dirty:
         raise PublishError(f"snapshot worktree has unexpected changes:\n{dirty}")
 
-    write_text_if_changed(worktree / "README.md", README_CONTENT)
-    write_text_if_changed(worktree / ".gitattributes", GITATTRIBUTES_CONTENT)
-    write_text_if_changed(worktree / ".gitignore", GITIGNORE_CONTENT)
+    data_directory.mkdir(parents=True, exist_ok=True)
+    write_text_if_changed(data_directory / "README.md", README_CONTENT)
+    write_text_if_changed(data_directory / ".gitattributes", GITATTRIBUTES_CONTENT)
+    write_text_if_changed(data_directory / ".gitignore", GITIGNORE_CONTENT)
 
-    next_snapshot = worktree / f"{SNAPSHOT_NAME}.next"
+    next_snapshot = data_directory / f"{SNAPSHOT_NAME}.next"
     metadata = create_snapshot(source_database, next_snapshot)
-    previous_metadata = read_json(worktree / METADATA_NAME)
+    previous_metadata = read_json(data_directory / METADATA_NAME)
     database_changed = (
         previous_metadata is None
         or logical_snapshot_key(previous_metadata) != logical_snapshot_key(metadata)
-        or not (worktree / SNAPSHOT_NAME).is_file()
+        or not (data_directory / SNAPSHOT_NAME).is_file()
     )
     if database_changed:
-        os.replace(next_snapshot, worktree / SNAPSHOT_NAME)
+        os.replace(next_snapshot, data_directory / SNAPSHOT_NAME)
         write_text_if_changed(
-            worktree / METADATA_NAME,
+            data_directory / METADATA_NAME,
             json.dumps(metadata, indent=2, sort_keys=True) + "\n",
         )
     else:
@@ -342,11 +351,7 @@ def publish_snapshot(
         worktree,
         "add",
         "--",
-        "README.md",
-        ".gitattributes",
-        ".gitignore",
-        SNAPSHOT_NAME,
-        METADATA_NAME,
+        DATA_DIRECTORY,
     )
     staged = git(worktree, "diff", "--cached", "--quiet", check=False)
     if staged.returncode not in (0, 1):
@@ -388,6 +393,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--worktree", type=Path, default=DEFAULT_WORKTREE)
     parser.add_argument("--lock-file", type=Path, default=DEFAULT_LOCK)
     parser.add_argument("--branch", default=DEFAULT_BRANCH)
+    parser.add_argument("--base-branch", default=DEFAULT_BASE_BRANCH)
     parser.add_argument("--remote", default=DEFAULT_REMOTE)
     return parser.parse_args()
 
@@ -411,7 +417,12 @@ def main() -> int:
                 print("Another telemetry snapshot publication is already running")
                 return 0
             result = publish_snapshot(
-                repository, database, worktree, args.branch, args.remote
+                repository,
+                database,
+                worktree,
+                args.branch,
+                args.base_branch,
+                args.remote,
             )
     except (OSError, PublishError) as exc:
         print(f"Telemetry snapshot error: {exc}", file=sys.stderr)

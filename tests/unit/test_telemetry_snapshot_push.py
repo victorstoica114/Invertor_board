@@ -58,6 +58,7 @@ def test_consistent_snapshot_preserves_complete_database_and_metadata():
 
         assert metadata["schema_version"] == 2
         assert metadata["sample_count"] == 1
+        assert metadata["database_file"] == "telemetry-data/telemetry.sqlite3"
         assert metadata["sources"] == [
             {
                 "source_id": "inverter-board-1-bms1",
