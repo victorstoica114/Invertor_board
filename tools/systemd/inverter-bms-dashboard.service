@@ -1,5 +1,5 @@
 [Unit]
-Description=Bluetooth BMS monitoring and control dashboard
+Description=BMS and Wi-Fi inverter monitoring and control dashboard
 After=network-online.target bluetooth.target dbus.service
 Wants=network-online.target bluetooth.target
 
@@ -20,6 +20,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=read-only
+ReadWritePaths=/run/user/1000
 
 [Install]
 WantedBy=multi-user.target

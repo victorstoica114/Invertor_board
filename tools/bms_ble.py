@@ -395,12 +395,12 @@ class _SeplosSession:
             return 5
         if function in (0x01, 0x04):
             return 3 + self.buffer[2] + 2 if len(self.buffer) >= 3 else None
-        if function == 0x10:
+        if function in (0x0F, 0x10):
             return 8
         return None
 
     def notification(self, _sender: Any, data: bytearray) -> None:
-        if data and len(data) >= 2 and data[1] & 0x7F in (0x01, 0x04, 0x10):
+        if data and len(data) >= 2 and data[1] & 0x7F in (0x01, 0x04, 0x0F, 0x10):
             self.buffer.clear()
             self.frame_event.clear()
         self.buffer.extend(data)

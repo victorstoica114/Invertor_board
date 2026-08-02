@@ -2,15 +2,16 @@
 
 The Raspberry Pi Bluetooth controller can connect directly to all three BMS
 devices currently used on the bench. `tools/bms_ble.py` provides telemetry and
-protocol inspection, plus guarded protocol writes for the JK and Seplos.
+protocol inspection. `tools/bms_config.py` provides guarded, one-parameter
+configuration writes with an identity check and immediate full read-back.
 
 ## Detected devices
 
 | Alias | BLE name / identity | MAC address | Verified access |
 | --- | --- | --- | --- |
-| `daly` | `DL-Dali Cristi`, HW `FX03_R301_1.2H` | `D0:18:05:01:4B:F9` | identity and full telemetry |
-| `seplos` | `SG16S200A-SP144B-C`, FW `15` | `C0:D6:3C:55:21:C6` | telemetry, identity and verified inverter-protocol read/write |
-| `jk` | `JK_B1A8S20P`, HW `19H`, SW `19.13` | `C8:47:80:45:18:0E` | telemetry, identity and UART/CAN protocol read/write |
+| `daly` | `DL-Dali Cristi`, FW `T00K_106042_21` | `D0:18:05:01:4B:F9` | 42 operating settings and switches |
+| `seplos` | `SG16S200A-SP144B-C`, FW `15` | `C0:D6:3C:55:21:C6` | 164 SPA/SFA settings and inverter profile |
+| `jk` | `JK_B1A8S20P`, HW `19H`, SW `19.13` | `C8:47:80:45:18:0E` | 65 protection, switch, trigger and communication settings |
 
 ## Installation
 
@@ -25,10 +26,9 @@ cp tools/bms_dashboard.env.example /home/pi/.config/inverter-bms-dashboard.env
 chmod 600 /home/pi/.config/inverter-bms-dashboard.env
 ```
 
-The example configuration leaves protocol controls disabled. To enable JK and
-Seplos writes, generate a private token, place it after
-`BMS_DASHBOARD_CONTROL_TOKEN=` in the local environment file, and do not commit
-that populated file.
+The dashboard trusts the local LAN. Telemetry, live configuration reads, and
+guarded write actions do not require an additional dashboard password or token.
+Do not expose port `8765` outside the trusted LAN/VPN.
 
 ## Read-only commands
 
@@ -84,32 +84,90 @@ input. Its bridge output stays `CAN_PYLON`, so Anenji continues receiving Pylon
 CAN while the web telemetry gains the individual cells. The Growatt current
 register is a signed centiamp value.
 
-## Daly write status
+## Guarded BMS configuration
 
-The Daly Bluetooth module uses its Modbus telemetry protocol and responds to all
-read requests. No verified inverter-protocol selector is exposed for this Daly
-firmware, so protocol-changing writes are not offered.
+The **BMS Control** tab covers the verified live maps for the exact three devices:
+
+- Daly D2 Modbus registers `0x0080`–`0x00A8` and balancer switch `0x00CF`;
+- Seplos V3 SPA registers `0x1301`–`0x1367`, meaningful SFA coils in
+  `0x1400`–`0x144F`, and the verified inverter-protocol selector;
+- JK v19 numeric protection/capacity settings, MOSFET and feature switches,
+  dry-contact triggers, UART/CAN selectors, and inverter-request settings.
+
+The interface reads the selected BMS automatically every 30 seconds while the
+tab is visible. Every Apply action shows the live value, asks for confirmation,
+writes one mapped parameter, then reads the complete map again. A mismatched
+identity, an out-of-range value, an unsupported selector, or a failed read-back
+rejects the operation. A JSON backup can be downloaded before making changes.
+
+Raw writes, unknown/reserved registers, factory calibration commands without a
+verified read-back field, and one-shot service/reset commands are deliberately
+not exposed. The Daly firmware has no verified inverter-protocol selector, but
+its operating thresholds and switches are writable through the mapped D2
+registers.
 
 ## Web dashboard
 
-`tools/bms_dashboard.py` exposes the three devices through a responsive LAN web
-interface. A single background loop owns the Bluetooth adapter; browsers only
-read the cached state and therefore do not create competing BLE connections.
+`tools/bms_dashboard.py` exposes the three Bluetooth BMS devices and the Wi-Fi
+inverters through a responsive LAN web interface. A single background loop owns
+the Bluetooth adapter; browsers only read the cached state and therefore do not
+create competing BLE connections. Inverter telemetry is read from the local
+SQLite database populated by `inverter-telemetry.service`, so the dashboard
+does not open a second connection during normal inverter monitoring. The
+separate **BMS Control** and **Inverter Control** tabs open guarded, short-lived
+configuration connections. ESP32 wired acquisition remains the operational BMS
+telemetry path; configuration writes do not alter that collector.
 
 ```sh
 /home/pi/.venvs/inverter-bms-dashboard/bin/python tools/bms_dashboard.py --host 0.0.0.0 --port 8765
 ```
 
-Monitoring endpoints are read-only. JK and Seplos protocol writes require the
-value of `BMS_DASHBOARD_CONTROL_TOKEN` in the `X-Control-Token` request header,
-an exact device confirmation typed in the browser, a permitted protocol, and a
-successful read-back from the BMS.
+Monitoring, live inverter-configuration reads, and writes do not require an
+additional password. The browser supplies the already-read device identity,
+shows an explicit confirmation dialog, restricts values to the verified map,
+and requires a successful read-back from the device.
+
+The inverter control tab reads the selected inverter immediately when opened
+and refreshes it every 30 seconds while the tab remains visible. Polling pauses
+when the tab/page is hidden and while a setting is being edited. The current
+configuration can be downloaded as a JSON backup. It writes only one known setting at a
+time, validates allowed values and dependent battery limits, requires the exact
+inverter serial, and re-reads the entire configuration afterward. Requests are
+serialized with the 30-second collector through a shared file lock. Registers
+whose live values do not match the applicable protocol map are shown read-only;
+arbitrary register or raw-command writes are not exposed.
+
+The inverter-control endpoints are:
+
+- `GET /api/inverters/{inverter_id}/configuration`
+- `POST /api/inverters/{inverter_id}/setting`
+
+The POST body contains `setting`, `value`, and the identity automatically read
+from the selected device. Write attempts and their before/after read-back values
+are recorded in the system journal.
+
+The equivalent BMS-control endpoints are:
+
+- `GET /api/bms/{daly|seplos|jk}/configuration`
+- `POST /api/bms/{daly|seplos|jk}/setting`
+
+The BMS POST body also contains `setting`, `value`, and the identity confirmation
+automatically obtained by the preceding configuration read. BMS BLE operations
+share one lock with the existing Bluetooth loop so two clients cannot write or
+poll the adapter concurrently.
+
+The inverter database and freshness threshold can be overridden with
+`BMS_DASHBOARD_TELEMETRY_DATABASE` and
+`BMS_DASHBOARD_INVERTER_STALE_SECONDS`. The inverter-only JSON endpoint is
+`GET /api/inverters`; the same snapshot is also included in `GET /api/status`.
 
 The service template is `tools/systemd/inverter-bms-dashboard.service`. It uses
 the dedicated virtual environment `/home/pi/.venvs/inverter-bms-dashboard` and
 reads its configuration from `/home/pi/.config/inverter-bms-dashboard.env`.
 It is installed as a system service running with the unprivileged `pi` account
 and is ordered after the Bluetooth and network services at boot.
+The service grants write access only to `/run/user/1000`, which is required for
+the shared inverter-network lock while `ProtectHome=read-only` remains enabled.
 
 Install or update the service after completing the steps above:
 

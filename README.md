@@ -76,12 +76,25 @@ Dual-BMS configuration and current limitations are documented in [docs/dual_bms.
 
 Direct local Bluetooth access for the bench Daly, Seplos, and JK BMS devices is
 documented in [docs/bluetooth_bms.md](docs/bluetooth_bms.md). The accompanying
-tool can read all three devices and safely inspect or change verified JK
-UART/CAN and Seplos inverter protocol selectors.
+tool can read all three devices and safely modify the verified Daly, Seplos and
+JK operating configuration maps one parameter at a time, including JK UART/CAN
+and Seplos inverter protocol selectors.
 
-The same tooling includes a Raspberry Pi web dashboard for LAN monitoring and
-protected JK/Seplos protocol control (`tools/bms_dashboard.py`, default port
-`8765`).
+The same tooling includes a Raspberry Pi web dashboard for LAN monitoring of
+the Bluetooth BMS devices and Wi-Fi inverters, plus a complete **BMS Control**
+tab and a dedicated Anenji/EASUN inverter-control tab
+(`tools/bms_dashboard.py`, default port `8765`). The dashboard trusts its local
+LAN/VPN and does not add a password prompt; changes still use the live device
+identity, strict protocol-map validation, a confirmation dialog, and full
+read-back. The current configuration can be downloaded as JSON first.
+
+The local SQLite collector also polls the Wi-Fi-connected Anenji and EASUN
+inverters every 30 seconds through their Eybond reverse tunnels. It
+stores normalized power telemetry together with all Anenji live registers and
+the raw EASUN `QPIGS`/`QMOD`/`QPIWS`/`QPIGS2` responses. `QPIRI` configuration
+is intentionally excluded from telemetry samples. Configuration,
+configuration-control safeguards, schema, and service commands are documented in
+[`docs/local_telemetry_database.md`](docs/local_telemetry_database.md).
 
 Partially implemented / scaffold:
 

@@ -26,6 +26,17 @@ class TelemetryCollectorTests(unittest.TestCase):
         )
         collector.register_boards(self.connection, [self.board])
         collector.register_sources(self.connection, [self.source])
+        self.inverter = collector.InverterConfig(
+            inverter_id="inverter-easun",
+            name="EASUN",
+            protocol="easun_qpigs",
+            mac="c4:d8:d5:1c:6a:06",
+            ip="192.168.1.185",
+            local_ip="192.168.1.44",
+            local_port=8899,
+            linked_board_id=self.board.board_id,
+        )
+        collector.register_inverters(self.connection, [self.inverter])
 
     def tearDown(self):
         self.connection.close()
@@ -69,6 +80,20 @@ class TelemetryCollectorTests(unittest.TestCase):
                 "inverter-board-1-bms1": "/api/telemetry",
                 "inverter-board-1-bms2": "/api/telemetry2",
                 "inverter-board-2-bms1": "/api/telemetry",
+            },
+        )
+        self.assertEqual(
+            {
+                inverter.inverter_id: (
+                    inverter.protocol,
+                    inverter.ip,
+                    inverter.local_port,
+                )
+                for inverter in config.inverters
+            },
+            {
+                "inverter-anenji": ("anenji_modbus", "192.168.1.18", 8899),
+                "inverter-easun": ("easun_qpigs", "192.168.1.185", 8899),
             },
         )
 
@@ -196,7 +221,77 @@ class TelemetryCollectorTests(unittest.TestCase):
             ],
         )
 
-    def test_v1_database_migration_preserves_samples(self):
+    def test_successful_inverter_sample_keeps_only_live_fields_and_raw_queries(self):
+        payload = {
+            "protocol": "EASUN_VOLTRONIC_QPIGS",
+            "working_mode": "BATTERY",
+            "output_voltage_v": 230.1,
+            "output_power_w": 123,
+            "battery_voltage_v": 26.8,
+            "battery_current_a": -4.5,
+            "pv_voltage_v": 302.4,
+            "battery_voltage_scc_v": 26.9,
+            "device_status_bits": "10101010",
+            "rating_fields": ["configuration", "must", "not", "persist"],
+            "raw": {
+                "responses": {
+                    "QPIGS": "full raw response",
+                    "QPIRI": "configuration response",
+                },
+                "frames_hex": {"QPIGS": "live", "QPIRI": "settings"},
+            },
+            "future_inverter_field": 42,
+        }
+        result = collector.InverterCollectionResult(
+            inverter=self.inverter,
+            payload=payload,
+            sampled_at_utc="2026-08-02T12:00:00.000Z",
+            sampled_at_unix_ms=1_785_645_600_000,
+            error=None,
+        )
+
+        self.assertEqual(
+            collector.store_inverter_results(self.connection, [result]), (1, 0)
+        )
+        row = self.connection.execute(
+            "SELECT * FROM latest_inverter_telemetry WHERE inverter_id = ?",
+            (self.inverter.inverter_id,),
+        ).fetchone()
+        self.assertEqual(row["protocol"], "EASUN_VOLTRONIC_QPIGS")
+        self.assertAlmostEqual(row["output_voltage_v"], 230.1)
+        self.assertEqual(row["output_power_w"], 123)
+        self.assertAlmostEqual(row["battery_current_a"], -4.5)
+        self.assertAlmostEqual(row["battery_voltage_scc_v"], 26.9)
+        self.assertEqual(row["device_status_bits"], "10101010")
+        stored_payload = json.loads(row["payload_json"])
+        self.assertNotIn("future_inverter_field", stored_payload)
+        self.assertNotIn("rating_fields", stored_payload)
+        self.assertEqual(
+            stored_payload["raw"]["responses"]["QPIGS"], "full raw response"
+        )
+        self.assertNotIn("QPIRI", stored_payload["raw"]["responses"])
+        self.assertNotIn("QPIRI", stored_payload["raw"]["frames_hex"])
+
+    def test_two_inverters_can_share_standard_callback_port(self):
+        second = collector.InverterConfig(
+            inverter_id="inverter-anenji",
+            name="Anenji",
+            protocol="anenji_modbus",
+            mac="34:5f:45:48:cf:15",
+            ip="192.168.1.18",
+            local_ip=self.inverter.local_ip,
+            local_port=self.inverter.local_port,
+            linked_board_id=self.board.board_id,
+        )
+
+        collector.register_inverters(self.connection, [second])
+
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM inverters").fetchone()[0],
+            2,
+        )
+
+    def test_v1_to_v4_database_migration_preserves_samples(self):
         connection = sqlite3.connect(":memory:")
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
@@ -229,18 +324,142 @@ class TelemetryCollectorTests(unittest.TestCase):
             """
         )
 
-        collector.migrate_database_v2(connection)
+        collector.migrate_database_v4(connection)
 
         row = connection.execute(
             "SELECT board_id, source_id FROM telemetry_samples"
         ).fetchone()
         self.assertEqual(row["board_id"], "inverter-board-1")
         self.assertEqual(row["source_id"], "inverter-board-1-bms1")
-        self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 2)
+        self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 4)
         self.assertEqual(
             connection.execute("SELECT COUNT(*) FROM latest_telemetry").fetchone()[0],
             1,
         )
+        self.assertIsNotNone(
+            connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='inverter_samples'"
+            ).fetchone()
+        )
+        connection.close()
+
+    def test_v3_to_v4_migration_preserves_inverter_samples_and_shares_port(self):
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.executescript(
+            """
+            PRAGMA user_version = 3;
+            CREATE TABLE boards (board_id TEXT PRIMARY KEY);
+            INSERT INTO boards VALUES ('inverter-board-1');
+            CREATE TABLE inverters (
+                inverter_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                protocol TEXT NOT NULL,
+                mac TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                linked_board_id TEXT,
+                configured_ip TEXT NOT NULL,
+                local_ip TEXT NOT NULL,
+                local_port INTEGER NOT NULL,
+                last_ip TEXT,
+                last_seen_utc TEXT,
+                last_error TEXT,
+                updated_at_utc TEXT NOT NULL,
+                UNIQUE (local_ip, local_port),
+                FOREIGN KEY (linked_board_id) REFERENCES boards(board_id)
+            );
+            CREATE TABLE inverter_samples (
+                id INTEGER PRIMARY KEY,
+                inverter_id TEXT NOT NULL,
+                FOREIGN KEY (inverter_id) REFERENCES inverters(inverter_id)
+            );
+            INSERT INTO inverters (
+                inverter_id, name, protocol, mac, linked_board_id,
+                configured_ip, local_ip, local_port, updated_at_utc
+            ) VALUES (
+                'inverter-easun', 'EASUN', 'easun_qpigs',
+                'c4:d8:d5:1c:6a:06', 'inverter-board-1',
+                '192.168.1.185', '192.168.1.44', 8899, 'old'
+            );
+            INSERT INTO inverter_samples VALUES (1, 'inverter-easun');
+            """
+        )
+
+        collector.migrate_database_v4(connection)
+        connection.execute(
+            """
+            INSERT INTO inverters (
+                inverter_id, name, protocol, mac, linked_board_id,
+                configured_ip, local_ip, local_port, updated_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "inverter-anenji",
+                "Anenji",
+                "anenji_modbus",
+                "34:5f:45:48:cf:15",
+                "inverter-board-1",
+                "192.168.1.18",
+                "192.168.1.44",
+                8899,
+                "new",
+            ),
+        )
+
+        self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 4)
+        self.assertEqual(
+            connection.execute("SELECT COUNT(*) FROM inverter_samples").fetchone()[0],
+            1,
+        )
+        self.assertEqual(
+            connection.execute("SELECT COUNT(*) FROM inverters").fetchone()[0], 2
+        )
+        self.assertEqual(connection.execute("PRAGMA foreign_key_check").fetchall(), [])
+        connection.close()
+
+    def test_v4_to_v5_migration_backfills_live_fields_and_removes_settings(self):
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.executescript(
+            """
+            PRAGMA user_version = 4;
+            CREATE TABLE inverters (inverter_id TEXT PRIMARY KEY);
+            INSERT INTO inverters VALUES ('inverter-easun');
+            CREATE TABLE inverter_samples (
+                id INTEGER PRIMARY KEY,
+                inverter_id TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                FOREIGN KEY (inverter_id) REFERENCES inverters(inverter_id)
+            );
+            """
+        )
+        old_payload = {
+            "protocol": "EASUN_VOLTRONIC_QPIGS",
+            "battery_voltage_scc_v": 27.1,
+            "device_status_bits": "10101010",
+            "rating_fields": ["settings"],
+            "raw": {
+                "responses": {"QPIGS": "live", "QPIRI": "settings"},
+                "frames_hex": {"QPIGS": "aa", "QPIRI": "bb"},
+            },
+        }
+        connection.execute(
+            "INSERT INTO inverter_samples VALUES (?, ?, ?)",
+            (1, "inverter-easun", json.dumps(old_payload)),
+        )
+
+        collector.migrate_database_v5(connection)
+
+        row = connection.execute("SELECT * FROM inverter_samples").fetchone()
+        payload = json.loads(row["payload_json"])
+        self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 5)
+        self.assertAlmostEqual(row["battery_voltage_scc_v"], 27.1)
+        self.assertEqual(row["device_status_bits"], "10101010")
+        self.assertNotIn("rating_fields", payload)
+        self.assertNotIn("QPIRI", payload["raw"]["responses"])
+        self.assertNotIn("QPIRI", payload["raw"]["frames_hex"])
+        self.assertEqual(connection.execute("PRAGMA foreign_key_check").fetchall(), [])
         connection.close()
 
 

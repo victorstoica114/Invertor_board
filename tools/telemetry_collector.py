@@ -19,6 +19,11 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Iterable
 
+try:
+    import inverter_protocols
+except ModuleNotFoundError:  # Imported as tools.telemetry_collector by the tests.
+    from tools import inverter_protocols
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = PROJECT_ROOT / "tools" / "telemetry_boards.json"
@@ -89,8 +94,80 @@ SAMPLE_COLUMNS = (
     "payload_json",
 )
 
+INVERTER_SAMPLE_FIELDS = (
+    "protocol",
+    "working_mode",
+    "working_mode_code",
+    "grid_voltage_v",
+    "grid_frequency_hz",
+    "grid_power_w",
+    "grid_power_source",
+    "inverter_voltage_v",
+    "inverter_current_a",
+    "inverter_frequency_hz",
+    "inverter_power_w",
+    "inverter_charging_average_current_a",
+    "inverter_charging_power_w",
+    "output_voltage_v",
+    "output_current_a",
+    "output_frequency_hz",
+    "output_power_w",
+    "output_apparent_power_va",
+    "load_pct",
+    "bus_voltage_v",
+    "battery_voltage_v",
+    "battery_current_a",
+    "battery_charge_current_a",
+    "battery_discharge_current_a",
+    "battery_power_w",
+    "battery_soc_pct",
+    "pv_voltage_v",
+    "pv_current_a",
+    "pv_power_w",
+    "pv_charging_power_w",
+    "pv_charging_average_current_a",
+    "pv2_voltage_v",
+    "pv2_current_a",
+    "pv2_power_w",
+    "inverter_temperature_c",
+    "dcdc_temperature_c",
+    "pv_temperature_c",
+    "power_flow_status",
+    "warning_bits",
+    "battery_voltage_scc_v",
+    "battery_voltage_offset",
+    "device_status_bits",
+    "device_status_bits_2",
+    "eeprom_version",
+)
+
+INVERTER_SAMPLE_COLUMNS = (
+    "inverter_id",
+    "sampled_at_utc",
+    "sampled_at_unix_ms",
+    "source_ip",
+    *INVERTER_SAMPLE_FIELDS,
+    "payload_json",
+)
+
+INVERTER_V5_COLUMN_TYPES = {
+    "grid_power_source": "TEXT",
+    "inverter_voltage_v": "REAL",
+    "inverter_current_a": "REAL",
+    "inverter_frequency_hz": "REAL",
+    "inverter_power_w": "REAL",
+    "inverter_charging_average_current_a": "REAL",
+    "inverter_charging_power_w": "REAL",
+    "pv_charging_average_current_a": "REAL",
+    "battery_voltage_scc_v": "REAL",
+    "battery_voltage_offset": "TEXT",
+    "device_status_bits": "TEXT",
+    "device_status_bits_2": "TEXT",
+    "eeprom_version": "TEXT",
+}
+
 SCHEMA_SQL = """
-PRAGMA user_version = 2;
+PRAGMA user_version = 5;
 
 CREATE TABLE IF NOT EXISTS boards (
     board_id TEXT PRIMARY KEY,
@@ -184,6 +261,92 @@ JOIN (
     GROUP BY source_id
 ) AS latest
 ON samples.id = latest.latest_id;
+
+CREATE TABLE IF NOT EXISTS inverters (
+    inverter_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    protocol TEXT NOT NULL,
+    mac TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    linked_board_id TEXT,
+    configured_ip TEXT NOT NULL,
+    local_ip TEXT NOT NULL,
+    local_port INTEGER NOT NULL,
+    last_ip TEXT,
+    last_seen_utc TEXT,
+    last_error TEXT,
+    updated_at_utc TEXT NOT NULL,
+    FOREIGN KEY (linked_board_id) REFERENCES boards(board_id)
+);
+
+CREATE TABLE IF NOT EXISTS inverter_samples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    inverter_id TEXT NOT NULL,
+    sampled_at_utc TEXT NOT NULL,
+    sampled_at_unix_ms INTEGER NOT NULL,
+    source_ip TEXT NOT NULL,
+    protocol TEXT NOT NULL,
+    working_mode TEXT,
+    working_mode_code TEXT,
+    grid_voltage_v REAL,
+    grid_frequency_hz REAL,
+    grid_power_w REAL,
+    grid_power_source TEXT,
+    inverter_voltage_v REAL,
+    inverter_current_a REAL,
+    inverter_frequency_hz REAL,
+    inverter_power_w REAL,
+    inverter_charging_average_current_a REAL,
+    inverter_charging_power_w REAL,
+    output_voltage_v REAL,
+    output_current_a REAL,
+    output_frequency_hz REAL,
+    output_power_w REAL,
+    output_apparent_power_va REAL,
+    load_pct REAL,
+    bus_voltage_v REAL,
+    battery_voltage_v REAL,
+    battery_current_a REAL,
+    battery_charge_current_a REAL,
+    battery_discharge_current_a REAL,
+    battery_power_w REAL,
+    battery_soc_pct REAL,
+    pv_voltage_v REAL,
+    pv_current_a REAL,
+    pv_power_w REAL,
+    pv_charging_power_w REAL,
+    pv_charging_average_current_a REAL,
+    pv2_voltage_v REAL,
+    pv2_current_a REAL,
+    pv2_power_w REAL,
+    inverter_temperature_c REAL,
+    dcdc_temperature_c REAL,
+    pv_temperature_c REAL,
+    power_flow_status INTEGER,
+    warning_bits TEXT,
+    battery_voltage_scc_v REAL,
+    battery_voltage_offset TEXT,
+    device_status_bits TEXT,
+    device_status_bits_2 TEXT,
+    eeprom_version TEXT,
+    payload_json TEXT NOT NULL,
+    FOREIGN KEY (inverter_id) REFERENCES inverters(inverter_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_inverter_samples_device_time
+    ON inverter_samples(inverter_id, sampled_at_unix_ms DESC);
+
+CREATE INDEX IF NOT EXISTS idx_inverter_samples_time
+    ON inverter_samples(sampled_at_unix_ms DESC);
+
+CREATE VIEW IF NOT EXISTS latest_inverter_telemetry AS
+SELECT samples.*
+FROM inverter_samples AS samples
+JOIN (
+    SELECT inverter_id, MAX(id) AS latest_id
+    FROM inverter_samples
+    GROUP BY inverter_id
+) AS latest
+ON samples.id = latest.latest_id;
 """
 
 SOURCES_SCHEMA_SQL = """
@@ -198,6 +361,94 @@ CREATE TABLE IF NOT EXISTS bms_sources (
     UNIQUE (board_id, endpoint),
     FOREIGN KEY (board_id) REFERENCES boards(board_id)
 );
+"""
+
+INVERTER_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS inverters (
+    inverter_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    protocol TEXT NOT NULL,
+    mac TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    linked_board_id TEXT,
+    configured_ip TEXT NOT NULL,
+    local_ip TEXT NOT NULL,
+    local_port INTEGER NOT NULL,
+    last_ip TEXT,
+    last_seen_utc TEXT,
+    last_error TEXT,
+    updated_at_utc TEXT NOT NULL,
+    FOREIGN KEY (linked_board_id) REFERENCES boards(board_id)
+);
+
+CREATE TABLE IF NOT EXISTS inverter_samples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    inverter_id TEXT NOT NULL,
+    sampled_at_utc TEXT NOT NULL,
+    sampled_at_unix_ms INTEGER NOT NULL,
+    source_ip TEXT NOT NULL,
+    protocol TEXT NOT NULL,
+    working_mode TEXT,
+    working_mode_code TEXT,
+    grid_voltage_v REAL,
+    grid_frequency_hz REAL,
+    grid_power_w REAL,
+    grid_power_source TEXT,
+    inverter_voltage_v REAL,
+    inverter_current_a REAL,
+    inverter_frequency_hz REAL,
+    inverter_power_w REAL,
+    inverter_charging_average_current_a REAL,
+    inverter_charging_power_w REAL,
+    output_voltage_v REAL,
+    output_current_a REAL,
+    output_frequency_hz REAL,
+    output_power_w REAL,
+    output_apparent_power_va REAL,
+    load_pct REAL,
+    bus_voltage_v REAL,
+    battery_voltage_v REAL,
+    battery_current_a REAL,
+    battery_charge_current_a REAL,
+    battery_discharge_current_a REAL,
+    battery_power_w REAL,
+    battery_soc_pct REAL,
+    pv_voltage_v REAL,
+    pv_current_a REAL,
+    pv_power_w REAL,
+    pv_charging_power_w REAL,
+    pv_charging_average_current_a REAL,
+    pv2_voltage_v REAL,
+    pv2_current_a REAL,
+    pv2_power_w REAL,
+    inverter_temperature_c REAL,
+    dcdc_temperature_c REAL,
+    pv_temperature_c REAL,
+    power_flow_status INTEGER,
+    warning_bits TEXT,
+    battery_voltage_scc_v REAL,
+    battery_voltage_offset TEXT,
+    device_status_bits TEXT,
+    device_status_bits_2 TEXT,
+    eeprom_version TEXT,
+    payload_json TEXT NOT NULL,
+    FOREIGN KEY (inverter_id) REFERENCES inverters(inverter_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_inverter_samples_device_time
+    ON inverter_samples(inverter_id, sampled_at_unix_ms DESC);
+
+CREATE INDEX IF NOT EXISTS idx_inverter_samples_time
+    ON inverter_samples(sampled_at_unix_ms DESC);
+
+CREATE VIEW IF NOT EXISTS latest_inverter_telemetry AS
+SELECT samples.*
+FROM inverter_samples AS samples
+JOIN (
+    SELECT inverter_id, MAX(id) AS latest_id
+    FROM inverter_samples
+    GROUP BY inverter_id
+) AS latest
+ON samples.id = latest.latest_id;
 """
 
 
@@ -218,6 +469,18 @@ class BmsSourceConfig:
 
 
 @dataclasses.dataclass(frozen=True)
+class InverterConfig:
+    inverter_id: str
+    name: str
+    protocol: str
+    mac: str
+    ip: str
+    local_ip: str
+    local_port: int
+    linked_board_id: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
 class CollectorConfig:
     interval_seconds: float
     request_timeout_seconds: float
@@ -225,6 +488,7 @@ class CollectorConfig:
     database: Path
     boards: tuple[BoardConfig, ...]
     sources: tuple[BmsSourceConfig, ...]
+    inverters: tuple[InverterConfig, ...]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -240,6 +504,19 @@ class CollectionResult:
     board: BoardConfig
     source: BmsSourceConfig
     ip: str | None
+    payload: dict[str, Any] | None
+    sampled_at_utc: str | None
+    sampled_at_unix_ms: int | None
+    error: str | None
+
+    @property
+    def succeeded(self) -> bool:
+        return self.payload is not None
+
+
+@dataclasses.dataclass(frozen=True)
+class InverterCollectionResult:
+    inverter: InverterConfig
     payload: dict[str, Any] | None
     sampled_at_utc: str | None
     sampled_at_unix_ms: int | None
@@ -364,6 +641,58 @@ def load_config(config_path: Path, database_override: str | None = None) -> Coll
     if not sources:
         raise ValueError("at least one BMS source must be configured")
 
+    inverters: list[InverterConfig] = []
+    seen_inverter_ids: set[str] = set()
+    seen_inverter_macs: set[str] = set()
+    for item in raw.get("inverters", []):
+        linked_board_id = str(item.get("linked_board_id", "")).strip() or None
+        inverter = InverterConfig(
+            inverter_id=str(item["id"]).strip(),
+            name=str(item["name"]).strip(),
+            protocol=str(item["protocol"]).strip(),
+            mac=normalize_mac(str(item["mac"])),
+            ip=str(item["ip"]).strip(),
+            local_ip=str(item["local_ip"]).strip(),
+            local_port=int(item["local_port"]),
+            linked_board_id=linked_board_id,
+        )
+        if not inverter.inverter_id or not inverter.name:
+            raise ValueError("inverter id and name cannot be empty")
+        if inverter.protocol not in inverter_protocols.READERS:
+            raise ValueError(
+                f"unsupported protocol for {inverter.inverter_id}: {inverter.protocol}"
+            )
+        if not MAC_PATTERN.fullmatch(inverter.mac):
+            raise ValueError(
+                f"invalid MAC address for {inverter.inverter_id}: {inverter.mac}"
+            )
+        for label, address in (("IP", inverter.ip), ("local IP", inverter.local_ip)):
+            try:
+                parsed_address = ipaddress.ip_address(address)
+            except ValueError as exc:
+                raise ValueError(
+                    f"invalid {label} for {inverter.inverter_id}: {address}"
+                ) from exc
+            if parsed_address.version != 4:
+                raise ValueError(
+                    f"{label} for {inverter.inverter_id} must be IPv4: {address}"
+                )
+        if not 1 <= inverter.local_port <= 65535:
+            raise ValueError(
+                f"invalid local port for {inverter.inverter_id}: {inverter.local_port}"
+            )
+        if linked_board_id is not None and linked_board_id not in board_ids:
+            raise ValueError(
+                f"unknown linked_board_id for {inverter.inverter_id}: {linked_board_id}"
+            )
+        if inverter.inverter_id in seen_inverter_ids:
+            raise ValueError(f"duplicate inverter id: {inverter.inverter_id}")
+        if inverter.mac in seen_inverter_macs:
+            raise ValueError(f"duplicate inverter MAC address: {inverter.mac}")
+        seen_inverter_ids.add(inverter.inverter_id)
+        seen_inverter_macs.add(inverter.mac)
+        inverters.append(inverter)
+
     database_value = database_override or str(raw.get("database", "data/telemetry.sqlite3"))
     return CollectorConfig(
         interval_seconds=interval,
@@ -372,6 +701,7 @@ def load_config(config_path: Path, database_override: str | None = None) -> Coll
         database=resolve_project_path(database_value),
         boards=tuple(boards),
         sources=tuple(sources),
+        inverters=tuple(inverters),
     )
 
 
@@ -418,12 +748,14 @@ def open_database(path: Path) -> sqlite3.Connection:
     if have_samples is None:
         connection.executescript(SCHEMA_SQL)
     else:
-        migrate_database_v2(connection)
+        migrate_database_v5(connection)
     return connection
 
 
 def migrate_database_v2(connection: sqlite3.Connection) -> None:
     """Add independent BMS sources while preserving every v1 sample."""
+    if connection.execute("PRAGMA user_version").fetchone()[0] >= 2:
+        return
     with connection:
         connection.executescript(SOURCES_SCHEMA_SQL)
         columns = {
@@ -485,6 +817,154 @@ def migrate_database_v2(connection: sqlite3.Connection) -> None:
         connection.execute("PRAGMA user_version = 2")
 
 
+def migrate_database_v3(connection: sqlite3.Connection) -> None:
+    """Add inverter inventory/samples while preserving all BMS history."""
+    version = connection.execute("PRAGMA user_version").fetchone()[0]
+    if version >= 3:
+        return
+    if version < 2:
+        migrate_database_v2(connection)
+    with connection:
+        connection.executescript(INVERTER_SCHEMA_SQL)
+        connection.execute("PRAGMA user_version = 3")
+
+
+def migrate_database_v4(connection: sqlite3.Connection) -> None:
+    """Allow multiple dongles to share their required local TCP port."""
+    version = connection.execute("PRAGMA user_version").fetchone()[0]
+    if version >= 4:
+        return
+    if version < 3:
+        migrate_database_v3(connection)
+
+    table_sql_row = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='inverters'"
+    ).fetchone()
+    table_sql = str(table_sql_row[0]) if table_sql_row is not None else ""
+    if "UNIQUE (local_ip, local_port)" in table_sql:
+        connection.commit()
+        connection.execute("PRAGMA foreign_keys = OFF")
+        try:
+            with connection:
+                connection.execute("DROP TABLE IF EXISTS inverters_v4")
+                connection.execute(
+                    """
+                    CREATE TABLE inverters_v4 (
+                        inverter_id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        protocol TEXT NOT NULL,
+                        mac TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                        linked_board_id TEXT,
+                        configured_ip TEXT NOT NULL,
+                        local_ip TEXT NOT NULL,
+                        local_port INTEGER NOT NULL,
+                        last_ip TEXT,
+                        last_seen_utc TEXT,
+                        last_error TEXT,
+                        updated_at_utc TEXT NOT NULL,
+                        FOREIGN KEY (linked_board_id) REFERENCES boards(board_id)
+                    )
+                    """
+                )
+                connection.execute(
+                    """
+                    INSERT INTO inverters_v4
+                    SELECT
+                        inverter_id, name, protocol, mac, linked_board_id,
+                        configured_ip, local_ip, local_port, last_ip,
+                        last_seen_utc, last_error, updated_at_utc
+                    FROM inverters
+                    """
+                )
+                connection.execute("DROP TABLE inverters")
+                connection.execute("ALTER TABLE inverters_v4 RENAME TO inverters")
+        finally:
+            connection.execute("PRAGMA foreign_keys = ON")
+    with connection:
+        connection.execute("PRAGMA user_version = 4")
+    foreign_key_errors = connection.execute("PRAGMA foreign_key_check").fetchall()
+    if foreign_key_errors:
+        raise sqlite3.IntegrityError(
+            f"foreign key errors after v4 migration: {foreign_key_errors}"
+        )
+
+
+def migrate_database_v5(connection: sqlite3.Connection) -> None:
+    """Store every live inverter field explicitly and remove settings from JSON."""
+    version = connection.execute("PRAGMA user_version").fetchone()[0]
+    if version >= 5:
+        return
+    if version < 4:
+        migrate_database_v4(connection)
+
+    columns = {
+        str(row[1]) for row in connection.execute("PRAGMA table_info(inverter_samples)")
+    }
+    with connection:
+        for field, sql_type in INVERTER_V5_COLUMN_TYPES.items():
+            if field not in columns:
+                connection.execute(
+                    f"ALTER TABLE inverter_samples ADD COLUMN {field} {sql_type}"
+                )
+
+        if "payload_json" in columns:
+            rows = connection.execute(
+                "SELECT id, payload_json FROM inverter_samples"
+            ).fetchall()
+            assignments = ", ".join(
+                f"{field} = ?" for field in INVERTER_V5_COLUMN_TYPES
+            )
+            for row in rows:
+                try:
+                    payload = json.loads(str(row["payload_json"]))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                live_payload = inverter_live_payload(payload)
+                values = [
+                    sqlite_value(field, live_payload.get(field))
+                    for field in INVERTER_V5_COLUMN_TYPES
+                ]
+                values.extend(
+                    (
+                        json.dumps(
+                            live_payload,
+                            separators=(",", ":"),
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
+                        row["id"],
+                    )
+                )
+                connection.execute(
+                    f"UPDATE inverter_samples SET {assignments}, payload_json = ? WHERE id = ?",
+                    values,
+                )
+
+        connection.execute("DROP VIEW IF EXISTS latest_inverter_telemetry")
+        connection.execute(
+            """
+            CREATE VIEW latest_inverter_telemetry AS
+            SELECT samples.*
+            FROM inverter_samples AS samples
+            JOIN (
+                SELECT inverter_id, MAX(id) AS latest_id
+                FROM inverter_samples
+                GROUP BY inverter_id
+            ) AS latest
+            ON samples.id = latest.latest_id
+            """
+        )
+        connection.execute("PRAGMA user_version = 5")
+
+    foreign_key_errors = connection.execute("PRAGMA foreign_key_check").fetchall()
+    if foreign_key_errors:
+        raise sqlite3.IntegrityError(
+            f"foreign key errors after v5 migration: {foreign_key_errors}"
+        )
+
+
 def register_boards(connection: sqlite3.Connection, boards: Iterable[BoardConfig]) -> None:
     timestamp = utc_now()
     for board in boards:
@@ -524,6 +1004,43 @@ def register_sources(
                 source.board_id,
                 source.name,
                 source.endpoint,
+                timestamp,
+            ),
+        )
+    connection.commit()
+
+
+def register_inverters(
+    connection: sqlite3.Connection, inverters: Iterable[InverterConfig]
+) -> None:
+    timestamp = utc_now()
+    for inverter in inverters:
+        connection.execute(
+            """
+            INSERT INTO inverters (
+                inverter_id, name, protocol, mac, linked_board_id,
+                configured_ip, local_ip, local_port, updated_at_utc
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(inverter_id) DO UPDATE SET
+                name = excluded.name,
+                protocol = excluded.protocol,
+                mac = excluded.mac,
+                linked_board_id = excluded.linked_board_id,
+                configured_ip = excluded.configured_ip,
+                local_ip = excluded.local_ip,
+                local_port = excluded.local_port,
+                updated_at_utc = excluded.updated_at_utc
+            """,
+            (
+                inverter.inverter_id,
+                inverter.name,
+                inverter.protocol,
+                inverter.mac,
+                inverter.linked_board_id,
+                inverter.ip,
+                inverter.local_ip,
+                inverter.local_port,
                 timestamp,
             ),
         )
@@ -623,6 +1140,37 @@ def fetch_telemetry(
     )
 
 
+def fetch_inverter(
+    inverter: InverterConfig, timeout_seconds: float
+) -> InverterCollectionResult:
+    try:
+        payload = inverter_protocols.read_inverter(
+            inverter.protocol,
+            inverter.ip,
+            inverter.local_ip,
+            inverter.local_port,
+            timeout_seconds,
+        )
+        if not isinstance(payload, dict) or not payload.get("protocol"):
+            raise ValueError("inverter reader returned an invalid payload")
+    except (OSError, TimeoutError, ValueError, inverter_protocols.InverterProtocolError) as exc:
+        return InverterCollectionResult(
+            inverter=inverter,
+            payload=None,
+            sampled_at_utc=None,
+            sampled_at_unix_ms=None,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+
+    return InverterCollectionResult(
+        inverter=inverter,
+        payload=payload,
+        sampled_at_utc=utc_now(),
+        sampled_at_unix_ms=time.time_ns() // 1_000_000,
+        error=None,
+    )
+
+
 def sqlite_value(field: str, value: Any) -> Any:
     if value is None:
         return None
@@ -633,6 +1181,31 @@ def sqlite_value(field: str, value: Any) -> Any:
     if isinstance(value, (str, int, float)):
         return value
     return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
+
+
+def inverter_live_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return only operational inverter telemetry and its live raw responses."""
+    live = {
+        field: payload[field]
+        for field in INVERTER_SAMPLE_FIELDS
+        if field in payload
+    }
+    raw_value = payload.get("raw")
+    if not isinstance(raw_value, dict):
+        return live
+
+    raw = dict(raw_value)
+    if payload.get("protocol") == "EASUN_VOLTRONIC_QPIGS":
+        # QPIRI is a ratings/configuration response.  Retain only the live
+        # QPIGS/QMOD/QPIWS/QPIGS2 response material in telemetry history.
+        for bucket_name in ("responses", "frames_hex", "optional_errors"):
+            bucket = raw.get(bucket_name)
+            if isinstance(bucket, dict):
+                raw[bucket_name] = {
+                    key: value for key, value in bucket.items() if key != "QPIRI"
+                }
+    live["raw"] = raw
+    return live
 
 
 def store_results(
@@ -746,6 +1319,84 @@ def store_results(
     return successes, failures
 
 
+def store_inverter_results(
+    connection: sqlite3.Connection,
+    results: Iterable[InverterCollectionResult],
+) -> tuple[int, int]:
+    result_list = list(results)
+    successes = 0
+    failures = 0
+    placeholders = ", ".join("?" for _ in INVERTER_SAMPLE_COLUMNS)
+    insert_sql = (
+        f"INSERT INTO inverter_samples ({', '.join(INVERTER_SAMPLE_COLUMNS)}) "
+        f"VALUES ({placeholders})"
+    )
+
+    with connection:
+        for result in result_list:
+            updated_at = utc_now()
+            if not result.succeeded:
+                failures += 1
+                connection.execute(
+                    """
+                    UPDATE inverters
+                    SET last_ip = ?,
+                        last_error = ?,
+                        updated_at_utc = ?
+                    WHERE inverter_id = ?
+                    """,
+                    (
+                        result.inverter.ip,
+                        (result.error or "unknown error")[:500],
+                        updated_at,
+                        result.inverter.inverter_id,
+                    ),
+                )
+                continue
+
+            assert result.payload is not None
+            assert result.sampled_at_utc is not None
+            assert result.sampled_at_unix_ms is not None
+            successes += 1
+            live_payload = inverter_live_payload(result.payload)
+            values: list[Any] = [
+                result.inverter.inverter_id,
+                result.sampled_at_utc,
+                result.sampled_at_unix_ms,
+                result.inverter.ip,
+            ]
+            values.extend(
+                sqlite_value(field, live_payload.get(field))
+                for field in INVERTER_SAMPLE_FIELDS
+            )
+            values.append(
+                json.dumps(
+                    live_payload,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            )
+            connection.execute(insert_sql, values)
+            connection.execute(
+                """
+                UPDATE inverters
+                SET last_ip = ?,
+                    last_seen_utc = ?,
+                    last_error = NULL,
+                    updated_at_utc = ?
+                WHERE inverter_id = ?
+                """,
+                (
+                    result.inverter.ip,
+                    result.sampled_at_utc,
+                    updated_at,
+                    result.inverter.inverter_id,
+                ),
+            )
+    return successes, failures
+
+
 def collect_once(
     config: CollectorConfig, connection: sqlite3.Connection
 ) -> list[CollectionResult]:
@@ -805,6 +1456,44 @@ def collect_once(
     return results
 
 
+def collect_inverters_once(
+    config: CollectorConfig, connection: sqlite3.Connection
+) -> list[InverterCollectionResult]:
+    if not config.inverters:
+        return []
+
+    # Both installed Eybond dongles only dial back to their standard TCP port
+    # 8899. Poll sequentially so they can safely share the same listener.
+    results = [
+        fetch_inverter(inverter, config.request_timeout_seconds)
+        for inverter in config.inverters
+    ]
+
+    results.sort(key=lambda result: result.inverter.inverter_id)
+    successes, failures = store_inverter_results(connection, results)
+    timestamp = utc_now()
+    details = ", ".join(
+        (
+            f"{result.inverter.inverter_id}@{result.inverter.ip}=stored"
+            if result.succeeded
+            else f"{result.inverter.inverter_id}@{result.inverter.ip}=skipped"
+        )
+        for result in results
+    )
+    print(
+        f"{timestamp} inverter cycle: {successes} stored, "
+        f"{failures} skipped ({details})",
+        flush=True,
+    )
+    for result in results:
+        if result.error:
+            print(
+                f"{timestamp} warning: {result.inverter.inverter_id}: {result.error}",
+                flush=True,
+            )
+    return results
+
+
 def print_status(connection: sqlite3.Connection, database_path: Path) -> None:
     print(f"Database: {database_path}")
     rows = connection.execute(
@@ -844,6 +1533,51 @@ def print_status(connection: sqlite3.Connection, database_path: Path) -> None:
             f"latest={row['latest_sample'] or '-'} ip={row['last_ip'] or '-'} "
             f"protocol={row['latest_protocol'] or '-'} "
             f"cells={row['latest_cell_count'] if row['latest_cell_count'] is not None else '-'} "
+            f"error={row['last_error'] or '-'}"
+        )
+
+    inverter_rows = connection.execute(
+        """
+        SELECT
+            inverters.inverter_id,
+            inverters.name,
+            inverters.protocol AS configured_protocol,
+            inverters.linked_board_id,
+            inverters.last_ip,
+            inverters.last_seen_utc,
+            inverters.last_error,
+            COALESCE(sample_counts.sample_count, 0) AS sample_count,
+            sample_counts.latest_sample,
+            latest_inverter_telemetry.protocol AS latest_protocol,
+            latest_inverter_telemetry.working_mode,
+            latest_inverter_telemetry.output_power_w,
+            latest_inverter_telemetry.battery_voltage_v,
+            latest_inverter_telemetry.pv_power_w
+        FROM inverters
+        LEFT JOIN (
+            SELECT
+                inverter_id,
+                COUNT(*) AS sample_count,
+                MAX(sampled_at_utc) AS latest_sample
+            FROM inverter_samples
+            GROUP BY inverter_id
+        ) AS sample_counts ON sample_counts.inverter_id = inverters.inverter_id
+        LEFT JOIN latest_inverter_telemetry
+            ON latest_inverter_telemetry.inverter_id = inverters.inverter_id
+        ORDER BY inverters.inverter_id
+        """
+    ).fetchall()
+    for row in inverter_rows:
+        print(
+            f"{row['inverter_id']} ({row['name']}): "
+            f"linked_board={row['linked_board_id'] or '-'} "
+            f"samples={row['sample_count']} latest={row['latest_sample'] or '-'} "
+            f"ip={row['last_ip'] or '-'} "
+            f"protocol={row['latest_protocol'] or row['configured_protocol']} "
+            f"mode={row['working_mode'] or '-'} "
+            f"output={row['output_power_w'] if row['output_power_w'] is not None else '-'}W "
+            f"battery={row['battery_voltage_v'] if row['battery_voltage_v'] is not None else '-'}V "
+            f"pv={row['pv_power_w'] if row['pv_power_w'] is not None else '-'}W "
             f"error={row['last_error'] or '-'}"
         )
 
@@ -896,6 +1630,7 @@ def main() -> int:
         connection = open_database(config.database)
         register_boards(connection, config.boards)
         register_sources(connection, config.sources)
+        register_inverters(connection, config.inverters)
     except (OSError, sqlite3.Error) as exc:
         print(f"Database error: {exc}", flush=True)
         return 3
@@ -910,6 +1645,7 @@ def main() -> int:
         return 0
     if args.once:
         collect_once(config, connection)
+        collect_inverters_once(config, connection)
         connection.close()
         return 0
 
@@ -923,6 +1659,7 @@ def main() -> int:
     print(
         f"Starting telemetry collector: boards={len(config.boards)} "
         f"sources={len(config.sources)} "
+        f"inverters={len(config.inverters)} "
         f"interval={config.interval_seconds:g}s database={config.database}",
         flush=True,
     )
@@ -930,6 +1667,7 @@ def main() -> int:
         while not stop_event.is_set():
             cycle_started = time.monotonic()
             collect_once(config, connection)
+            collect_inverters_once(config, connection)
             remaining = max(
                 0.0, config.interval_seconds - (time.monotonic() - cycle_started)
             )

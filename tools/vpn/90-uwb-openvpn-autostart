@@ -1,0 +1,12 @@
+#!/bin/sh
+
+# Ask systemd to check the VPN immediately whenever the physical uplink or the
+# VPN changes state. The periodic watchdog remains the recovery fallback.
+
+case "${1:-}:${2:-}" in
+    wlan0:up|wlan0:dhcp4-change|wlan0:down|eth0:up|eth0:dhcp4-change|eth0:down|*:vpn-up|*:vpn-down|*:connectivity-change)
+        /usr/bin/systemctl --no-block start uwb-openvpn-watchdog.service >/dev/null 2>&1 || true
+        ;;
+esac
+
+exit 0

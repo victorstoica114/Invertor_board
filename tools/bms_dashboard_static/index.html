@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark light">
-  <title>BMS Control Center</title>
+  <title>Energy Control Center</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/styles.css">
 </head>
@@ -13,8 +13,8 @@
     <div class="brand">
       <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
       <div>
-        <h1>BMS Control Center</h1>
-        <p>Raspberry Pi · Bluetooth gateway</p>
+        <h1>Energy Control Center</h1>
+        <p>Raspberry Pi · Bluetooth BMS · Wi-Fi inverters</p>
       </div>
     </div>
     <div class="top-actions">
@@ -31,7 +31,9 @@
         <p id="last-update" class="muted">Initializing Bluetooth connections…</p>
       </div>
       <div class="hero-summary" aria-label="System summary">
-        <div><span>Total power</span><strong id="total-power">—</strong></div>
+        <div><span>BMS power</span><strong id="total-power">—</strong></div>
+        <div><span>Inverter output</span><strong id="inverter-output-total">—</strong></div>
+        <div><span>Inverters</span><strong id="inverter-online-summary">—</strong></div>
         <div><span>Control</span><strong id="control-state">—</strong></div>
         <div><span>Polling</span><strong id="poll-interval">—</strong></div>
       </div>
@@ -42,7 +44,9 @@
     <section class="workspace">
       <div class="tabs" role="tablist" aria-label="Dashboard sections">
         <button class="tab active" data-tab="details" role="tab" type="button">Details and history</button>
-        <button class="tab" data-tab="protocols" role="tab" type="button">Protocols and control</button>
+        <button class="tab" data-tab="inverters" role="tab" type="button">Inverters</button>
+        <button class="tab" data-tab="inverter-control" role="tab" type="button">Inverter control</button>
+        <button class="tab" data-tab="bms-control" role="tab" type="button">BMS control</button>
       </div>
 
       <div id="details-panel" class="tab-panel active" role="tabpanel">
@@ -75,67 +79,68 @@
         </article>
       </div>
 
-      <div id="protocols-panel" class="tab-panel" role="tabpanel">
-        <div class="protocol-layout">
-          <article class="protocol-card">
-            <div class="card-title">
-              <div>
-                <span>JK BMS</span>
-                <strong>UART / CAN protocols</strong>
-              </div>
-              <span class="capability write">read + write</span>
-            </div>
-            <div id="jk-current-protocols" class="protocol-current"></div>
-            <form id="jk-protocol-form" class="control-form">
-              <label>Interface
-                <select id="jk-interface" name="interface"></select>
-              </label>
-              <label>Protocol
-                <select id="jk-protocol" name="protocol"></select>
-              </label>
-              <label>Control password
-                <input id="control-token" type="password" autocomplete="current-password" placeholder="Token configured on the RPi">
-              </label>
-              <label>Confirmation
-                <input id="jk-confirmation" type="text" autocomplete="off" placeholder="Type JK_B1A8S20P">
-              </label>
-              <div class="control-warning">
-                Changing the protocol can immediately stop communication on the wired port. The board firmware must use the same register map and baud rate.
-              </div>
-              <button class="button danger" type="submit">Apply JK protocol</button>
-            </form>
-          </article>
+      <div id="inverters-panel" class="tab-panel" role="tabpanel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Local network telemetry</p>
+            <h3>Anenji and EASUN inverters</h3>
+          </div>
+          <span id="inverter-database-state" class="status-pill"><span class="dot"></span>Waiting for SQLite</span>
+        </div>
+        <div id="inverter-grid" class="inverter-grid" aria-live="polite"></div>
+      </div>
 
-          <article class="protocol-card">
-            <div class="card-title">
-              <div><span>Seplos V3</span><strong>Inverter protocol</strong></div>
-              <span class="capability write">read + write</span>
-            </div>
-            <dl id="seplos-protocol" class="info-list"></dl>
-            <form id="seplos-protocol-form" class="control-form protocol-control">
-              <label>RS485 profile
-                <select id="seplos-profile" name="profile"></select>
-              </label>
-              <label>Control password
-                <input id="seplos-control-token" type="password" autocomplete="current-password" placeholder="Token configured on the RPi">
-              </label>
-              <label>Confirmation
-                <input id="seplos-confirmation" type="text" autocomplete="off" placeholder="Type the BMS serial number">
-              </label>
-              <div class="control-warning">
-                The board profile must match: Growatt exposes all 16 cells, Pylon provides Pylon compatibility, and SRNE/WOW uses the available PACE map.
-              </div>
-              <button class="button danger" type="submit">Apply Seplos protocol</button>
-            </form>
-          </article>
+      <div id="inverter-control-panel" class="tab-panel" role="tabpanel">
+        <div class="panel-heading inverter-control-heading">
+          <div>
+            <p class="eyebrow">Guarded configuration</p>
+            <h3>Inverter Control</h3>
+          </div>
+          <span id="inverter-config-status" class="status-pill"><span class="dot"></span>Configuration not loaded</span>
+        </div>
+        <article class="inverter-control-toolbar">
+          <label>Inverter
+            <select id="inverter-control-selector"></select>
+          </label>
+          <div class="inverter-control-buttons">
+            <button id="inverter-config-backup" class="button secondary" type="button" disabled>Download JSON backup</button>
+          </div>
+        </article>
+        <div class="control-warning inverter-control-warning">
+          This dashboard trusts the local LAN and does not require an additional password. One setting is written at a time and immediately read back. Changing battery type can reset dependent charge settings; remote power-off can interrupt loads.
+        </div>
+        <div id="inverter-config-identity" class="inverter-config-identity"></div>
+        <div id="inverter-config-content" class="inverter-config-content" aria-live="polite">
+          <article class="inverter-empty"><strong>Waiting for live configuration</strong><p>Configuration loads automatically while this tab is open.</p></article>
+        </div>
+      </div>
 
-          <article class="protocol-card">
-            <div class="card-title">
-              <div><span>Daly</span><strong>Bluetooth access</strong></div>
-              <span class="capability read">telemetry</span>
-            </div>
-            <p class="note">Full telemetry is enabled. This Daly firmware does not expose a verified inverter-protocol selector.</p>
-          </article>
+      <div id="bms-control-panel" class="tab-panel" role="tabpanel">
+        <div class="panel-heading inverter-control-heading">
+          <div>
+            <p class="eyebrow">Guarded Bluetooth configuration</p>
+            <h3>BMS Control</h3>
+          </div>
+          <span id="bms-config-status" class="status-pill"><span class="dot"></span>Configuration not loaded</span>
+        </div>
+        <article class="inverter-control-toolbar">
+          <label>BMS
+            <select id="bms-control-selector">
+              <option value="daly">Daly</option>
+              <option value="seplos">Seplos</option>
+              <option value="jk">JK BMS</option>
+            </select>
+          </label>
+          <div class="inverter-control-buttons">
+            <button id="bms-config-backup" class="button secondary" type="button" disabled>Download JSON backup</button>
+          </div>
+        </article>
+        <div class="control-warning inverter-control-warning">
+          Bluetooth is used only to configure the selected BMS; operational telemetry continues through the ESP32 wired links. One parameter is written at a time, then immediately read back and verified. Protection, MOSFET and communication changes can interrupt charging, discharging or inverter communication.
+        </div>
+        <div id="bms-config-identity" class="inverter-config-identity"></div>
+        <div id="bms-config-content" class="inverter-config-content" aria-live="polite">
+          <article class="inverter-empty"><strong>Waiting for live configuration</strong><p>Configuration loads automatically while this tab is open.</p></article>
         </div>
       </div>
     </section>

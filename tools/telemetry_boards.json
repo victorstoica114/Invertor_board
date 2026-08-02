@@ -36,5 +36,27 @@
       "name": "Seplos BMS",
       "endpoint": "/api/telemetry"
     }
+  ],
+  "inverters": [
+    {
+      "id": "inverter-anenji",
+      "name": "Anenji",
+      "protocol": "anenji_modbus",
+      "mac": "34:5f:45:48:cf:15",
+      "ip": "192.168.1.18",
+      "local_ip": "192.168.1.44",
+      "local_port": 8899,
+      "linked_board_id": "inverter-board-2"
+    },
+    {
+      "id": "inverter-easun",
+      "name": "EASUN",
+      "protocol": "easun_qpigs",
+      "mac": "c4:d8:d5:1c:6a:06",
+      "ip": "192.168.1.185",
+      "local_ip": "192.168.1.44",
+      "local_port": 8899,
+      "linked_board_id": "inverter-board-1"
+    }
   ]
 }

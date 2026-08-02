@@ -204,11 +204,43 @@ def database_summary(connection: sqlite3.Connection) -> dict[str, Any]:
             """
         )
     ]
+    inverter_sample_count = int(
+        connection.execute("SELECT COUNT(*) FROM inverter_samples").fetchone()[0]
+    )
+    latest_inverter_sample = connection.execute(
+        "SELECT MAX(sampled_at_utc) FROM inverter_samples"
+    ).fetchone()[0]
+    inverters = [
+        dict(row)
+        for row in connection.execute(
+            """
+            SELECT
+                inverters.inverter_id,
+                inverters.name,
+                inverters.linked_board_id,
+                inverters.configured_ip,
+                COUNT(inverter_samples.id) AS sample_count,
+                MAX(inverter_samples.sampled_at_utc) AS latest_sample_utc,
+                latest_inverter_telemetry.protocol AS latest_protocol,
+                latest_inverter_telemetry.working_mode AS latest_working_mode
+            FROM inverters
+            LEFT JOIN inverter_samples
+                ON inverter_samples.inverter_id = inverters.inverter_id
+            LEFT JOIN latest_inverter_telemetry
+                ON latest_inverter_telemetry.inverter_id = inverters.inverter_id
+            GROUP BY inverters.inverter_id
+            ORDER BY inverters.inverter_id
+            """
+        )
+    ]
     return {
         "schema_version": schema_version,
         "sample_count": sample_count,
         "latest_sample_utc": latest_sample,
         "sources": sources,
+        "inverter_sample_count": inverter_sample_count,
+        "latest_inverter_sample_utc": latest_inverter_sample,
+        "inverters": inverters,
     }
 
 
@@ -262,11 +294,24 @@ def logical_snapshot_key(metadata: dict[str, Any]) -> tuple[Any, ...]:
         )
         for source in metadata.get("sources", [])
     )
+    inverters = tuple(
+        (
+            inverter.get("inverter_id"),
+            inverter.get("sample_count"),
+            inverter.get("latest_sample_utc"),
+            inverter.get("latest_protocol"),
+            inverter.get("latest_working_mode"),
+        )
+        for inverter in metadata.get("inverters", [])
+    )
     return (
         metadata.get("schema_version"),
         metadata.get("sample_count"),
         metadata.get("latest_sample_utc"),
         sources,
+        metadata.get("inverter_sample_count"),
+        metadata.get("latest_inverter_sample_utc"),
+        inverters,
     )
 
 

@@ -1,7 +1,23 @@
 "use strict";
 
 const DEVICE_LABELS = { daly: "Daly", seplos: "Seplos", jk: "JK BMS" };
-const state = { data: null, selected: "daly", toastTimer: null };
+const INVERTER_CONFIG_REFRESH_MS = 30_000;
+const BMS_CONFIG_REFRESH_MS = 30_000;
+const state = {
+  data: null,
+  selected: "daly",
+  selectedInverter: "inverter-anenji",
+  inverterConfig: null,
+  inverterConfigLoading: false,
+  inverterConfigWriting: false,
+  inverterConfigTimer: null,
+  selectedBms: "daly",
+  bmsConfig: null,
+  bmsConfigLoading: false,
+  bmsConfigWriting: false,
+  bmsConfigTimer: null,
+  toastTimer: null,
+};
 
 const $ = (selector) => document.querySelector(selector);
 const esc = (value) => String(value ?? "—").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
@@ -77,13 +93,430 @@ function deviceCard(alias, device) {
     </article>`;
 }
 
+function inverterMeasurement(value, digits, unit) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
+  return `${Number(value).toFixed(digits)}${unit ? ` ${unit}` : ""}`;
+}
+
+function inverterMetric(label, value, digits = 1, unit = "") {
+  return `<div class="inverter-metric"><span>${esc(label)}</span><strong>${esc(inverterMeasurement(value, digits, unit))}</strong></div>`;
+}
+
+function inverterCard(device) {
+  const t = device.telemetry || {};
+  const soc = clamp(Number(t.battery_soc_pct) || 0, 0, 100);
+  const mode = t.working_mode || "Unknown";
+  const protocol = t.protocol || device.configured_protocol;
+  const age = Number.isFinite(Number(device.age_seconds)) ? `${Math.round(Number(device.age_seconds))}s ago` : "No sample";
+  const lastSample = device.last_sample ? new Date(device.last_sample).toLocaleString("en-GB") : "—";
+  return `
+    <article class="inverter-card ${device.online ? "online" : "offline"}" data-inverter="${esc(device.id)}">
+      <div class="device-head">
+        <div>
+          <span class="eyebrow">${esc(device.source_ip || device.configured_ip)}</span>
+          <h3>${esc(device.name)}</h3>
+          <span class="device-subtitle">${esc(protocol)}</span>
+        </div>
+        <span class="device-status ${device.online ? "online" : ""}"><span class="dot"></span>${device.online ? "Online" : device.stale ? "Stale" : "Offline"}</span>
+      </div>
+      <div class="inverter-primary">
+        <div><span>Output power</span><strong>${esc(inverterMeasurement(t.output_power_w, 0, "W"))}</strong></div>
+        <div><span>Operating mode</span><strong>${esc(mode)}</strong></div>
+      </div>
+      <div class="inverter-section">
+        <h4>AC output and grid</h4>
+        <div class="inverter-metrics">
+          ${inverterMetric("Output voltage", t.output_voltage_v, 1, "V")}
+          ${inverterMetric("Output current", t.output_current_a, 1, "A")}
+          ${inverterMetric("Output frequency", t.output_frequency_hz, 2, "Hz")}
+          ${inverterMetric("Apparent power", t.output_apparent_power_va, 0, "VA")}
+          ${inverterMetric("Load", t.load_pct, 0, "%")}
+          ${inverterMetric("Grid voltage", t.grid_voltage_v, 1, "V")}
+          ${inverterMetric("Grid frequency", t.grid_frequency_hz, 2, "Hz")}
+          ${inverterMetric("Grid power", t.grid_power_w, 0, "W")}
+        </div>
+      </div>
+      <div class="inverter-section">
+        <div class="section-title"><h4>Battery</h4><span>${esc(inverterMeasurement(t.battery_soc_pct, 0, "%"))}</span></div>
+        <div class="progress"><i style="width:${soc}%"></i></div>
+        <div class="inverter-metrics compact">
+          ${inverterMetric("Voltage", t.battery_voltage_v, 2, "V")}
+          ${inverterMetric("Current", t.battery_current_a, 2, "A")}
+          ${inverterMetric("Power", t.battery_power_w, 0, "W")}
+          ${inverterMetric("Charge current", t.battery_charge_current_a, 1, "A")}
+          ${inverterMetric("Discharge current", t.battery_discharge_current_a, 1, "A")}
+        </div>
+      </div>
+      <div class="inverter-section">
+        <h4>Solar and temperatures</h4>
+        <div class="inverter-metrics compact">
+          ${inverterMetric("PV voltage", t.pv_voltage_v, 1, "V")}
+          ${inverterMetric("PV current", t.pv_current_a, 1, "A")}
+          ${inverterMetric("PV power", t.pv_power_w, 0, "W")}
+          ${inverterMetric("PV 2 power", t.pv2_power_w, 0, "W")}
+          ${inverterMetric("Inverter temp.", t.inverter_temperature_c, 1, "°C")}
+          ${inverterMetric("DCDC temp.", t.dcdc_temperature_c, 1, "°C")}
+          ${inverterMetric("PV temp.", t.pv_temperature_c, 1, "°C")}
+        </div>
+      </div>
+      <dl class="inverter-meta info-list">
+        ${dl([
+          ["Last sample", lastSample],
+          ["Sample age", age],
+          ["Wi-Fi MAC", device.mac],
+          ["Linked ESP32", device.linked_board_id || "—"],
+          ["Warning bits", t.warning_bits || "None reported"],
+        ])}
+      </dl>
+      ${device.error ? `<div class="device-error">${esc(device.error)}</div>` : ""}
+    </article>`;
+}
+
+function renderInverters(data) {
+  const monitor = data.inverters || { available: false, devices: {}, error: "Waiting for inverter data" };
+  const devices = Object.values(monitor.devices || {});
+  const databaseState = $("#inverter-database-state");
+  const online = devices.filter((device) => device.online).length;
+  databaseState.className = `status-pill ${monitor.available ? (online ? "live" : "") : ""}`;
+  databaseState.innerHTML = `<span class="dot"></span>${monitor.available ? `SQLite v${monitor.schema_version} · ${online}/${devices.length} online` : "SQLite unavailable"}`;
+  if (!monitor.available) {
+    $("#inverter-grid").innerHTML = `<article class="inverter-empty"><strong>Inverter telemetry is unavailable</strong><p>${esc(monitor.error || "The local database could not be read.")}</p></article>`;
+    return;
+  }
+  if (!devices.length) {
+    $("#inverter-grid").innerHTML = `<article class="inverter-empty"><strong>No inverters configured</strong><p>The collector database does not contain inverter inventory yet.</p></article>`;
+    return;
+  }
+  $("#inverter-grid").innerHTML = devices.map(inverterCard).join("");
+}
+
+function setInverterConfigStatus(message, mode = "") {
+  const element = $("#inverter-config-status");
+  element.className = `status-pill ${mode}`.trim();
+  element.innerHTML = `<span class="dot"></span>${esc(message)}`;
+}
+
+function renderInverterControlShell(data) {
+  const devices = Object.values(data.inverters?.devices || {});
+  if (devices.length && !devices.some((device) => device.id === state.selectedInverter)) {
+    state.selectedInverter = devices[0].id;
+  }
+  const selector = $("#inverter-control-selector");
+  const options = devices.map((device) => `<option value="${esc(device.id)}" ${device.id === state.selectedInverter ? "selected" : ""}>${esc(device.name)} · ${esc(device.configured_ip)}</option>`).join("");
+  if (selector.innerHTML !== options) selector.innerHTML = options;
+  selector.disabled = !devices.length || state.inverterConfigLoading || state.inverterConfigWriting;
+}
+
+function configurationValueLabel(item) {
+  const option = (item.options || []).find((candidate) => String(candidate.value) === String(item.value));
+  if (option) return option.label;
+  if (item.display_value !== undefined) return item.display_value;
+  return `${item.value ?? "—"}${item.unit ? ` ${item.unit}` : ""}`;
+}
+
+function configurationInput(item) {
+  const id = `inverter-setting-${item.key}`;
+  if (!item.writable) {
+    return `<div class="setting-readonly">${esc(configurationValueLabel(item))}</div>`;
+  }
+  if (item.type === "action") {
+    return `<button class="button danger setting-action" type="button" data-apply-setting="${esc(item.key)}">Execute action</button>`;
+  }
+  if (item.type === "select") {
+    return `<select id="${esc(id)}" data-setting-input="${esc(item.key)}">${(item.options || []).map((option) => `<option value="${esc(option.value)}" ${String(option.value) === String(item.value) ? "selected" : ""}>${esc(option.label)}</option>`).join("")}</select>`;
+  }
+  const attributes = [
+    `id="${esc(id)}"`, `data-setting-input="${esc(item.key)}"`,
+    `type="${item.type === "text" ? "text" : "number"}"`, `value="${esc(item.value)}"`,
+    item.minimum !== undefined ? `min="${esc(item.minimum)}"` : "",
+    item.maximum !== undefined ? `max="${esc(item.maximum)}"` : "",
+    item.step !== undefined ? `step="${esc(item.step)}"` : "",
+  ].filter(Boolean).join(" ");
+  return `<div class="setting-input-wrap"><input ${attributes}>${item.unit ? `<span>${esc(item.unit)}</span>` : ""}</div>`;
+}
+
+function renderInverterConfiguration(configuration) {
+  const identity = configuration.identity || {};
+  const ratings = configuration.ratings || {};
+  const inconsistencyCount = Object.keys(configuration.raw?.inconsistencies || {}).length;
+  $("#inverter-config-identity").innerHTML = `
+    <article><span>Inverter</span><strong>${esc(configuration.inverter?.name || configuration.protocol)}</strong></article>
+    <article><span>Serial number</span><strong>${esc(identity.serial)}</strong></article>
+    <article><span>Firmware</span><strong>${esc(identity.firmware || "—")}</strong></article>
+    <article><span>Rated power</span><strong>${esc(ratings.rated_power_w !== undefined ? `${ratings.rated_power_w} W` : ratings.output_power_w !== undefined ? `${ratings.output_power_w} W` : "—")}</strong></article>
+    <article><span>Protocol map</span><strong>${esc(configuration.protocol)}</strong></article>
+    <article><span>Read-only mismatches</span><strong>${inconsistencyCount}</strong></article>`;
+  $("#inverter-config-content").innerHTML = (configuration.groups || []).map((group) => `
+    <article class="inverter-config-group">
+      <div class="card-title"><div><span>Live settings</span><strong>${esc(group.title)}</strong></div></div>
+      <div class="inverter-settings-list">${(group.settings || []).map((item) => `
+        <div class="inverter-setting ${item.writable ? "" : "readonly"} ${item.critical ? "critical" : ""}">
+          <div class="setting-copy">
+            <div><strong>${esc(item.label)}</strong>${item.critical ? `<span class="setting-badge">critical</span>` : ""}</div>
+            <span>Current: ${esc(configurationValueLabel(item))}</span>
+            ${item.description ? `<p>${esc(item.description)}</p>` : ""}
+          </div>
+          <div class="setting-control">
+            ${configurationInput(item)}
+            ${item.writable && item.type !== "action" ? `<button class="button secondary" type="button" data-apply-setting="${esc(item.key)}">Apply</button>` : ""}
+          </div>
+        </div>`).join("")}</div>
+    </article>`).join("");
+  $("#inverter-config-backup").disabled = false;
+  setInverterConfigStatus(`Updated ${new Date().toLocaleTimeString("en-GB")} · every 30s`, "live");
+}
+
+function findConfigurationItem(key) {
+  for (const group of state.inverterConfig?.groups || []) {
+    const item = (group.settings || []).find((candidate) => candidate.key === key);
+    if (item) return item;
+  }
+  return null;
+}
+
+async function loadInverterConfiguration() {
+  if (!state.data || !state.selectedInverter || state.inverterConfigLoading || state.inverterConfigWriting) return;
+  state.inverterConfigLoading = true;
+  renderInverterControlShell(state.data);
+  setInverterConfigStatus("Reading live configuration…", "busy");
+  try {
+    const result = await api(`/api/inverters/${encodeURIComponent(state.selectedInverter)}/configuration`);
+    state.inverterConfig = result.configuration;
+    renderInverterConfiguration(state.inverterConfig);
+  } catch (error) {
+    setInverterConfigStatus("Configuration read failed");
+    if (!state.inverterConfig) {
+      $("#inverter-config-content").innerHTML = `<article class="inverter-empty"><strong>Cannot read live configuration</strong><p>${esc(error.message)}. The dashboard will retry automatically.</p></article>`;
+    }
+  } finally {
+    state.inverterConfigLoading = false;
+    renderInverterControlShell(state.data);
+  }
+}
+
+function inverterControlIsActive() {
+  return $("#inverter-control-panel").classList.contains("active") && document.visibilityState === "visible";
+}
+
+function stopInverterConfigPolling() {
+  clearInterval(state.inverterConfigTimer);
+  state.inverterConfigTimer = null;
+}
+
+function startInverterConfigPolling() {
+  stopInverterConfigPolling();
+  if (!inverterControlIsActive()) return;
+  loadInverterConfiguration();
+  state.inverterConfigTimer = setInterval(() => {
+    const active = document.activeElement;
+    const editing = $("#inverter-config-content").contains(active)
+      && (active.matches("input") || active.matches("select"));
+    if (inverterControlIsActive() && !editing) loadInverterConfiguration();
+  }, INVERTER_CONFIG_REFRESH_MS);
+}
+
+async function applyInverterSetting(key, button) {
+  const item = findConfigurationItem(key);
+  if (!item || !item.writable) return;
+  const serial = state.inverterConfig?.identity?.serial;
+  if (!serial) {
+    toast("The inverter serial number is unavailable; reload before writing.", true);
+    return;
+  }
+  const input = document.querySelector(`[data-setting-input="${CSS.escape(key)}"]`);
+  const requested = item.type === "action" ? 1 : input?.value;
+  const current = item.type === "action" ? "one-shot action" : configurationValueLabel(item);
+  const warning = item.critical ? "\n\nThis is a critical setting and can affect loads or battery safety." : "";
+  if (!window.confirm(`Apply “${item.label}” to ${state.inverterConfig.inverter?.name || "the inverter"}?\n\nCurrent: ${current}\nRequested: ${requested}${warning}`)) return;
+  const originalText = button.textContent;
+  state.inverterConfigWriting = true;
+  renderInverterControlShell(state.data);
+  button.disabled = true;
+  button.textContent = "Applying…";
+  setInverterConfigStatus(`Writing ${item.label}…`, "busy");
+  try {
+    const response = await api(`/api/inverters/${encodeURIComponent(state.selectedInverter)}/setting`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ setting: key, value: requested, confirmation: serial }),
+    });
+    state.inverterConfig = response.result.after_configuration;
+    renderInverterConfiguration(state.inverterConfig);
+    toast(response.result.written
+      ? (response.result.verified ? "Setting written and verified by read-back." : "Action acknowledged by the inverter.")
+      : "The requested value was already active; no write was needed.");
+  } catch (error) {
+    setInverterConfigStatus("Write failed; reload before retrying");
+    toast(`Command rejected: ${error.message}`, true);
+  } finally {
+    state.inverterConfigWriting = false;
+    renderInverterControlShell(state.data);
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+}
+
+function setBmsConfigStatus(message, mode = "") {
+  const element = $("#bms-config-status");
+  element.className = `status-pill ${mode}`.trim();
+  element.innerHTML = `<span class="dot"></span>${esc(message)}`;
+}
+
+function renderBmsControlShell() {
+  const selector = $("#bms-control-selector");
+  selector.value = state.selectedBms;
+  selector.disabled = state.bmsConfigLoading || state.bmsConfigWriting;
+}
+
+function bmsConfigurationInput(item) {
+  const id = `bms-setting-${item.key}`;
+  if (!item.writable) return `<div class="setting-readonly">${esc(configurationValueLabel(item))}</div>`;
+  if (item.type === "select") {
+    return `<select id="${esc(id)}" data-bms-setting-input="${esc(item.key)}">${(item.options || []).map((option) => `<option value="${esc(option.value)}" ${String(option.value) === String(item.value) ? "selected" : ""}>${esc(option.label)}</option>`).join("")}</select>`;
+  }
+  if (item.type === "bool") {
+    return `<select id="${esc(id)}" data-bms-setting-input="${esc(item.key)}"><option value="true" ${item.value ? "selected" : ""}>Enabled</option><option value="false" ${item.value ? "" : "selected"}>Disabled</option></select>`;
+  }
+  const attributes = [
+    `id="${esc(id)}"`, `data-bms-setting-input="${esc(item.key)}"`, `type="number"`,
+    `value="${esc(item.value)}"`,
+    item.minimum !== undefined ? `min="${esc(item.minimum)}"` : "",
+    item.maximum !== undefined ? `max="${esc(item.maximum)}"` : "",
+    item.step !== undefined ? `step="${esc(item.step)}"` : "",
+  ].filter(Boolean).join(" ");
+  return `<div class="setting-input-wrap"><input ${attributes}>${item.unit ? `<span>${esc(item.unit)}</span>` : ""}</div>`;
+}
+
+function renderBmsConfiguration(configuration) {
+  const identity = configuration.identity || {};
+  const settingCount = (configuration.groups || []).reduce((total, group) => total + (group.settings || []).length, 0);
+  $("#bms-config-identity").innerHTML = `
+    <article><span>BMS</span><strong>${esc(DEVICE_LABELS[configuration.device] || configuration.device)}</strong></article>
+    <article><span>Model</span><strong>${esc(identity.model)}</strong></article>
+    <article><span>Firmware</span><strong>${esc(identity.firmware || "—")}</strong></article>
+    <article><span>Hardware</span><strong>${esc(identity.hardware || "—")}</strong></article>
+    <article><span>BLE address</span><strong>${esc(identity.address)}</strong></article>
+    <article><span>Writable parameters</span><strong>${settingCount}</strong></article>`;
+  $("#bms-config-content").innerHTML = (configuration.groups || []).map((group) => `
+    <article class="inverter-config-group">
+      <div class="card-title"><div><span>Live BMS settings</span><strong>${esc(group.title)}</strong></div></div>
+      <div class="inverter-settings-list">${(group.settings || []).map((item) => `
+        <div class="inverter-setting ${item.writable ? "" : "readonly"} ${item.critical ? "critical" : ""}">
+          <div class="setting-copy">
+            <div><strong>${esc(item.label)}</strong>${item.critical ? `<span class="setting-badge">critical</span>` : ""}</div>
+            <span>Current: ${esc(configurationValueLabel(item))}</span>
+            ${item.description ? `<p>${esc(item.description)}</p>` : ""}
+          </div>
+          <div class="setting-control">
+            ${bmsConfigurationInput(item)}
+            ${item.writable ? `<button class="button secondary" type="button" data-apply-bms-setting="${esc(item.key)}">Apply</button>` : ""}
+          </div>
+        </div>`).join("")}</div>
+    </article>`).join("");
+  $("#bms-config-backup").disabled = false;
+  setBmsConfigStatus(`Updated ${new Date().toLocaleTimeString("en-GB")} · every 30s`, "live");
+}
+
+function findBmsConfigurationItem(key) {
+  for (const group of state.bmsConfig?.groups || []) {
+    const item = (group.settings || []).find((candidate) => candidate.key === key);
+    if (item) return item;
+  }
+  return null;
+}
+
+async function loadBmsConfiguration() {
+  if (!state.selectedBms || state.bmsConfigLoading || state.bmsConfigWriting) return;
+  state.bmsConfigLoading = true;
+  renderBmsControlShell();
+  setBmsConfigStatus("Reading live configuration…", "busy");
+  try {
+    const result = await api(`/api/bms/${encodeURIComponent(state.selectedBms)}/configuration`);
+    state.bmsConfig = result.configuration;
+    renderBmsConfiguration(state.bmsConfig);
+  } catch (error) {
+    setBmsConfigStatus(error.message.includes("another Bluetooth operation") ? "Waiting for Bluetooth…" : "Configuration read failed");
+    if (!state.bmsConfig) {
+      $("#bms-config-content").innerHTML = `<article class="inverter-empty"><strong>Cannot read live configuration</strong><p>${esc(error.message)}. The dashboard will retry automatically.</p></article>`;
+    }
+  } finally {
+    state.bmsConfigLoading = false;
+    renderBmsControlShell();
+  }
+}
+
+function bmsControlIsActive() {
+  return $("#bms-control-panel").classList.contains("active") && document.visibilityState === "visible";
+}
+
+function stopBmsConfigPolling() {
+  clearInterval(state.bmsConfigTimer);
+  state.bmsConfigTimer = null;
+}
+
+function startBmsConfigPolling() {
+  stopBmsConfigPolling();
+  if (!bmsControlIsActive()) return;
+  loadBmsConfiguration();
+  state.bmsConfigTimer = setInterval(() => {
+    const active = document.activeElement;
+    const editing = $("#bms-config-content").contains(active)
+      && (active.matches("input") || active.matches("select"));
+    if (bmsControlIsActive() && !editing) loadBmsConfiguration();
+  }, BMS_CONFIG_REFRESH_MS);
+}
+
+async function applyBmsSetting(key, button) {
+  const item = findBmsConfigurationItem(key);
+  const confirmation = state.bmsConfig?.identity?.confirmation;
+  if (!item || !item.writable || !confirmation) {
+    toast("The BMS identity is unavailable; reload before writing.", true);
+    return;
+  }
+  const input = document.querySelector(`[data-bms-setting-input="${CSS.escape(key)}"]`);
+  const requested = input?.value;
+  if (requested === undefined || requested === "") return;
+  if (!window.confirm(`Apply “${item.label}” to ${DEVICE_LABELS[state.selectedBms]}?\n\nCurrent: ${configurationValueLabel(item)}\nRequested: ${requested}\n\nThe command will be read back immediately. This setting can affect battery safety or wired communication.`)) return;
+  const originalText = button.textContent;
+  state.bmsConfigWriting = true;
+  renderBmsControlShell();
+  button.disabled = true;
+  button.textContent = "Applying…";
+  setBmsConfigStatus(`Writing ${item.label}…`, "busy");
+  try {
+    const response = await api(`/api/bms/${encodeURIComponent(state.selectedBms)}/setting`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ setting: key, value: requested, confirmation }),
+    });
+    state.bmsConfig = response.result.after_configuration;
+    renderBmsConfiguration(state.bmsConfig);
+    toast(response.result.written
+      ? "BMS setting written and verified by read-back."
+      : "The requested value was already active; no write was needed.");
+  } catch (error) {
+    setBmsConfigStatus("Write failed; reload before retrying");
+    toast(`BMS command rejected: ${error.message}`, true);
+  } finally {
+    state.bmsConfigWriting = false;
+    renderBmsControlShell();
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+}
+
 function renderHeader(data) {
   const devices = Object.values(data.devices || {});
   const online = devices.filter((device) => device.online).length;
   const totalPower = devices.reduce((sum, device) => sum + (Number(device.telemetry?.power) || 0), 0);
+  const inverters = Object.values(data.inverters?.devices || {});
+  const onlineInverters = inverters.filter((device) => device.online).length;
+  const inverterOutput = inverters.reduce((sum, device) => sum + (Number(device.telemetry?.output_power_w) || 0), 0);
   $("#online-count").textContent = online;
   $("#total-power").textContent = `${num(totalPower, 0)} W`;
-  $("#control-state").textContent = data.control_enabled ? "Protected" : "Disabled";
+  $("#inverter-output-total").textContent = `${num(inverterOutput, 0)} W`;
+  $("#inverter-online-summary").textContent = `${onlineInverters}/${inverters.length || 2} online`;
+  $("#control-state").textContent = data.control_auth_required ? "Protected" : "Trusted LAN";
   $("#poll-interval").textContent = `${data.poll_interval_seconds}s`;
   $("#last-update").textContent = data.last_poll_finished ? `Last cycle: ${new Date(data.last_poll_finished).toLocaleString("en-GB")}` : "Initializing Bluetooth connections…";
   const poll = $("#poll-state");
@@ -172,41 +605,14 @@ function renderCellVoltages(cells) {
   }).join("");
 }
 
-function jkData(data) { return data.protocols?.jk?.data || null; }
-function seplosData(data) { return data.protocols?.seplos?.data || null; }
-
-function updateJkOptions() {
-  if (!state.data) return;
-  const jk = jkData(state.data);
-  const interfaceName = $("#jk-interface").value;
-  const info = jk?.interfaces?.[interfaceName];
-  $("#jk-protocol").innerHTML = (info?.enabled_protocols || []).map((item) => `<option value="${item.index}" ${item.index === info.selected.index ? "selected" : ""}>${item.index} · ${esc(item.name)}</option>`).join("");
-}
-
-function renderProtocols(data) {
-  const jk = jkData(data);
-  const interfaces = jk?.interfaces || {};
-  $("#jk-current-protocols").innerHTML = Object.entries(interfaces).map(([name, item]) => `<div><span>${esc(name)}</span><strong>${esc(item.selected.index)} · ${esc(item.selected.name)}</strong></div>`).join("") || `<p class="note">JK protocol data is not available yet.</p>`;
-  const previousInterface = $("#jk-interface").value;
-  $("#jk-interface").innerHTML = Object.keys(interfaces).map((name) => `<option value="${name}" ${name === previousInterface ? "selected" : ""}>${name.toUpperCase()}</option>`).join("");
-  updateJkOptions();
-  const seplosDevice = seplosData(data);
-  const seplos = seplosDevice?.inverter_protocol;
-  $("#seplos-protocol").innerHTML = seplos ? dl([
-    ["Profile", seplos.selector_profile || "unknown"], ["Protocol", seplos.protocol_name], ["Version", seplos.protocol_version], ["Baud rate", `${seplos.baud_rate} bps`], ["Inverter", seplos.inverter_name], ["Selector", seplos.selector_index]
-  ]) : dl([["Status", data.protocols?.seplos?.error || "Waiting for data"]]);
-  const previousProfile = $("#seplos-profile").value;
-  $("#seplos-profile").innerHTML = (data.seplos_protocol_profiles || []).map((profile) => `<option value="${esc(profile.name)}" ${profile.name === (previousProfile || seplos?.selector_profile) ? "selected" : ""}>${profile.index} · ${esc(profile.protocol_name)}</option>`).join("");
-  $("#jk-protocol-form button[type=submit]").disabled = !data.control_enabled || !jk;
-  $("#seplos-protocol-form button[type=submit]").disabled = !data.control_enabled || !seplosDevice;
-}
-
 function renderAll() {
   if (!state.data) return;
   renderHeader(state.data);
   renderCards(state.data);
   renderDetails(state.data);
-  renderProtocols(state.data);
+  renderInverters(state.data);
+  renderInverterControlShell(state.data);
+  renderBmsControlShell();
 }
 
 async function loadStatus(showError = false) {
@@ -226,59 +632,71 @@ $("#refresh-button").addEventListener("click", async () => {
   } catch (error) { toast(error.message, true); }
 });
 
+$("#inverter-control-selector").addEventListener("change", (event) => {
+  state.selectedInverter = event.target.value;
+  state.inverterConfig = null;
+  $("#inverter-config-identity").innerHTML = "";
+  $("#inverter-config-content").innerHTML = `<article class="inverter-empty"><strong>Reading selected inverter</strong><p>Waiting for its live configuration.</p></article>`;
+  $("#inverter-config-backup").disabled = true;
+  setInverterConfigStatus("Waiting for automatic read");
+  startInverterConfigPolling();
+});
+$("#inverter-config-content").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-apply-setting]");
+  if (button) applyInverterSetting(button.dataset.applySetting, button);
+});
+$("#inverter-config-backup").addEventListener("click", () => {
+  if (!state.inverterConfig) return;
+  const blob = new Blob([JSON.stringify(state.inverterConfig, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${state.selectedInverter}-configuration-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  link.click();
+  URL.revokeObjectURL(url);
+});
+
+$("#bms-control-selector").addEventListener("change", (event) => {
+  state.selectedBms = event.target.value;
+  state.bmsConfig = null;
+  $("#bms-config-identity").innerHTML = "";
+  $("#bms-config-content").innerHTML = `<article class="inverter-empty"><strong>Reading selected BMS</strong><p>Waiting for its live Bluetooth configuration.</p></article>`;
+  $("#bms-config-backup").disabled = true;
+  setBmsConfigStatus("Waiting for automatic read");
+  startBmsConfigPolling();
+});
+$("#bms-config-content").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-apply-bms-setting]");
+  if (button) applyBmsSetting(button.dataset.applyBmsSetting, button);
+});
+$("#bms-config-backup").addEventListener("click", () => {
+  if (!state.bmsConfig) return;
+  const blob = new Blob([JSON.stringify(state.bmsConfig, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${state.selectedBms}-bms-configuration-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  link.click();
+  URL.revokeObjectURL(url);
+});
+
 document.querySelectorAll(".tab").forEach((button) => button.addEventListener("click", () => {
   document.querySelectorAll(".tab").forEach((item) => item.classList.toggle("active", item === button));
   document.querySelectorAll(".tab-panel").forEach((panel) => panel.classList.toggle("active", panel.id === `${button.dataset.tab}-panel`));
+  if (button.dataset.tab === "inverter-control") startInverterConfigPolling();
+  else stopInverterConfigPolling();
+  if (button.dataset.tab === "bms-control") startBmsConfigPolling();
+  else stopBmsConfigPolling();
 }));
 
-$("#jk-interface").addEventListener("change", updateJkOptions);
-$("#jk-protocol-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const jk = jkData(state.data);
-  if (!jk) return;
-  if ($("#jk-confirmation").value.trim() !== jk.model) {
-    toast(`For confirmation, type exactly ${jk.model}`, true);
-    return;
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    startInverterConfigPolling();
+    startBmsConfigPolling();
+  } else {
+    stopInverterConfigPolling();
+    stopBmsConfigPolling();
   }
-  const button = event.submitter;
-  button.disabled = true;
-  button.textContent = "Applying…";
-  try {
-    const result = await api("/api/jk/protocol", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Control-Token": $("#control-token").value },
-      body: JSON.stringify({ interface: $("#jk-interface").value, protocol: $("#jk-protocol").value, confirmation: jk.address }),
-    });
-    toast(result.result.changed ? "The JK protocol was changed and verified by read-back." : "The selected protocol was already active.");
-    $("#jk-confirmation").value = "";
-    await loadStatus(true);
-  } catch (error) { toast(`Command rejected: ${error.message}`, true); }
-  finally { button.disabled = false; button.textContent = "Apply JK protocol"; }
-});
-
-$("#seplos-protocol-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const seplos = seplosData(state.data);
-  if (!seplos) return;
-  const serial = seplos.identity?.bms_serial_number;
-  if (!serial || $("#seplos-confirmation").value.trim() !== serial) {
-    toast(`For confirmation, type exactly ${serial || "the BMS serial number"}`, true);
-    return;
-  }
-  const button = event.submitter;
-  button.disabled = true;
-  button.textContent = "Applying…";
-  try {
-    const result = await api("/api/seplos/protocol", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Control-Token": $("#seplos-control-token").value },
-      body: JSON.stringify({ profile: $("#seplos-profile").value, confirmation: serial }),
-    });
-    toast(result.result.changed ? "The Seplos protocol was changed and verified by read-back." : "The selected protocol was already active.");
-    $("#seplos-confirmation").value = "";
-    await loadStatus(true);
-  } catch (error) { toast(`Command rejected: ${error.message}`, true); }
-  finally { button.disabled = false; button.textContent = "Apply Seplos protocol"; }
 });
 
 loadStatus(true);

@@ -1,8 +1,8 @@
 # Local telemetry database
 
-`tools/telemetry_collector.py` reads every configured BMS telemetry endpoint
-every 30 seconds and stores valid, non-stale responses in SQLite. Multiple BMS
-sources may share the same physical ESP32 board.
+`tools/telemetry_collector.py` reads every configured BMS and inverter every 30
+seconds and stores successful snapshots in SQLite. Multiple BMS sources may
+share the same physical ESP32 board.
 
 ## Board identities
 
@@ -23,6 +23,43 @@ The collector first uses an explicit board IP when configured. Without one, it
 resolves the current IP by MAC/hostname from the hotspot dnsmasq lease file and
 finally falls back to the last successful address cached in SQLite.
 
+## Inverters
+
+| Source | IP | Wi-Fi MAC | Protocol | Linked board |
+| --- | --- | --- | --- | --- |
+| `inverter-anenji` | `192.168.1.18` | `34:5f:45:48:cf:15` | Eybond-wrapped Modbus registers 201-234 | 2 |
+| `inverter-easun` | `192.168.1.185` | `c4:d8:d5:1c:6a:06` | Eybond-wrapped Voltronic ASCII | 1 |
+
+Both installed Eybond dongles require the standard reverse TCP callback port
+`8899`. The collector therefore polls the inverters sequentially on that port.
+Telemetry collection is read-only: it temporarily directs each dongle to the
+Raspberry Pi, receives one reverse TCP connection, runs the queries, and closes
+the connection. The dashboard's explicit configuration read/write operations
+use the same port and a shared inter-process lock, so they cannot overlap a
+collector cycle.
+
+Anenji snapshots contain all raw live registers 201-234 plus normalized pack,
+grid, inverter-internal, output, PV, load, temperature, SOC, operating-mode,
+charging-average, and power-flow values. EASUN snapshots require `QPIGS` and
+also collect the live `QMOD`, `QPIWS`, and `QPIGS2` queries when supported.
+`QPIRI` is deliberately not queried by the collector because it contains
+ratings and configuration. Complete decoded live payloads, live raw responses,
+raw frames, and optional-command errors are retained in `payload_json`.
+
+The installed EASUN reports protocol ID `PI30`. Its `QPIGS` response includes
+measured AC output active/apparent power, but no measured AC-input current or
+power. The collector records grid power as exactly zero while input voltage and
+frequency are both zero. If AC input becomes available, grid power remains
+unknown instead of being replaced with an unlabelled energy-balance estimate;
+an external meter is required for an accurate non-zero grid-power measurement.
+
+The local wire implementation follows the documented Eybond reverse-tunnel
+behavior used by
+[`smartess-local`](https://github.com/oleksandr-kuzmenko/smartess-local) and
+the EASUN/Voltronic command handling demonstrated by
+[`easunpy`](https://github.com/vgsolar2/easunpy). The collector itself has no
+additional Python package dependency.
+
 ## Files
 
 - configuration: `tools/telemetry_boards.json`
@@ -40,7 +77,7 @@ Run one collection cycle:
 python3 tools/telemetry_collector.py --once
 ```
 
-Show sample counts and the most recent result for each BMS source:
+Show sample counts and the most recent result for every BMS and inverter:
 
 ```bash
 python3 tools/telemetry_collector.py --status
@@ -54,9 +91,12 @@ tail -f data/telemetry_collector.log
 
 ## Schema
 
-Schema version 2 adds `bms_sources` and a `source_id` on every sample. A version
-1 database is migrated in place; existing primary samples are assigned to the
-matching `*-bms1` source and are not deleted.
+Schema version 5 includes the original BMS source migration plus inverter
+inventory and samples. Older databases are migrated in place and no BMS or
+inverter sample rows are deleted. Version 4 allowed the two installed dongles
+to share their required local callback port because polling is sequential.
+Version 5 adds explicit columns for every currently decoded live inverter
+field and removes historical EASUN `QPIRI`/rating content from `payload_json`.
 
 `telemetry_samples` contains one row for every valid, non-stale HTTP response.
 The main telemetry fields are stored in typed columns. `cells_v_json` preserves
@@ -70,6 +110,15 @@ sample time, and latest error for each BMS.
 
 `latest_telemetry` is a view containing the newest sample from each BMS source.
 
+`inverters` contains identity, configured network/protocol information, linked
+ESP32 board, last successful sample, and latest error. `inverter_samples`
+contains 44 typed live fields and the filtered live `payload_json` for each
+successful read. Configuration responses and inverter settings are not stored.
+`latest_inverter_telemetry` contains the newest sample per inverter.
+
+An absent or unreachable inverter updates `inverters.last_error` but never
+creates a false/empty sample.
+
 ## Periodic Git snapshots
 
 `tools/telemetry_snapshot_push.py` uses the SQLite Backup API to create a
@@ -81,6 +130,10 @@ the firmware branch. It publishes only these generated files under the
 - `telemetry.sqlite3`
 - `metadata.json`
 - a short branch README and Git attributes
+
+The metadata contains independent BMS and inverter sample counts. Either type
+of new sample changes the logical snapshot key and causes the next scheduled
+publication to include the updated database.
 
 The dedicated worktree is kept outside the project at
 `~/.local/share/inverter-telemetry-data`, so the automation never switches the

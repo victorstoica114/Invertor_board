@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodically verify the Synology OpenVPN connection
+
+[Timer]
+OnBootSec=15s
+OnUnitInactiveSec=30s
+AccuracySec=2s
+Persistent=true
+Unit=uwb-openvpn-watchdog.service
+
+[Install]
+WantedBy=timers.target

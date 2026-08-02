@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""LAN dashboard for the local Daly, Seplos and JK Bluetooth BMS devices."""
+"""LAN dashboard for local Bluetooth BMS devices and Wi-Fi inverters."""
 
 from __future__ import annotations
 
@@ -9,31 +9,41 @@ from collections import deque
 import copy
 import datetime as dt
 from dataclasses import dataclass
-import hmac
+import json
 import logging
 import os
 from pathlib import Path
+import re
+import sqlite3
 import time
 from typing import Any, Awaitable, Callable, Final, Mapping
 
 from aiohttp import web
 
 try:
-    from tools import bms_ble
+    from tools import bms_ble, bms_config, inverter_protocols
 except ModuleNotFoundError:  # Direct execution: python tools/bms_dashboard.py
     import bms_ble  # type: ignore[no-redef]
+    import bms_config  # type: ignore[no-redef]
+    import inverter_protocols  # type: ignore[no-redef]
 
 
 LOGGER = logging.getLogger("bms_dashboard")
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 STATIC_ROOT: Final[Path] = PROJECT_ROOT / "tools" / "bms_dashboard_static"
+DEFAULT_TELEMETRY_DATABASE: Final[Path] = PROJECT_ROOT / "data" / "telemetry.sqlite3"
 HISTORY_LIMIT: Final[int] = 180
 MIN_REFRESH_SECONDS: Final[float] = 3.0
+DEFAULT_INVERTER_STALE_SECONDS: Final[float] = 90.0
+INVERTER_CONTROL_TIMEOUT_SECONDS: Final[float] = 12.0
+INVERTER_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 TelemetryReader = Callable[[str], Awaitable[dict[str, Any]]]
 ProtocolReader = Callable[[], Awaitable[dict[str, Any]]]
 JkProtocolWriter = Callable[[str, str, str], Awaitable[dict[str, Any]]]
 SeplosProtocolWriter = Callable[[str, str], Awaitable[dict[str, Any]]]
+BmsConfigurationReader = Callable[[str], Awaitable[dict[str, Any]]]
+BmsSettingWriter = Callable[[str, str, Any, str], Awaitable[dict[str, Any]]]
 
 
 def utc_now() -> str:
@@ -58,9 +68,126 @@ def history_sample(timestamp: str, telemetry: Mapping[str, Any]) -> dict[str, An
     }
 
 
-def control_authorized(headers: Mapping[str, str], configured_token: str) -> bool:
-    supplied = headers.get("X-Control-Token", "")
-    return bool(configured_token) and hmac.compare_digest(supplied, configured_token)
+def read_inverter_snapshot(
+    database: Path,
+    stale_after_seconds: float = DEFAULT_INVERTER_STALE_SECONDS,
+    now_unix_ms: int | None = None,
+) -> dict[str, Any]:
+    """Read the latest inverter samples without competing with the collector."""
+    current_ms = time.time_ns() // 1_000_000 if now_unix_ms is None else now_unix_ms
+    try:
+        database_uri = f"{database.expanduser().resolve().as_uri()}?mode=ro"
+        with sqlite3.connect(database_uri, uri=True, timeout=2) as connection:
+            connection.row_factory = sqlite3.Row
+            schema_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            rows = connection.execute(
+                """
+                SELECT
+                    inverters.inverter_id,
+                    inverters.name,
+                    inverters.protocol AS configured_protocol,
+                    inverters.mac,
+                    inverters.linked_board_id,
+                    inverters.configured_ip,
+                    inverters.last_seen_utc,
+                    inverters.last_error,
+                    latest_inverter_telemetry.sampled_at_utc,
+                    latest_inverter_telemetry.sampled_at_unix_ms,
+                    latest_inverter_telemetry.source_ip,
+                    latest_inverter_telemetry.payload_json
+                FROM inverters
+                LEFT JOIN latest_inverter_telemetry
+                    ON latest_inverter_telemetry.inverter_id = inverters.inverter_id
+                ORDER BY inverters.inverter_id
+                """
+            ).fetchall()
+    except (OSError, sqlite3.Error) as exc:
+        return {
+            "available": False,
+            "schema_version": None,
+            "stale_after_seconds": stale_after_seconds,
+            "error": f"{type(exc).__name__}: {exc}",
+            "devices": {},
+        }
+
+    devices: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        payload: dict[str, Any] = {}
+        payload_error: str | None = None
+        if row["payload_json"]:
+            try:
+                parsed = json.loads(str(row["payload_json"]))
+                if not isinstance(parsed, dict):
+                    raise ValueError("payload is not a JSON object")
+                payload = parsed
+            except (ValueError, TypeError, json.JSONDecodeError) as exc:
+                payload_error = f"{type(exc).__name__}: {exc}"
+
+        sampled_ms = row["sampled_at_unix_ms"]
+        age_seconds = (
+            max(0.0, (current_ms - int(sampled_ms)) / 1000.0)
+            if sampled_ms is not None
+            else None
+        )
+        stale = age_seconds is None or age_seconds > stale_after_seconds
+        error = str(row["last_error"]) if row["last_error"] else payload_error
+        if stale and error is None:
+            error = (
+                "No inverter sample is available"
+                if age_seconds is None
+                else f"Latest sample is stale ({age_seconds:.0f}s old)"
+            )
+        inverter_id = str(row["inverter_id"])
+        devices[inverter_id] = {
+            "id": inverter_id,
+            "name": str(row["name"]),
+            "mac": str(row["mac"]),
+            "linked_board_id": row["linked_board_id"],
+            "configured_protocol": str(row["configured_protocol"]),
+            "configured_ip": str(row["configured_ip"]),
+            "source_ip": row["source_ip"] or row["configured_ip"],
+            "online": not stale and error is None,
+            "stale": stale,
+            "age_seconds": age_seconds,
+            "last_sample": row["sampled_at_utc"],
+            "last_seen": row["last_seen_utc"],
+            "error": error,
+            "telemetry": payload,
+        }
+    return {
+        "available": True,
+        "schema_version": schema_version,
+        "stale_after_seconds": stale_after_seconds,
+        "error": None,
+        "devices": devices,
+    }
+
+
+def read_inverter_target(database: Path, inverter_id: str) -> dict[str, Any]:
+    """Resolve one configured inverter from the collector's local inventory."""
+    if not INVERTER_ID_PATTERN.fullmatch(inverter_id):
+        raise ValueError("invalid inverter id")
+    database_uri = f"{database.expanduser().resolve().as_uri()}?mode=ro"
+    with sqlite3.connect(database_uri, uri=True, timeout=2) as connection:
+        connection.row_factory = sqlite3.Row
+        row = connection.execute(
+            """
+            SELECT inverter_id, name, protocol, configured_ip, local_ip, local_port
+            FROM inverters
+            WHERE inverter_id = ?
+            """,
+            (inverter_id,),
+        ).fetchone()
+    if row is None:
+        raise KeyError(inverter_id)
+    return {
+        "id": str(row["inverter_id"]),
+        "name": str(row["name"]),
+        "protocol": str(row["protocol"]),
+        "ip": str(row["configured_ip"]),
+        "local_ip": str(row["local_ip"]),
+        "local_port": int(row["local_port"]),
+    }
 
 
 @dataclass(frozen=True)
@@ -69,7 +196,8 @@ class DashboardConfig:
     port: int = 8765
     poll_interval_seconds: float = 20.0
     protocol_interval_seconds: float = 300.0
-    control_token: str = ""
+    telemetry_database: Path = DEFAULT_TELEMETRY_DATABASE
+    inverter_stale_seconds: float = DEFAULT_INVERTER_STALE_SECONDS
 
     @classmethod
     def from_env_and_args(cls, args: argparse.Namespace) -> "DashboardConfig":
@@ -81,14 +209,34 @@ class DashboardConfig:
         protocol_interval = float(
             os.environ.get("BMS_DASHBOARD_PROTOCOL_INTERVAL", cls.protocol_interval_seconds)
         )
-        token = os.environ.get("BMS_DASHBOARD_CONTROL_TOKEN", "")
+        database_value = os.environ.get(
+            "BMS_DASHBOARD_TELEMETRY_DATABASE", str(DEFAULT_TELEMETRY_DATABASE)
+        )
+        database = Path(database_value).expanduser()
+        if not database.is_absolute():
+            database = PROJECT_ROOT / database
+        inverter_stale_seconds = float(
+            os.environ.get(
+                "BMS_DASHBOARD_INVERTER_STALE_SECONDS",
+                DEFAULT_INVERTER_STALE_SECONDS,
+            )
+        )
         if not 1 <= port <= 65535:
             raise ValueError("port must be between 1 and 65535")
         if poll_interval < 5:
             raise ValueError("poll interval must be at least 5 seconds")
         if protocol_interval < 30:
             raise ValueError("protocol interval must be at least 30 seconds")
-        return cls(host, port, poll_interval, protocol_interval, token)
+        if inverter_stale_seconds < 30:
+            raise ValueError("inverter stale interval must be at least 30 seconds")
+        return cls(
+            host=host,
+            port=port,
+            poll_interval_seconds=poll_interval,
+            protocol_interval_seconds=protocol_interval,
+            telemetry_database=database.resolve(),
+            inverter_stale_seconds=inverter_stale_seconds,
+        )
 
 
 class DashboardState:
@@ -102,6 +250,8 @@ class DashboardState:
         seplos_protocol_reader: ProtocolReader = bms_ble.read_seplos_protocol,
         jk_protocol_writer: JkProtocolWriter = bms_ble.set_jk_protocol,
         seplos_protocol_writer: SeplosProtocolWriter = bms_ble.set_seplos_protocol,
+        bms_configuration_reader: BmsConfigurationReader = bms_config.read_bms_configuration,
+        bms_setting_writer: BmsSettingWriter = bms_config.write_bms_setting,
     ) -> None:
         self.config = config
         self.telemetry_reader = telemetry_reader
@@ -109,7 +259,10 @@ class DashboardState:
         self.seplos_protocol_reader = seplos_protocol_reader
         self.jk_protocol_writer = jk_protocol_writer
         self.seplos_protocol_writer = seplos_protocol_writer
+        self.bms_configuration_reader = bms_configuration_reader
+        self.bms_setting_writer = bms_setting_writer
         self.operation_lock = asyncio.Lock()
+        self.inverter_operation_lock = asyncio.Lock()
         self.refresh_event = asyncio.Event()
         self.poll_task: asyncio.Task[None] | None = None
         self.polling = False
@@ -268,6 +421,19 @@ class DashboardState:
         self.refresh_event.set()
         return result
 
+    async def read_bms_configuration(self, alias: str) -> dict[str, Any]:
+        async with self.operation_lock:
+            return await self.bms_configuration_reader(alias)
+
+    async def write_bms_setting(
+        self, alias: str, setting: str, value: Any, confirmation: str
+    ) -> dict[str, Any]:
+        async with self.operation_lock:
+            result = await self.bms_setting_writer(alias, setting, value, confirmation)
+            self.generation += 1
+        self.refresh_event.set()
+        return result
+
     def public_snapshot(self) -> dict[str, Any]:
         return {
             "server_time": utc_now(),
@@ -276,7 +442,8 @@ class DashboardState:
             "poll_interval_seconds": self.config.poll_interval_seconds,
             "last_poll_started": self.last_poll_started,
             "last_poll_finished": self.last_poll_finished,
-            "control_enabled": bool(self.config.control_token),
+            "control_enabled": True,
+            "control_auth_required": False,
             "seplos_protocol_profiles": [
                 {"name": name, **copy.deepcopy(profile)}
                 for name, profile in bms_ble.SEPLOS_PROTOCOLS.items()
@@ -317,7 +484,166 @@ async def index_handler(_request: web.Request) -> web.FileResponse:
 
 
 async def status_handler(request: web.Request) -> web.Response:
-    return web.json_response(dashboard_state(request).public_snapshot())
+    state = dashboard_state(request)
+    snapshot = state.public_snapshot()
+    snapshot["inverters"] = await asyncio.to_thread(
+        read_inverter_snapshot,
+        state.config.telemetry_database,
+        state.config.inverter_stale_seconds,
+    )
+    return web.json_response(snapshot)
+
+
+async def inverters_handler(request: web.Request) -> web.Response:
+    state = dashboard_state(request)
+    snapshot = await asyncio.to_thread(
+        read_inverter_snapshot,
+        state.config.telemetry_database,
+        state.config.inverter_stale_seconds,
+    )
+    return web.json_response(snapshot)
+
+
+def bms_alias_for_request(request: web.Request) -> str:
+    alias = request.match_info.get("alias", "")
+    if alias not in bms_ble.DEVICE_INVENTORY:
+        raise web.HTTPNotFound(text="unknown BMS")
+    return alias
+
+
+async def bms_configuration_handler(request: web.Request) -> web.Response:
+    state = dashboard_state(request)
+    alias = bms_alias_for_request(request)
+    try:
+        configuration = await state.read_bms_configuration(alias)
+    except ValueError as exc:
+        raise web.HTTPBadRequest(text=str(exc)) from exc
+    except TimeoutError as exc:
+        raise web.HTTPGatewayTimeout(text=f"Bluetooth configuration read timed out: {exc}") from exc
+    except Exception as exc:
+        LOGGER.error("BMS configuration read failed: alias=%s reason=%s", alias, exc)
+        raise web.HTTPBadGateway(text=f"Bluetooth configuration read failed: {exc}") from exc
+    return web.json_response({"ok": True, "configuration": configuration})
+
+
+async def bms_setting_handler(request: web.Request) -> web.Response:
+    state = dashboard_state(request)
+    alias = bms_alias_for_request(request)
+    try:
+        body = await request.json()
+    except (ValueError, TypeError) as exc:
+        raise web.HTTPBadRequest(text="invalid JSON body") from exc
+    setting = str(body.get("setting", "")).strip()
+    confirmation = str(body.get("confirmation", "")).strip()
+    if not setting or "value" not in body:
+        raise web.HTTPBadRequest(text="setting and value are required")
+    LOGGER.warning(
+        "BMS configuration write requested: alias=%s setting=%s peer=%s",
+        alias, setting, request.remote or "unknown",
+    )
+    try:
+        result = await state.write_bms_setting(alias, setting, body["value"], confirmation)
+    except ValueError as exc:
+        LOGGER.warning("BMS write rejected: alias=%s setting=%s reason=%s", alias, setting, exc)
+        raise web.HTTPBadRequest(text=str(exc)) from exc
+    except TimeoutError as exc:
+        LOGGER.error("BMS write timed out: alias=%s setting=%s", alias, setting)
+        raise web.HTTPGatewayTimeout(text=f"Bluetooth configuration write timed out: {exc}") from exc
+    except Exception as exc:
+        LOGGER.error("BMS write failed: alias=%s setting=%s reason=%s", alias, setting, exc)
+        raise web.HTTPBadGateway(text=f"Bluetooth configuration write failed: {exc}") from exc
+    LOGGER.warning(
+        "BMS configuration write completed: alias=%s setting=%s written=%s verified=%s before=%r after=%r",
+        alias, setting, result["written"], result["verified"], result["before"], result["after"],
+    )
+    return web.json_response({"ok": True, "result": result})
+
+
+async def inverter_target_for_request(request: web.Request) -> dict[str, Any]:
+    state = dashboard_state(request)
+    inverter_id = request.match_info.get("inverter_id", "")
+    try:
+        return await asyncio.to_thread(
+            read_inverter_target, state.config.telemetry_database, inverter_id
+        )
+    except ValueError as exc:
+        raise web.HTTPBadRequest(text=str(exc)) from exc
+    except KeyError as exc:
+        raise web.HTTPNotFound(text="unknown inverter") from exc
+    except (OSError, sqlite3.Error) as exc:
+        raise web.HTTPServiceUnavailable(text=f"inverter inventory is unavailable: {exc}") from exc
+
+
+async def inverter_configuration_handler(request: web.Request) -> web.Response:
+    state = dashboard_state(request)
+    target = await inverter_target_for_request(request)
+    if state.inverter_operation_lock.locked():
+        raise web.HTTPConflict(text="another inverter configuration operation is in progress")
+    try:
+        async with state.inverter_operation_lock:
+            configuration = await asyncio.to_thread(
+                inverter_protocols.read_inverter_configuration,
+                target["protocol"],
+                target["ip"],
+                target["local_ip"],
+                target["local_port"],
+                INVERTER_CONTROL_TIMEOUT_SECONDS,
+            )
+    except ValueError as exc:
+        raise web.HTTPBadRequest(text=str(exc)) from exc
+    except TimeoutError as exc:
+        raise web.HTTPGatewayTimeout(text=str(exc)) from exc
+    except (OSError, inverter_protocols.InverterProtocolError) as exc:
+        raise web.HTTPBadGateway(text=str(exc)) from exc
+    configuration["inverter"] = target
+    return web.json_response({"ok": True, "configuration": configuration})
+
+
+async def inverter_setting_handler(request: web.Request) -> web.Response:
+    state = dashboard_state(request)
+    target = await inverter_target_for_request(request)
+    try:
+        body = await request.json()
+    except (ValueError, TypeError) as exc:
+        raise web.HTTPBadRequest(text="invalid JSON body") from exc
+    setting = str(body.get("setting", "")).strip()
+    confirmation = str(body.get("confirmation", "")).strip()
+    if not setting or "value" not in body:
+        raise web.HTTPBadRequest(text="setting and value are required")
+    if state.inverter_operation_lock.locked():
+        raise web.HTTPConflict(text="another inverter configuration operation is in progress")
+    LOGGER.warning(
+        "inverter configuration write requested: inverter=%s setting=%s peer=%s",
+        target["id"], setting, request.remote or "unknown",
+    )
+    try:
+        async with state.inverter_operation_lock:
+            result = await asyncio.to_thread(
+                inverter_protocols.write_inverter_setting,
+                target["protocol"],
+                target["ip"],
+                target["local_ip"],
+                target["local_port"],
+                INVERTER_CONTROL_TIMEOUT_SECONDS,
+                setting,
+                body["value"],
+                confirmation,
+            )
+    except ValueError as exc:
+        LOGGER.warning("inverter write rejected: inverter=%s setting=%s reason=%s", target["id"], setting, exc)
+        raise web.HTTPBadRequest(text=str(exc)) from exc
+    except TimeoutError as exc:
+        LOGGER.error("inverter write timed out: inverter=%s setting=%s", target["id"], setting)
+        raise web.HTTPGatewayTimeout(text=str(exc)) from exc
+    except (OSError, inverter_protocols.InverterProtocolError) as exc:
+        LOGGER.error("inverter write failed: inverter=%s setting=%s reason=%s", target["id"], setting, exc)
+        raise web.HTTPBadGateway(text=str(exc)) from exc
+    result["after_configuration"]["inverter"] = target
+    LOGGER.warning(
+        "inverter configuration write completed: inverter=%s setting=%s written=%s verified=%s before=%r after=%r",
+        target["id"], setting, result["written"], result["verified"], result["before"], result["after"],
+    )
+    return web.json_response({"ok": True, "result": result})
 
 
 async def health_handler(request: web.Request) -> web.Response:
@@ -337,24 +663,15 @@ async def refresh_handler(request: web.Request) -> web.Response:
     return web.json_response({"accepted": accepted, "reason": None if accepted else "refresh rate limited"})
 
 
-def require_control(request: web.Request) -> DashboardState:
-    state = dashboard_state(request)
-    if not state.config.control_token:
-        raise web.HTTPServiceUnavailable(text="BMS control is disabled on this server")
-    if not control_authorized(request.headers, state.config.control_token):
-        raise web.HTTPUnauthorized(text="invalid control token")
-    return state
-
-
 async def protocol_refresh_handler(request: web.Request) -> web.Response:
-    state = require_control(request)
+    state = dashboard_state(request)
     if not await state.refresh_protocols():
         raise web.HTTPConflict(text="another Bluetooth operation is in progress")
     return web.json_response({"ok": True, "protocols": state.public_snapshot()["protocols"]})
 
 
 async def jk_protocol_handler(request: web.Request) -> web.Response:
-    state = require_control(request)
+    state = dashboard_state(request)
     try:
         body = await request.json()
     except (ValueError, TypeError) as exc:
@@ -378,7 +695,7 @@ async def jk_protocol_handler(request: web.Request) -> web.Response:
 
 
 async def seplos_protocol_handler(request: web.Request) -> web.Response:
-    state = require_control(request)
+    state = dashboard_state(request)
     try:
         body = await request.json()
     except (ValueError, TypeError) as exc:
@@ -424,6 +741,11 @@ def create_app(config: DashboardConfig, state: DashboardState | None = None) -> 
     app[STATE_KEY] = state or DashboardState(config)
     app.router.add_get("/", index_handler)
     app.router.add_get("/api/status", status_handler)
+    app.router.add_get("/api/inverters", inverters_handler)
+    app.router.add_get("/api/bms/{alias}/configuration", bms_configuration_handler)
+    app.router.add_post("/api/bms/{alias}/setting", bms_setting_handler)
+    app.router.add_get("/api/inverters/{inverter_id}/configuration", inverter_configuration_handler)
+    app.router.add_post("/api/inverters/{inverter_id}/setting", inverter_setting_handler)
     app.router.add_get("/api/health", health_handler)
     app.router.add_post("/api/refresh", refresh_handler)
     app.router.add_post("/api/protocols/refresh", protocol_refresh_handler)
@@ -447,11 +769,10 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     config = DashboardConfig.from_env_and_args(build_parser().parse_args())
     LOGGER.info(
-        "starting on http://%s:%d (poll %.1fs, controls %s)",
+        "starting on http://%s:%d (poll %.1fs, controls trusted on LAN)",
         config.host,
         config.port,
         config.poll_interval_seconds,
-        "enabled" if config.control_token else "disabled",
     )
     web.run_app(create_app(config), host=config.host, port=config.port, print=None)
 
