@@ -1,0 +1,11 @@
+[Unit]
+Description=Publish inverter telemetry every 12 hours
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=12h
+Persistent=true
+Unit=inverter-telemetry-push.service
+
+[Install]
+WantedBy=timers.target

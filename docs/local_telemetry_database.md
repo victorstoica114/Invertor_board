@@ -69,3 +69,43 @@ unreachable sources update status metadata but never create a sample.
 sample time, and latest error for each BMS.
 
 `latest_telemetry` is a view containing the newest sample from each BMS source.
+
+## Periodic Git snapshots
+
+`tools/telemetry_snapshot_push.py` uses the SQLite Backup API to create a
+consistent copy even while the collector is writing. It publishes only these
+generated files to the orphan `telemetry-data` branch:
+
+- `telemetry.sqlite3`
+- `metadata.json`
+- a short branch README and Git attributes
+
+The worktree is kept outside the project at
+`~/.local/share/inverter-telemetry-data`, so the automation never switches the
+firmware checkout away from `main`. The publisher skips a new commit when the
+logical database contents have not changed and refuses files above the safe
+GitHub per-file limit. WAL files, logs, and local backups are never staged.
+
+Run one publication manually:
+
+```bash
+python3 tools/telemetry_snapshot_push.py
+```
+
+The user timer templates are:
+
+- `tools/systemd/inverter-telemetry-push.service`
+- `tools/systemd/inverter-telemetry-push.timer`
+
+The timer runs 15 minutes after boot and then every 12 hours. Check it with:
+
+```bash
+systemctl --user status inverter-telemetry-push.timer
+systemctl --user list-timers inverter-telemetry-push.timer
+journalctl --user -u inverter-telemetry-push.service
+```
+
+Keeping repeated binary database snapshots in Git increases the total remote
+repository size over time even though the data history is isolated from
+`main`. If the SQLite file approaches 95 MiB, the publisher stops and the data
+should be partitioned or moved to a storage system designed for large datasets.

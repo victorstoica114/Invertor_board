@@ -1,0 +1,13 @@
+[Unit]
+Description=Publish inverter telemetry SQLite snapshot to Git
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/pi/Documents/Inverter_Board
+ExecStart=/usr/bin/python3 /home/pi/Documents/Inverter_Board/tools/telemetry_snapshot_push.py
+Environment=GIT_TERMINAL_PROMPT=0
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=10min
