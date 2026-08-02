@@ -14,19 +14,28 @@ protocol inspection, plus guarded protocol writes for the JK and Seplos.
 
 ## Installation
 
-Keep the host dependencies separate from ESP-IDF:
+Keep the host dependencies separate from ESP-IDF. The path below matches the
+systemd service template:
 
 ```sh
-python3 -m venv .venv-bms-ble
-.venv-bms-ble/bin/pip install -r tools/bms_ble_requirements.txt
+python3 -m venv /home/pi/.venvs/inverter-bms-dashboard
+/home/pi/.venvs/inverter-bms-dashboard/bin/pip install -r tools/bms_ble_requirements.txt
+mkdir -p /home/pi/.config
+cp tools/bms_dashboard.env.example /home/pi/.config/inverter-bms-dashboard.env
+chmod 600 /home/pi/.config/inverter-bms-dashboard.env
 ```
+
+The example configuration leaves protocol controls disabled. To enable JK and
+Seplos writes, generate a private token, place it after
+`BMS_DASHBOARD_CONTROL_TOKEN=` in the local environment file, and do not commit
+that populated file.
 
 ## Read-only commands
 
 ```sh
-.venv-bms-ble/bin/python tools/bms_ble.py scan
-.venv-bms-ble/bin/python tools/bms_ble.py read --device all
-.venv-bms-ble/bin/python tools/bms_ble.py protocols --device all
+/home/pi/.venvs/inverter-bms-dashboard/bin/python tools/bms_ble.py scan
+/home/pi/.venvs/inverter-bms-dashboard/bin/python tools/bms_ble.py read --device all
+/home/pi/.venvs/inverter-bms-dashboard/bin/python tools/bms_ble.py protocols --device all
 ```
 
 An absent or busy device is reported as an error for that alias; the other
@@ -42,7 +51,7 @@ or the value cannot be read back after the command.
 Example that keeps UART1 on JK Modbus (index `1`):
 
 ```sh
-.venv-bms-ble/bin/python tools/bms_ble.py set-jk-protocol \
+/home/pi/.venvs/inverter-bms-dashboard/bin/python tools/bms_ble.py set-jk-protocol \
   --interface uart1 --protocol 1 --confirm C8:47:80:45:18:0E
 ```
 
@@ -58,7 +67,7 @@ read-back. A change requires the exact BMS serial and is rolled back if the
 requested selector or baud rate cannot be read back:
 
 ```sh
-.venv-bms-ble/bin/python tools/bms_ble.py set-seplos-protocol \
+/home/pi/.venvs/inverter-bms-dashboard/bin/python tools/bms_ble.py set-seplos-protocol \
   --profile growatt_485 --confirm SP144B-C2506260009
 ```
 
@@ -88,7 +97,7 @@ interface. A single background loop owns the Bluetooth adapter; browsers only
 read the cached state and therefore do not create competing BLE connections.
 
 ```sh
-.venv-bms-ble/bin/python tools/bms_dashboard.py --host 0.0.0.0 --port 8765
+/home/pi/.venvs/inverter-bms-dashboard/bin/python tools/bms_dashboard.py --host 0.0.0.0 --port 8765
 ```
 
 Monitoring endpoints are read-only. JK and Seplos protocol writes require the
@@ -101,3 +110,11 @@ the dedicated virtual environment `/home/pi/.venvs/inverter-bms-dashboard` and
 reads its configuration from `/home/pi/.config/inverter-bms-dashboard.env`.
 It is installed as a system service running with the unprivileged `pi` account
 and is ordered after the Bluetooth and network services at boot.
+
+Install or update the service after completing the steps above:
+
+```sh
+sudo cp tools/systemd/inverter-bms-dashboard.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now inverter-bms-dashboard.service
+```
