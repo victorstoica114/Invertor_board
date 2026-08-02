@@ -80,6 +80,7 @@ TELEMETRY_FIELDS = (
 
 SAMPLE_COLUMNS = (
     "board_id",
+    "source_id",
     "sampled_at_utc",
     "sampled_at_unix_ms",
     "source_ip",
@@ -89,7 +90,7 @@ SAMPLE_COLUMNS = (
 )
 
 SCHEMA_SQL = """
-PRAGMA user_version = 1;
+PRAGMA user_version = 2;
 
 CREATE TABLE IF NOT EXISTS boards (
     board_id TEXT PRIMARY KEY,
@@ -101,9 +102,22 @@ CREATE TABLE IF NOT EXISTS boards (
     updated_at_utc TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS bms_sources (
+    source_id TEXT PRIMARY KEY,
+    board_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    endpoint TEXT NOT NULL,
+    last_seen_utc TEXT,
+    last_error TEXT,
+    updated_at_utc TEXT NOT NULL,
+    UNIQUE (board_id, endpoint),
+    FOREIGN KEY (board_id) REFERENCES boards(board_id)
+);
+
 CREATE TABLE IF NOT EXISTS telemetry_samples (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     board_id TEXT NOT NULL,
+    source_id TEXT NOT NULL,
     sampled_at_utc TEXT NOT NULL,
     sampled_at_unix_ms INTEGER NOT NULL,
     source_ip TEXT NOT NULL,
@@ -151,11 +165,12 @@ CREATE TABLE IF NOT EXISTS telemetry_samples (
     warnings TEXT,
     cells_v_json TEXT NOT NULL,
     payload_json TEXT NOT NULL,
-    FOREIGN KEY (board_id) REFERENCES boards(board_id)
+    FOREIGN KEY (board_id) REFERENCES boards(board_id),
+    FOREIGN KEY (source_id) REFERENCES bms_sources(source_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_telemetry_board_time
-    ON telemetry_samples(board_id, sampled_at_unix_ms DESC);
+CREATE INDEX IF NOT EXISTS idx_telemetry_source_time
+    ON telemetry_samples(source_id, sampled_at_unix_ms DESC);
 
 CREATE INDEX IF NOT EXISTS idx_telemetry_time
     ON telemetry_samples(sampled_at_unix_ms DESC);
@@ -164,11 +179,25 @@ CREATE VIEW IF NOT EXISTS latest_telemetry AS
 SELECT samples.*
 FROM telemetry_samples AS samples
 JOIN (
-    SELECT board_id, MAX(id) AS latest_id
+    SELECT source_id, MAX(id) AS latest_id
     FROM telemetry_samples
-    GROUP BY board_id
+    GROUP BY source_id
 ) AS latest
 ON samples.id = latest.latest_id;
+"""
+
+SOURCES_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS bms_sources (
+    source_id TEXT PRIMARY KEY,
+    board_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    endpoint TEXT NOT NULL,
+    last_seen_utc TEXT,
+    last_error TEXT,
+    updated_at_utc TEXT NOT NULL,
+    UNIQUE (board_id, endpoint),
+    FOREIGN KEY (board_id) REFERENCES boards(board_id)
+);
 """
 
 
@@ -177,6 +206,15 @@ class BoardConfig:
     board_id: str
     hostname: str
     mac: str
+    static_ip: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class BmsSourceConfig:
+    source_id: str
+    board_id: str
+    name: str
+    endpoint: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -186,6 +224,7 @@ class CollectorConfig:
     lease_file: Path
     database: Path
     boards: tuple[BoardConfig, ...]
+    sources: tuple[BmsSourceConfig, ...]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -199,6 +238,7 @@ class Lease:
 @dataclasses.dataclass(frozen=True)
 class CollectionResult:
     board: BoardConfig
+    source: BmsSourceConfig
     ip: str | None
     payload: dict[str, Any] | None
     sampled_at_utc: str | None
@@ -243,10 +283,19 @@ def load_config(config_path: Path, database_override: str | None = None) -> Coll
     seen_hostnames: set[str] = set()
     seen_macs: set[str] = set()
     for item in raw.get("boards", []):
+        static_ip = str(item.get("ip", "")).strip() or None
+        if static_ip is not None:
+            try:
+                ipaddress.ip_address(static_ip)
+            except ValueError as exc:
+                raise ValueError(
+                    f"invalid static IP for {item.get('id', 'unknown board')}: {static_ip}"
+                ) from exc
         board = BoardConfig(
             board_id=str(item["id"]).strip(),
             hostname=str(item["hostname"]).strip(),
             mac=normalize_mac(str(item["mac"])),
+            static_ip=static_ip,
         )
         if not board.board_id or not board.hostname:
             raise ValueError("board id and hostname cannot be empty")
@@ -266,6 +315,55 @@ def load_config(config_path: Path, database_override: str | None = None) -> Coll
     if not boards:
         raise ValueError("at least one board must be configured")
 
+    board_ids = {board.board_id for board in boards}
+    raw_sources = raw.get("sources")
+    if raw_sources is None:
+        raw_sources = [
+            {
+                "id": f"{board.board_id}-bms1",
+                "board_id": board.board_id,
+                "name": f"{board.hostname} BMS 1",
+                "endpoint": "/api/telemetry",
+            }
+            for board in boards
+        ]
+
+    sources: list[BmsSourceConfig] = []
+    seen_source_ids: set[str] = set()
+    seen_board_endpoints: set[tuple[str, str]] = set()
+    for item in raw_sources:
+        source = BmsSourceConfig(
+            source_id=str(item["id"]).strip(),
+            board_id=str(item["board_id"]).strip(),
+            name=str(item["name"]).strip(),
+            endpoint=str(item["endpoint"]).strip(),
+        )
+        if not source.source_id or not source.name:
+            raise ValueError("BMS source id and name cannot be empty")
+        if source.board_id not in board_ids:
+            raise ValueError(
+                f"unknown board_id for {source.source_id}: {source.board_id}"
+            )
+        if not source.endpoint.startswith("/api/") or any(
+            character in source.endpoint for character in ("?", "#", " ")
+        ):
+            raise ValueError(
+                f"invalid telemetry endpoint for {source.source_id}: {source.endpoint}"
+            )
+        if source.source_id in seen_source_ids:
+            raise ValueError(f"duplicate BMS source id: {source.source_id}")
+        board_endpoint = (source.board_id, source.endpoint)
+        if board_endpoint in seen_board_endpoints:
+            raise ValueError(
+                f"duplicate endpoint {source.endpoint} on board {source.board_id}"
+            )
+        seen_source_ids.add(source.source_id)
+        seen_board_endpoints.add(board_endpoint)
+        sources.append(source)
+
+    if not sources:
+        raise ValueError("at least one BMS source must be configured")
+
     database_value = database_override or str(raw.get("database", "data/telemetry.sqlite3"))
     return CollectorConfig(
         interval_seconds=interval,
@@ -273,6 +371,7 @@ def load_config(config_path: Path, database_override: str | None = None) -> Coll
         lease_file=resolve_project_path(str(raw["lease_file"])),
         database=resolve_project_path(database_value),
         boards=tuple(boards),
+        sources=tuple(sources),
     )
 
 
@@ -313,8 +412,77 @@ def open_database(path: Path) -> sqlite3.Connection:
     connection.execute("PRAGMA synchronous = NORMAL")
     connection.execute("PRAGMA foreign_keys = ON")
     connection.execute("PRAGMA busy_timeout = 5000")
-    connection.executescript(SCHEMA_SQL)
+    have_samples = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'telemetry_samples'"
+    ).fetchone()
+    if have_samples is None:
+        connection.executescript(SCHEMA_SQL)
+    else:
+        migrate_database_v2(connection)
     return connection
+
+
+def migrate_database_v2(connection: sqlite3.Connection) -> None:
+    """Add independent BMS sources while preserving every v1 sample."""
+    with connection:
+        connection.executescript(SOURCES_SCHEMA_SQL)
+        columns = {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(telemetry_samples)")
+        }
+        if "source_id" not in columns:
+            connection.execute("ALTER TABLE telemetry_samples ADD COLUMN source_id TEXT")
+
+        timestamp = utc_now()
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO bms_sources (
+                source_id, board_id, name, endpoint, updated_at_utc
+            )
+            SELECT
+                board_id || '-bms1',
+                board_id,
+                hostname || ' BMS 1',
+                '/api/telemetry',
+                ?
+            FROM boards
+            """,
+            (timestamp,),
+        )
+        connection.execute(
+            """
+            UPDATE telemetry_samples
+            SET source_id = board_id || '-bms1'
+            WHERE source_id IS NULL OR source_id = ''
+            """
+        )
+        connection.execute("DROP VIEW IF EXISTS latest_telemetry")
+        connection.execute("DROP INDEX IF EXISTS idx_telemetry_board_time")
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_telemetry_source_time
+            ON telemetry_samples(source_id, sampled_at_unix_ms DESC)
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_telemetry_time
+            ON telemetry_samples(sampled_at_unix_ms DESC)
+            """
+        )
+        connection.execute(
+            """
+            CREATE VIEW latest_telemetry AS
+            SELECT samples.*
+            FROM telemetry_samples AS samples
+            JOIN (
+                SELECT source_id, MAX(id) AS latest_id
+                FROM telemetry_samples
+                GROUP BY source_id
+            ) AS latest
+            ON samples.id = latest.latest_id
+            """
+        )
+        connection.execute("PRAGMA user_version = 2")
 
 
 def register_boards(connection: sqlite3.Connection, boards: Iterable[BoardConfig]) -> None:
@@ -334,6 +502,34 @@ def register_boards(connection: sqlite3.Connection, boards: Iterable[BoardConfig
     connection.commit()
 
 
+def register_sources(
+    connection: sqlite3.Connection, sources: Iterable[BmsSourceConfig]
+) -> None:
+    timestamp = utc_now()
+    for source in sources:
+        connection.execute(
+            """
+            INSERT INTO bms_sources (
+                source_id, board_id, name, endpoint, updated_at_utc
+            )
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(source_id) DO UPDATE SET
+                board_id = excluded.board_id,
+                name = excluded.name,
+                endpoint = excluded.endpoint,
+                updated_at_utc = excluded.updated_at_utc
+            """,
+            (
+                source.source_id,
+                source.board_id,
+                source.name,
+                source.endpoint,
+                timestamp,
+            ),
+        )
+    connection.commit()
+
+
 def load_cached_ips(connection: sqlite3.Connection) -> dict[str, str]:
     rows = connection.execute(
         "SELECT board_id, last_ip FROM boards WHERE last_ip IS NOT NULL"
@@ -344,6 +540,9 @@ def load_cached_ips(connection: sqlite3.Connection) -> dict[str, str]:
 def resolve_board_ip(
     board: BoardConfig, leases: Iterable[Lease], cached_ips: dict[str, str]
 ) -> str | None:
+    if board.static_ip:
+        return board.static_ip
+
     matching_mac = [lease for lease in leases if lease.mac == board.mac]
     if matching_mac:
         return max(matching_mac, key=lambda lease: lease.expires_at).ip
@@ -365,11 +564,15 @@ def resolve_board_ip(
 
 
 def fetch_telemetry(
-    board: BoardConfig, ip: str | None, timeout_seconds: float
+    board: BoardConfig,
+    source: BmsSourceConfig,
+    ip: str | None,
+    timeout_seconds: float,
 ) -> CollectionResult:
     if ip is None:
         return CollectionResult(
             board=board,
+            source=source,
             ip=None,
             payload=None,
             sampled_at_utc=None,
@@ -378,7 +581,7 @@ def fetch_telemetry(
         )
 
     request = urllib.request.Request(
-        f"http://{ip}/api/telemetry",
+        f"http://{ip}{source.endpoint}",
         headers={
             "Accept": "application/json",
             "User-Agent": "inverter-telemetry-collector/1",
@@ -394,9 +597,14 @@ def fetch_telemetry(
         payload = json.loads(body.decode("utf-8"))
         if not isinstance(payload, dict):
             raise ValueError("telemetry response is not a JSON object")
+        if payload.get("valid") is not True:
+            raise ValueError("telemetry payload is not valid")
+        if payload.get("stale") is True:
+            raise ValueError("telemetry payload is stale")
     except (OSError, ValueError, UnicodeError, json.JSONDecodeError) as exc:
         return CollectionResult(
             board=board,
+            source=source,
             ip=ip,
             payload=None,
             sampled_at_utc=None,
@@ -406,6 +614,7 @@ def fetch_telemetry(
 
     return CollectionResult(
         board=board,
+        source=source,
         ip=ip,
         payload=payload,
         sampled_at_utc=utc_now(),
@@ -429,6 +638,7 @@ def sqlite_value(field: str, value: Any) -> Any:
 def store_results(
     connection: sqlite3.Connection, results: Iterable[CollectionResult]
 ) -> tuple[int, int]:
+    result_list = list(results)
     successes = 0
     failures = 0
     placeholders = ", ".join("?" for _ in SAMPLE_COLUMNS)
@@ -438,23 +648,21 @@ def store_results(
     )
 
     with connection:
-        for result in results:
+        for result in result_list:
             updated_at = utc_now()
             if not result.succeeded:
                 failures += 1
                 connection.execute(
                     """
-                    UPDATE boards
-                    SET last_ip = COALESCE(?, last_ip),
-                        last_error = ?,
+                    UPDATE bms_sources
+                    SET last_error = ?,
                         updated_at_utc = ?
-                    WHERE board_id = ?
+                    WHERE source_id = ?
                     """,
                     (
-                        result.ip,
                         (result.error or "unknown error")[:500],
                         updated_at,
-                        result.board.board_id,
+                        result.source.source_id,
                     ),
                 )
                 continue
@@ -467,6 +675,7 @@ def store_results(
 
             values: list[Any] = [
                 result.board.board_id,
+                result.source.source_id,
                 result.sampled_at_utc,
                 result.sampled_at_unix_ms,
                 result.ip,
@@ -493,19 +702,46 @@ def store_results(
             connection.execute(insert_sql, values)
             connection.execute(
                 """
-                UPDATE boards
-                SET last_ip = ?,
-                    last_seen_utc = ?,
+                UPDATE bms_sources
+                SET last_seen_utc = ?,
                     last_error = NULL,
+                    updated_at_utc = ?
+                WHERE source_id = ?
+                """,
+                (
+                    result.sampled_at_utc,
+                    updated_at,
+                    result.source.source_id,
+                ),
+            )
+
+        for board_id in {result.board.board_id for result in result_list}:
+            board_results = [
+                result for result in result_list if result.board.board_id == board_id
+            ]
+            successful = [result for result in board_results if result.succeeded]
+            board_ip = next((result.ip for result in board_results if result.ip), None)
+            if successful:
+                latest_seen = max(
+                    result.sampled_at_utc or "" for result in successful
+                )
+                board_error = None
+            else:
+                latest_seen = None
+                board_error = "; ".join(
+                    f"{result.source.source_id}: {result.error or 'unknown error'}"
+                    for result in board_results
+                )[:500]
+            connection.execute(
+                """
+                UPDATE boards
+                SET last_ip = COALESCE(?, last_ip),
+                    last_seen_utc = COALESCE(?, last_seen_utc),
+                    last_error = ?,
                     updated_at_utc = ?
                 WHERE board_id = ?
                 """,
-                (
-                    result.ip,
-                    result.sampled_at_utc,
-                    updated_at,
-                    result.board.board_id,
-                ),
+                (board_ip, latest_seen, board_error, utc_now(), board_id),
             )
     return successes, failures
 
@@ -524,30 +760,32 @@ def collect_once(
     board_ips = {
         board: resolve_board_ip(board, leases, cached_ips) for board in config.boards
     }
+    boards_by_id = {board.board_id: board for board in config.boards}
     results: list[CollectionResult] = []
     with concurrent.futures.ThreadPoolExecutor(
-        max_workers=min(len(config.boards), 8)
+        max_workers=min(len(config.sources), 8)
     ) as executor:
         futures = {
             executor.submit(
                 fetch_telemetry,
-                board,
-                board_ips[board],
+                boards_by_id[source.board_id],
+                source,
+                board_ips[boards_by_id[source.board_id]],
                 config.request_timeout_seconds,
-            ): board
-            for board in config.boards
+            ): source
+            for source in config.sources
         }
         for future in concurrent.futures.as_completed(futures):
             results.append(future.result())
 
-    results.sort(key=lambda result: result.board.board_id)
+    results.sort(key=lambda result: result.source.source_id)
     successes, failures = store_results(connection, results)
     timestamp = utc_now()
     details = ", ".join(
         (
-            f"{result.board.board_id}@{result.ip}=stored"
+            f"{result.source.source_id}@{result.ip}{result.source.endpoint}=stored"
             if result.succeeded
-            else f"{result.board.board_id}@{result.ip or '-'}=skipped"
+            else f"{result.source.source_id}@{result.ip or '-'}{result.source.endpoint}=skipped"
         )
         for result in results
     )
@@ -561,7 +799,7 @@ def collect_once(
     for result in results:
         if result.error:
             print(
-                f"{timestamp} warning: {result.board.board_id}: {result.error}",
+                f"{timestamp} warning: {result.source.source_id}: {result.error}",
                 flush=True,
             )
     return results
@@ -572,25 +810,40 @@ def print_status(connection: sqlite3.Connection, database_path: Path) -> None:
     rows = connection.execute(
         """
         SELECT
+            bms_sources.source_id,
+            bms_sources.name,
+            bms_sources.endpoint,
+            bms_sources.last_seen_utc,
+            bms_sources.last_error,
             boards.board_id,
             boards.hostname,
-            boards.mac,
             boards.last_ip,
-            boards.last_seen_utc,
-            boards.last_error,
-            COUNT(telemetry_samples.id) AS sample_count,
-            MAX(telemetry_samples.sampled_at_utc) AS latest_sample
-        FROM boards
-        LEFT JOIN telemetry_samples
-            ON telemetry_samples.board_id = boards.board_id
-        GROUP BY boards.board_id
-        ORDER BY boards.board_id
+            COALESCE(sample_counts.sample_count, 0) AS sample_count,
+            sample_counts.latest_sample,
+            latest_telemetry.protocol AS latest_protocol,
+            latest_telemetry.cell_count AS latest_cell_count
+        FROM bms_sources
+        JOIN boards ON boards.board_id = bms_sources.board_id
+        LEFT JOIN (
+            SELECT
+                source_id,
+                COUNT(*) AS sample_count,
+                MAX(sampled_at_utc) AS latest_sample
+            FROM telemetry_samples
+            GROUP BY source_id
+        ) AS sample_counts ON sample_counts.source_id = bms_sources.source_id
+        LEFT JOIN latest_telemetry
+            ON latest_telemetry.source_id = bms_sources.source_id
+        ORDER BY bms_sources.source_id
         """
     ).fetchall()
     for row in rows:
         print(
-            f"{row['board_id']}: samples={row['sample_count']} "
+            f"{row['source_id']} ({row['name']}): board={row['board_id']} "
+            f"endpoint={row['endpoint']} samples={row['sample_count']} "
             f"latest={row['latest_sample'] or '-'} ip={row['last_ip'] or '-'} "
+            f"protocol={row['latest_protocol'] or '-'} "
+            f"cells={row['latest_cell_count'] if row['latest_cell_count'] is not None else '-'} "
             f"error={row['last_error'] or '-'}"
         )
 
@@ -642,6 +895,7 @@ def main() -> int:
     try:
         connection = open_database(config.database)
         register_boards(connection, config.boards)
+        register_sources(connection, config.sources)
     except (OSError, sqlite3.Error) as exc:
         print(f"Database error: {exc}", flush=True)
         return 3
@@ -668,6 +922,7 @@ def main() -> int:
     signal.signal(signal.SIGTERM, request_stop)
     print(
         f"Starting telemetry collector: boards={len(config.boards)} "
+        f"sources={len(config.sources)} "
         f"interval={config.interval_seconds:g}s database={config.database}",
         flush=True,
     )

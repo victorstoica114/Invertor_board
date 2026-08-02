@@ -1,7 +1,8 @@
 # Local telemetry database
 
-`tools/telemetry_collector.py` reads `/api/telemetry` from both inverter
-boards every 30 seconds and stores successful responses in SQLite.
+`tools/telemetry_collector.py` reads every configured BMS telemetry endpoint
+every 30 seconds and stores valid, non-stale responses in SQLite. Multiple BMS
+sources may share the same physical ESP32 board.
 
 ## Board identities
 
@@ -10,9 +11,17 @@ boards every 30 seconds and stores successful responses in SQLite.
 | 1 | `inverter-board-1` | `58:8c:81:3a:d6:90` |
 | 2 | `inverter-board-2` | `58:8c:81:5d:1b:94` |
 
-The collector reads the hotspot's dnsmasq lease file and resolves the current
-IP address by MAC. IP addresses may change without requiring configuration
-changes.
+Current sources:
+
+| Source | Board | Endpoint | BMS |
+| --- | --- | --- | --- |
+| `inverter-board-1-bms1` | 1 | `/api/telemetry` | JK BMS |
+| `inverter-board-1-bms2` | 1 | `/api/telemetry2` | Daly BMS |
+| `inverter-board-2-bms1` | 2 | `/api/telemetry` | Seplos BMS |
+
+The collector first uses an explicit board IP when configured. Without one, it
+resolves the current IP by MAC/hostname from the hotspot dnsmasq lease file and
+finally falls back to the last successful address cached in SQLite.
 
 ## Files
 
@@ -31,7 +40,7 @@ Run one collection cycle:
 python3 tools/telemetry_collector.py --once
 ```
 
-Show sample counts and the most recent result for each board:
+Show sample counts and the most recent result for each BMS source:
 
 ```bash
 python3 tools/telemetry_collector.py --status
@@ -45,13 +54,18 @@ tail -f data/telemetry_collector.log
 
 ## Schema
 
-`telemetry_samples` contains one row for every successful HTTP response. The
-main telemetry fields are stored in typed columns. `cells_v_json` preserves
+Schema version 2 adds `bms_sources` and a `source_id` on every sample. A version
+1 database is migrated in place; existing primary samples are assigned to the
+matching `*-bms1` source and are not deleted.
+
+`telemetry_samples` contains one row for every valid, non-stale HTTP response.
+The main telemetry fields are stored in typed columns. `cells_v_json` preserves
 the variable-length cell array, while `payload_json` preserves the complete
-response so new firmware fields are not lost.
+response so new firmware fields are not lost. Invalid, stale, absent, or
+unreachable sources update status metadata but never create a sample.
 
-`boards` contains device identity, last IP, last successful sample time, and
-the latest connection error. A missing or unreachable board updates only this
-status metadata; it does not create a telemetry row.
+`boards` contains physical ESP32 identity and connectivity status.
+`bms_sources` contains the independent endpoint, display name, last successful
+sample time, and latest error for each BMS.
 
-`latest_telemetry` is a view containing the newest sample from each board.
+`latest_telemetry` is a view containing the newest sample from each BMS source.

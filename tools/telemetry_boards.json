@@ -7,12 +7,34 @@
     {
       "id": "inverter-board-1",
       "hostname": "inverter-board-1",
-      "mac": "58:8c:81:3a:d6:90"
+      "mac": "58:8c:81:3a:d6:90",
+      "ip": "192.168.1.5"
     },
     {
       "id": "inverter-board-2",
       "hostname": "inverter-board-2",
-      "mac": "58:8c:81:5d:1b:94"
+      "mac": "58:8c:81:5d:1b:94",
+      "ip": "192.168.1.167"
+    }
+  ],
+  "sources": [
+    {
+      "id": "inverter-board-1-bms1",
+      "board_id": "inverter-board-1",
+      "name": "JK BMS",
+      "endpoint": "/api/telemetry"
+    },
+    {
+      "id": "inverter-board-1-bms2",
+      "board_id": "inverter-board-1",
+      "name": "Daly BMS",
+      "endpoint": "/api/telemetry2"
+    },
+    {
+      "id": "inverter-board-2-bms1",
+      "board_id": "inverter-board-2",
+      "name": "Seplos BMS",
+      "endpoint": "/api/telemetry"
     }
   ]
 }
