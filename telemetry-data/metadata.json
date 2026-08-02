@@ -1,0 +1,42 @@
+{
+  "database_file": "telemetry-data/telemetry.sqlite3",
+  "format_version": 1,
+  "generated_at_utc": "2026-08-02T10:25:01Z",
+  "latest_sample_utc": "2026-08-02T10:24:58.715Z",
+  "sample_count": 55,
+  "schema_version": 2,
+  "sha256": "0a0bd5fbd5e0400507764cc2e087729d80c86a0746a2b1fb1ad651c31ac0f909",
+  "size_bytes": 118784,
+  "sources": [
+    {
+      "board_id": "inverter-board-1",
+      "endpoint": "/api/telemetry",
+      "latest_cell_count": 8,
+      "latest_protocol": "JKBMS_MODBUS",
+      "latest_sample_utc": "2026-08-02T10:24:58.705Z",
+      "name": "JK BMS",
+      "sample_count": 21,
+      "source_id": "inverter-board-1-bms1"
+    },
+    {
+      "board_id": "inverter-board-1",
+      "endpoint": "/api/telemetry2",
+      "latest_cell_count": 8,
+      "latest_protocol": "DALY_RS485",
+      "latest_sample_utc": "2026-08-02T10:24:58.715Z",
+      "name": "Daly BMS",
+      "sample_count": 11,
+      "source_id": "inverter-board-1-bms2"
+    },
+    {
+      "board_id": "inverter-board-2",
+      "endpoint": "/api/telemetry",
+      "latest_cell_count": 16,
+      "latest_protocol": "RS485_GROWATT",
+      "latest_sample_utc": "2026-08-02T10:24:58.710Z",
+      "name": "Seplos BMS",
+      "sample_count": 23,
+      "source_id": "inverter-board-2-bms1"
+    }
+  ]
+}
