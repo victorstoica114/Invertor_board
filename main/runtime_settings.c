@@ -24,6 +24,9 @@ static bridge_runtime_settings_t defaultSettings(void)
         .inverter_protocol = Inverter_protocol,
         .bms_port = BMS_PORT,
         .inverter_port = Inverter_PORT,
+        .dual_bms = false,
+        .bms2_protocol = PROTOCOL_RS485_DALY,
+        .bms2_port = (BMS_PORT == 2u) ? 1u : 2u,
         .web_port = WEB_INTERFACE_PORT,
         .wifi_ssid = WIFI_STA_SSID,
         .wifi_password = WIFI_STA_PASSWORD,
@@ -56,6 +59,28 @@ static bool validateSettings(const bridge_runtime_settings_t *s)
     }
     if (s->inverter_port < 1u || s->inverter_port > 2u) {
         return false;
+    }
+    if (s->dual_bms) {
+        const bool bms2IsJkbms = bridgeProtocolIsRs485JkbmsModbus(s->bms2_protocol);
+        const bool bms2IsDaly = (s->bms2_protocol == PROTOCOL_RS485_DALY);
+        const bool primaryIsJkbms = bridgeProtocolIsRs485JkbmsModbus(s->bms_protocol);
+        const bool primaryIsDaly = (s->bms_protocol == PROTOCOL_RS485_DALY);
+
+        if (s->mode != MODE_BRIDGE || (!bms2IsJkbms && !bms2IsDaly)) {
+            return false;
+        }
+        if (s->bms2_port < 1u || s->bms2_port > 2u) {
+            return false;
+        }
+        if ((s->bms_line == LINE_RS485) && (s->bms_port == s->bms2_port)) {
+            return false;
+        }
+        if ((s->inverter_line == LINE_RS485) && (s->inverter_port == s->bms2_port)) {
+            return false;
+        }
+        if ((primaryIsJkbms && bms2IsJkbms) || (primaryIsDaly && bms2IsDaly)) {
+            return false;
+        }
     }
     if (s->web_port == 0u) {
         return false;
@@ -156,6 +181,15 @@ void runtimeSettingsInit(void)
         if (nvs_get_u8(nvs, "iport", &u8val) == ESP_OK) {
             loaded.inverter_port = u8val;
         }
+        if (nvs_get_u8(nvs, "dualbms", &u8val) == ESP_OK) {
+            loaded.dual_bms = (u8val != 0u);
+        }
+        if (nvs_get_u8(nvs, "b2prot", &u8val) == ESP_OK) {
+            loaded.bms2_protocol = u8val;
+        }
+        if (nvs_get_u8(nvs, "b2port", &u8val) == ESP_OK) {
+            loaded.bms2_port = u8val;
+        }
         (void)nvs_get_u16(nvs, "wport", &loaded.web_port);
 
         len = sizeof(loaded.wifi_ssid);
@@ -205,6 +239,9 @@ bool runtimeSettingsSave(const bridge_runtime_settings_t *settings)
     ok &= (nvs_set_u8(nvs, "iprot", settings->inverter_protocol) == ESP_OK);
     ok &= (nvs_set_u8(nvs, "bport", settings->bms_port) == ESP_OK);
     ok &= (nvs_set_u8(nvs, "iport", settings->inverter_port) == ESP_OK);
+    ok &= (nvs_set_u8(nvs, "dualbms", settings->dual_bms ? 1u : 0u) == ESP_OK);
+    ok &= (nvs_set_u8(nvs, "b2prot", settings->bms2_protocol) == ESP_OK);
+    ok &= (nvs_set_u8(nvs, "b2port", settings->bms2_port) == ESP_OK);
     ok &= (nvs_set_u16(nvs, "wport", settings->web_port) == ESP_OK);
     ok &= (nvs_set_str(nvs, "ssid", settings->wifi_ssid) == ESP_OK);
     ok &= (nvs_set_str(nvs, "pass", settings->wifi_password) == ESP_OK);

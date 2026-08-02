@@ -8,6 +8,7 @@
 #include "config.h"
 #include "orchestrator/protocol_types.h"
 #include "protocols/china_tower_modbus/china_tower_modbus_bms_task.h"
+#include "protocols/common/battery_model.h"
 #include "protocols/daly_can/daly_can_bms_task.h"
 #include "protocols/daly_rs485/daly_rs485_bms_task.h"
 #include "protocols/growatt/growatt_bms_task.h"
@@ -1697,6 +1698,17 @@ static void fillTelemetryFromLatestPacket(bridgeTelemetrySnapshot_t *out, uint32
         out->packVoltageV = (float)packet.packVoltageCv / 100.0f;
         out->currentA = 0.0f;
     }
+    if (settings.bms_protocol == PROTOCOL_RS485_GROWATT) {
+        battery_model_t model = {0};
+        batteryModelGetReal(&model);
+        if (model.valid) {
+            out->currentA = model.packCurrentA;
+            out->packPowerW = out->packVoltageV * out->currentA;
+            out->packPowerValid = true;
+            out->sohPct = model.sohPct;
+            out->cycles = model.cycleCount;
+        }
+    }
     fillPaceAlertFields(&packet, out);
     fillChinaTowerAlertFields(&packet, out);
     fillGrowattAlertFields(&packet, out);
@@ -1916,6 +1928,66 @@ void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
     ESP_LOGI(BRIDGE_TAG, "[TELEM] Final snapshot: valid=%s, source=%s, soc=%u%%, v=%.2fV, age=%u ms",
              out->valid ? "YES" : "NO", out->source, out->socPct,
              (double)out->packVoltageV, out->ageMs);
+}
+
+void bridgeGetSecondaryTelemetrySnapshot(bridgeTelemetrySnapshot_t *out)
+{
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+    bms_decoded_packet_t packet = {0};
+    uint32_t updatedMs = 0u;
+    const uint32_t nowMs = bridgeNowMs();
+
+    if (out == NULL) {
+        return;
+    }
+
+    memset(out, 0, sizeof(*out));
+    snprintf(out->protocol, sizeof(out->protocol), "%s", protocolToStr(settings.bms2_protocol));
+    if (!settings.dual_bms) {
+        return;
+    }
+
+    if (bridgeProtocolIsRs485JkbmsModbus(settings.bms2_protocol)) {
+        jkbms_modbus_snapshot_t snapshot = {0};
+        const bool haveSnapshot = jkbmsModbusBmsTaskGetLatestSnapshot(&snapshot);
+        if (jkbmsModbusBmsTaskGetLatestPacket(&packet) && packet.timestampUs > 0) {
+            updatedMs = (uint32_t)(packet.timestampUs / 1000ULL);
+        }
+        if (haveSnapshot) {
+            fillTelemetryFromJkbmsSnapshot(&snapshot, out);
+        }
+    } else if (settings.bms2_protocol == PROTOCOL_RS485_DALY) {
+        daly_rs485_snapshot_t snapshot = {0};
+        const bool haveSnapshot = dalyRs485BmsTaskGetLatestSnapshot(&snapshot);
+        if (dalyRs485BmsTaskGetLatestPacket(&packet) && packet.timestampUs > 0) {
+            updatedMs = (uint32_t)(packet.timestampUs / 1000ULL);
+        }
+        if (haveSnapshot) {
+            fillTelemetryFromDalySnapshot(&snapshot, out, "DALY_RS485_TASK", "DALY_RS485");
+            if (updatedMs == 0u && snapshot.timestampUs > 0) {
+                updatedMs = (uint32_t)(snapshot.timestampUs / 1000ULL);
+            }
+        }
+    }
+
+    snprintf(out->protocol, sizeof(out->protocol), "%s", protocolToStr(settings.bms2_protocol));
+    if (out->valid) {
+        snprintf(out->source, sizeof(out->source), "RS485_%u", (unsigned)settings.bms2_port);
+    }
+
+    out->updatedMs = updatedMs;
+    out->ageMs = (updatedMs != 0u && nowMs >= updatedMs) ? (nowMs - updatedMs) : 0u;
+    out->stale = (updatedMs != 0u) &&
+                 (out->ageMs > bridgeTelemetryStaleMs(settings.bms2_protocol));
+    if (out->stale) {
+        char protocol[sizeof(out->protocol)] = {0};
+        snprintf(protocol, sizeof(protocol), "%s", out->protocol);
+        memset(out, 0, sizeof(*out));
+        snprintf(out->protocol, sizeof(out->protocol), "%s", protocol);
+        out->stale = true;
+        out->updatedMs = updatedMs;
+        out->ageMs = (nowMs >= updatedMs) ? (nowMs - updatedMs) : 0u;
+    }
 }
 
 void bridgeSetTelemetrySnapshot(const bridgeTelemetrySnapshot_t *in)

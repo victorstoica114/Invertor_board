@@ -4,7 +4,7 @@
 ## Kept dependency-free so the parser can be unit-tested without PulseView.
 ##
 
-VERSION = 'v2026.07.04a'
+VERSION = 'v2026.08.01a'
 
 DALY_START_BYTE = 0xA5
 DALY_FRAME_LEN = 13
@@ -26,6 +26,8 @@ DALY_MODBUS_TEMP_SENSOR_BASE_REG_INDEX = 48
 DALY_MODBUS_TEMP_SENSOR_REG_COUNT = 4
 DALY_MODBUS_TEMP_SENSOR_COUNT_REG_INDEX = 61
 DALY_MODBUS_MOS_TEMP_RAW_REG_INDEX = 90
+DALY_MODBUS_PACK_VOLTAGE_DECI_V_REG_INDEX = 56
+DALY_MODBUS_CURRENT_OFFSET_DECI_A_REG_INDEX = 57
 
 COMMAND_NAMES = {
     0x50: 'rated capacity/cell voltage',
@@ -381,6 +383,10 @@ def modbus_register_name(addr, value=None):
             return 'cell{:02d}_mv'.format(addr + 1)
     if addr == DALY_MODBUS_SOC_DECI_REG_INDEX:
         return 'soc_deci_pct'
+    if addr == DALY_MODBUS_PACK_VOLTAGE_DECI_V_REG_INDEX:
+        return 'pack_voltage_deci_v'
+    if addr == DALY_MODBUS_CURRENT_OFFSET_DECI_A_REG_INDEX:
+        return 'pack_current_offset_deci_a'
     if DALY_MODBUS_TEMP_SENSOR_BASE_REG_INDEX <= addr < DALY_MODBUS_TEMP_SENSOR_BASE_REG_INDEX + DALY_MODBUS_TEMP_SENSOR_REG_COUNT:
         return 'temp_sensor{}_raw'.format(addr - DALY_MODBUS_TEMP_SENSOR_BASE_REG_INDEX + 1)
     if addr == DALY_MODBUS_TEMP_SENSOR_COUNT_REG_INDEX:
@@ -397,6 +403,10 @@ def describe_modbus_register(addr, value):
         return 'C{:02d}={:.3f}V'.format(idx, value / 1000.0)
     if addr == DALY_MODBUS_SOC_DECI_REG_INDEX:
         return 'SOC={:.1f}% raw=0x{:04X}'.format(value / 10.0, value)
+    if addr == DALY_MODBUS_PACK_VOLTAGE_DECI_V_REG_INDEX:
+        return 'Pack={:.1f}V raw=0x{:04X}'.format(value / 10.0, value)
+    if addr == DALY_MODBUS_CURRENT_OFFSET_DECI_A_REG_INDEX:
+        return 'I={:+.1f}A raw=0x{:04X}'.format(current_a_from_raw(value), value)
     temp = decode_offset_temp(value)
     if temp is not None and (name.startswith('temp_sensor') or name == 'mos_temp_raw'):
         return '{}={:.1f}C'.format(name, temp)
@@ -450,11 +460,28 @@ def modbus_values(registers):
 def summarize_modbus_soc_current(registers):
     values = modbus_values(registers)
     parts = []
+    mapped_current = False
+    if (DALY_MODBUS_PACK_VOLTAGE_DECI_V_REG_INDEX in values and
+            0 < values[DALY_MODBUS_PACK_VOLTAGE_DECI_V_REG_INDEX] <= 1000):
+        parts.append('Pack={:.1f}V#{}'.format(
+            values[DALY_MODBUS_PACK_VOLTAGE_DECI_V_REG_INDEX] / 10.0,
+            DALY_MODBUS_PACK_VOLTAGE_DECI_V_REG_INDEX,
+        ))
+    if (DALY_MODBUS_CURRENT_OFFSET_DECI_A_REG_INDEX in values and
+            25000 <= values[DALY_MODBUS_CURRENT_OFFSET_DECI_A_REG_INDEX] <= 35000):
+        parts.append('I={:+.1f}A#{}'.format(
+            current_a_from_raw(values[DALY_MODBUS_CURRENT_OFFSET_DECI_A_REG_INDEX]),
+            DALY_MODBUS_CURRENT_OFFSET_DECI_A_REG_INDEX,
+        ))
+        mapped_current = True
     if DALY_MODBUS_SOC_DECI_REG_INDEX in values and 0 <= values[DALY_MODBUS_SOC_DECI_REG_INDEX] <= 1000:
         parts.append('SOC={:.1f}%#{}'.format(
             values[DALY_MODBUS_SOC_DECI_REG_INDEX] / 10.0,
             DALY_MODBUS_SOC_DECI_REG_INDEX,
         ))
+
+    if mapped_current:
+        return parts
 
     regs = [reg.get('value') for reg in registers]
     for idx in range(0, max(0, len(regs) - 3)):

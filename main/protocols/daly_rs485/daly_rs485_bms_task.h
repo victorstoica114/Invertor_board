@@ -54,6 +54,9 @@ typedef struct {
 } daly_rs485_snapshot_t;
 
 esp_err_t dalyRs485BmsTaskStart(QueueHandle_t outQueue);
+esp_err_t dalyRs485BmsTaskStartConfigured(QueueHandle_t outQueue,
+                                         uint8_t bmsPort,
+                                         bool publishBatteryModel);
 esp_err_t dalyRs485BmsTaskStop(void);
 bool dalyRs485BmsTaskGetLatestPacket(bms_decoded_packet_t *outPacket);
 bool dalyRs485BmsTaskGetLatestSnapshot(daly_rs485_snapshot_t *outSnapshot);

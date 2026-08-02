@@ -20,6 +20,10 @@ extern int g_routeStubWowBmsStartCount;
 extern int g_routeStubSeplosBmsStartCount;
 extern int g_routeStubDalyRs485BmsStartCount;
 extern int g_routeStubDalyCanBmsStartCount;
+extern int g_routeStubJkbmsConfiguredStartCount;
+extern int g_routeStubDalyConfiguredStartCount;
+extern uint8_t g_routeStubSecondaryBmsPort;
+extern bool g_routeStubSecondaryPublishesBatteryModel;
 extern int g_routeStubGrowattInverterStartCount;
 extern int g_routeStubPylonInverterStartCount;
 extern int g_routeStubPylonBridgeEnableCount;
@@ -548,6 +552,34 @@ void test_route_daly_rs485_to_can_pylon_starts_can_sender(void)
 }
 
 /**
+ * Test: a second Daly BMS can run on the free RS485 port for telemetry only.
+ */
+void test_route_dual_bms_starts_secondary_telemetry_only(void)
+{
+    bridge_runtime_settings_t settings = {0};
+
+    settings.mode = MODE_BRIDGE;
+    settings.bms_line = LINE_RS485;
+    settings.bms_protocol = PROTOCOL_RS485_JKBMS_115200;
+    settings.bms_port = 2;
+    settings.inverter_line = LINE_CAN;
+    settings.inverter_protocol = PROTOCOL_CAN_PYLON;
+    settings.inverter_port = 2;
+    settings.dual_bms = true;
+    settings.bms2_protocol = PROTOCOL_RS485_DALY;
+    settings.bms2_port = 1;
+
+    TEST_ASSERT_EQUAL(ESP_OK, orchestratorStartFromRuntime(&settings));
+    TEST_ASSERT_EQUAL(1, g_routeStubJkbmsModbusBmsStartCount);
+    TEST_ASSERT_EQUAL(0, g_routeStubJkbmsConfiguredStartCount);
+    TEST_ASSERT_EQUAL(1, g_routeStubDalyRs485BmsStartCount);
+    TEST_ASSERT_EQUAL(1, g_routeStubDalyConfiguredStartCount);
+    TEST_ASSERT_EQUAL_UINT8(1, g_routeStubSecondaryBmsPort);
+    TEST_ASSERT_FALSE(g_routeStubSecondaryPublishesBatteryModel);
+    TEST_ASSERT_EQUAL(1, g_routeStubPylonInverterStartCount);
+}
+
+/**
  * Test: Daly CAN native poller can feed a Pylon CAN inverter sender.
  */
 void test_route_daly_can_to_can_pylon_starts_can_poller_and_sender(void)
@@ -897,6 +929,7 @@ int main(void)
     RUN_TEST(test_route_seplos_rs485_to_rs485_pylon_starts_responder);
     RUN_TEST(test_route_seplos_19200_to_rs485_pylon_115200_starts_responder);
     RUN_TEST(test_route_daly_rs485_to_can_pylon_starts_can_sender);
+    RUN_TEST(test_route_dual_bms_starts_secondary_telemetry_only);
     RUN_TEST(test_route_daly_can_to_can_pylon_starts_can_poller_and_sender);
     RUN_TEST(test_route_daly_can_500k_to_can_pylon_starts_can_poller_and_sender);
     RUN_TEST(test_route_pylon_rs485_to_can_pylon_starts_probe_and_can_sender);

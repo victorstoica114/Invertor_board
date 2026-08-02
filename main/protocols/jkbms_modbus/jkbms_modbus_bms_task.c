@@ -22,6 +22,8 @@
 
 typedef struct {
     QueueHandle_t outQueue;
+    uint8_t bmsPort;
+    bool publishBatteryModel;
     modbusDecoder_t decoder;
     jkbms_modbus_poller_t poller;
     uint32_t sequence;
@@ -1158,8 +1160,7 @@ static void jkbmsModbusBmsTask(void *pv)
 {
     jkbmsModbusBmsTaskCtx_t *ctx = (jkbmsModbusBmsTaskCtx_t *)pv;
     uint8_t rxChunk[RS485_BUF_SIZE];
-    bridge_runtime_settings_t settings = runtimeSettingsGet();
-    const uint8_t bmsPort = (settings.bms_port == 2u) ? 2u : 1u;
+    const uint8_t bmsPort = (ctx->bmsPort == 2u) ? 2u : 1u;
     const uart_port_t rxUart = (bmsPort == 2u) ? rs485GetUart2() : rs485GetUart1();
     const gpio_num_t dirPin = (bmsPort == 2u) ? rs485GetDir2() : rs485GetDir1();
     const char *ifName = (bmsPort == 2u) ? "JKBMS_RS485_2" : "JKBMS_RS485_1";
@@ -1206,7 +1207,9 @@ static void jkbmsModbusBmsTask(void *pv)
             jkbms_modbus_snapshot_t snapshot = {0};
             int64_t newestCacheUs = 0;
             if (!jkbmsModbusDecoderCacheFresh(&ctx->decoder, nowUs, &newestCacheUs)) {
-                batteryModelClear();
+                if (ctx->publishBatteryModel) {
+                    batteryModelClear();
+                }
                 jkbmsClearLatestData();
                 if ((nowUs - g_lastSourceStaleLogUs) >= 1000000LL) {
                     if (newestCacheUs <= 0) {
@@ -1225,7 +1228,9 @@ static void jkbmsModbusBmsTask(void *pv)
                 }
             } else if (buildDecodedSnapshot(&ctx->decoder, &snapshot)) {
                 jkbmsStoreLatestSnapshot(&snapshot);
-                jkbmsPublishBatteryModel(&snapshot, newestCacheUs);
+                if (ctx->publishBatteryModel) {
+                    jkbmsPublishBatteryModel(&snapshot, newestCacheUs);
+                }
                 logCellDebug(&ctx->decoder, &snapshot, nowUs);
 
                 bms_decoded_packet_t packet = {0};
@@ -1266,7 +1271,15 @@ static void jkbmsModbusBmsTask(void *pv)
 
 esp_err_t jkbmsModbusBmsTaskStart(QueueHandle_t outQueue)
 {
-    if (outQueue == NULL) {
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+    return jkbmsModbusBmsTaskStartConfigured(outQueue, settings.bms_port, true);
+}
+
+esp_err_t jkbmsModbusBmsTaskStartConfigured(QueueHandle_t outQueue,
+                                            uint8_t bmsPort,
+                                            bool publishBatteryModel)
+{
+    if (outQueue == NULL || bmsPort < 1u || bmsPort > 2u) {
         return ESP_ERR_INVALID_ARG;
     }
     if (g_jkbmsModbusBmsTaskHandle != NULL) {
@@ -1275,10 +1288,14 @@ esp_err_t jkbmsModbusBmsTaskStart(QueueHandle_t outQueue)
 
     memset(&g_jkbmsModbusBmsCtx, 0, sizeof(g_jkbmsModbusBmsCtx));
     g_jkbmsModbusBmsCtx.outQueue = outQueue;
+    g_jkbmsModbusBmsCtx.bmsPort = bmsPort;
+    g_jkbmsModbusBmsCtx.publishBatteryModel = publishBatteryModel;
     g_lastCellDebugLogUs = 0;
     g_lastSourceStaleLogUs = 0;
     memset(&g_lastGoodCellMap, 0, sizeof(g_lastGoodCellMap));
-    batteryModelClear();
+    if (publishBatteryModel) {
+        batteryModelClear();
+    }
 
     jkbmsClearLatestData();
 
@@ -1295,9 +1312,11 @@ esp_err_t jkbmsModbusBmsTaskStart(QueueHandle_t outQueue)
     }
 
     ESP_LOGI(EXAMPLE_TAG,
-             "JKBMS Modbus BMS task started (poll=%dms, publish=%dms)",
+             "JKBMS Modbus BMS task started (RS485_%u, poll=%dms, publish=%dms, model=%s)",
+             (unsigned)bmsPort,
              JKBMS_BMS_QUERY_PERIOD_MS,
-             JKBMS_BMS_PUBLISH_PERIOD_MS);
+             JKBMS_BMS_PUBLISH_PERIOD_MS,
+             publishBatteryModel ? "primary" : "telemetry-only");
     return ESP_OK;
 }
 
@@ -1343,12 +1362,15 @@ esp_err_t jkbmsModbusBmsTaskStop(void)
         return ESP_OK;
     }
 
+    const bool publishedBatteryModel = g_jkbmsModbusBmsCtx.publishBatteryModel;
     vTaskDelete(g_jkbmsModbusBmsTaskHandle);
     g_jkbmsModbusBmsTaskHandle = NULL;
     memset(&g_jkbmsModbusBmsCtx, 0, sizeof(g_jkbmsModbusBmsCtx));
     g_lastCellDebugLogUs = 0;
     memset(&g_lastGoodCellMap, 0, sizeof(g_lastGoodCellMap));
-    batteryModelClear();
+    if (publishedBatteryModel) {
+        batteryModelClear();
+    }
 
     portENTER_CRITICAL(&g_latestPacketMux);
     g_haveLatestPacket = false;

@@ -40,6 +40,7 @@
 
 typedef struct {
     QueueHandle_t bmsQueue;
+    QueueHandle_t secondaryBmsQueue;
     QueueHandle_t inverterQueue;
     protocol_id_t bmsProtocol;
     protocol_id_t inverterProtocol;
@@ -620,6 +621,49 @@ static void orchestratorReset(orchestratorCtx_t *ctx)
         vQueueDelete(ctx->inverterQueue);
         ctx->inverterQueue = NULL;
     }
+    if (ctx->secondaryBmsQueue != NULL) {
+        vQueueDelete(ctx->secondaryBmsQueue);
+        ctx->secondaryBmsQueue = NULL;
+    }
+}
+
+static esp_err_t startSecondaryBmsTask(const bridge_runtime_settings_t *settings)
+{
+    esp_err_t err = ESP_OK;
+
+    if (settings == NULL || !settings->dual_bms) {
+        return ESP_OK;
+    }
+
+    g_orchestratorCtx.secondaryBmsQueue =
+        xQueueCreate(ORCHESTRATOR_BMS_QUEUE_LEN, sizeof(bms_decoded_packet_t));
+    if (g_orchestratorCtx.secondaryBmsQueue == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    if (bridgeProtocolIsRs485JkbmsModbus(settings->bms2_protocol)) {
+        err = jkbmsModbusBmsTaskStartConfigured(g_orchestratorCtx.secondaryBmsQueue,
+                                                settings->bms2_port,
+                                                false);
+    } else if (settings->bms2_protocol == PROTOCOL_RS485_DALY) {
+        err = dalyRs485BmsTaskStartConfigured(g_orchestratorCtx.secondaryBmsQueue,
+                                              settings->bms2_port,
+                                              false);
+    } else {
+        err = ESP_ERR_NOT_SUPPORTED;
+    }
+
+    if (err != ESP_OK) {
+        vQueueDelete(g_orchestratorCtx.secondaryBmsQueue);
+        g_orchestratorCtx.secondaryBmsQueue = NULL;
+        return err;
+    }
+
+    ESP_LOGI(EXAMPLE_TAG,
+             "Secondary BMS telemetry started: protocol=%u RS485_%u (not forwarded to inverter)",
+             (unsigned)settings->bms2_protocol,
+             (unsigned)settings->bms2_port);
+    return ESP_OK;
 }
 
 esp_err_t orchestratorStart(protocol_id_t bmsProtocol, protocol_id_t inverterProtocol)
@@ -684,7 +728,7 @@ esp_err_t orchestratorStart(protocol_id_t bmsProtocol, protocol_id_t inverterPro
     return ESP_OK;
 }
 
-esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings)
+static esp_err_t orchestratorStartPrimaryFromRuntime(const bridge_runtime_settings_t *settings)
 {
     if (settings == NULL) {
         return ESP_ERR_INVALID_ARG;
@@ -1496,6 +1540,27 @@ esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings
 
     return orchestratorStart(protocolIdFromUiProtocol(settings->bms_protocol),
                              protocolIdFromUiProtocol(settings->inverter_protocol));
+}
+
+esp_err_t orchestratorStartFromRuntime(const bridge_runtime_settings_t *settings)
+{
+    esp_err_t err = orchestratorStartPrimaryFromRuntime(settings);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = startSecondaryBmsTask(settings);
+    if (err != ESP_OK) {
+        ESP_LOGE(EXAMPLE_TAG,
+                 "Failed to start secondary BMS telemetry (protocol=%u port=%u err=0x%x)",
+                 settings != NULL ? (unsigned)settings->bms2_protocol : 0u,
+                 settings != NULL ? (unsigned)settings->bms2_port : 0u,
+                 (unsigned)err);
+        (void)orchestratorStop();
+        return err;
+    }
+
+    return ESP_OK;
 }
 
 esp_err_t orchestratorStop(void)

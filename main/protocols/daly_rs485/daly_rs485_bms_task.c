@@ -32,6 +32,8 @@
 #define DALY_MODBUS_TEMP_SENSOR_REG_COUNT 4u
 #define DALY_MODBUS_TEMP_SENSOR_COUNT_REG_INDEX 61u
 #define DALY_MODBUS_MOS_TEMP_RAW_REG_INDEX 90u
+#define DALY_MODBUS_PACK_VOLTAGE_DECI_V_REG_INDEX 56u
+#define DALY_MODBUS_CURRENT_OFFSET_DECI_A_REG_INDEX 57u
 #define DALY_MODBUS_SOC_DECI_REG_INDEX 58u
 #define DALY_MODBUS_RESPONSE_TIMEOUT_MS 2500
 #define DALY_MODBUS_INTER_BYTE_TIMEOUT_MS 500
@@ -57,6 +59,8 @@ typedef enum {
 
 typedef struct {
     QueueHandle_t outQueue;
+    uint8_t bmsPort;
+    bool publishBatteryModel;
     uint32_t sequence;
     int64_t lastFrameUs;
     int64_t lastPublishUs;
@@ -594,6 +598,28 @@ static bool dalyDecodeModbusRegisters(daly_task_ctx_t *ctx,
         }
 
         if (count > DALY_MODBUS_SOC_DECI_REG_INDEX &&
+            regs[DALY_MODBUS_PACK_VOLTAGE_DECI_V_REG_INDEX] > 0u &&
+            regs[DALY_MODBUS_PACK_VOLTAGE_DECI_V_REG_INDEX] <= 1000u &&
+            regs[DALY_MODBUS_CURRENT_OFFSET_DECI_A_REG_INDEX] >= 25000u &&
+            regs[DALY_MODBUS_CURRENT_OFFSET_DECI_A_REG_INDEX] <= 35000u &&
+            regs[DALY_MODBUS_SOC_DECI_REG_INDEX] <= 1000u) {
+            int32_t currentDeciA =
+                (int32_t)regs[DALY_MODBUS_CURRENT_OFFSET_DECI_A_REG_INDEX] - 30000;
+
+            s->hasPackVoltageCv = true;
+            s->packVoltageCv =
+                (uint16_t)(regs[DALY_MODBUS_PACK_VOLTAGE_DECI_V_REG_INDEX] * 10u);
+            s->hasCurrentDeciA = true;
+            if (currentDeciA < INT16_MIN) currentDeciA = INT16_MIN;
+            if (currentDeciA > INT16_MAX) currentDeciA = INT16_MAX;
+            s->currentDeciA = (int16_t)currentDeciA;
+            s->hasSocDeciPct = true;
+            s->socDeciPct = regs[DALY_MODBUS_SOC_DECI_REG_INDEX];
+            socCandidateIndex = DALY_MODBUS_SOC_DECI_REG_INDEX;
+            updated = true;
+        }
+
+        if (count > DALY_MODBUS_SOC_DECI_REG_INDEX &&
             regs[DALY_MODBUS_SOC_DECI_REG_INDEX] > 0u &&
             regs[DALY_MODBUS_SOC_DECI_REG_INDEX] <= 1000u) {
             s->hasSocDeciPct = true;
@@ -643,7 +669,7 @@ static bool dalyDecodeModbusRegisters(daly_task_ctx_t *ctx,
 
         if ((s->timestampUs - g_lastModbusLogUs) >= 2000000LL) {
             ESP_LOGI(EXAMPLE_TAG,
-                     "DALY Modbus decoded block=0x%04X regs=%u cells=%u pack=%.2fV soc=%u.%u%% current=%.1fA socIdx=%u first=[%04X %04X %04X %04X]",
+                     "DALY Modbus decoded block=0x%04X regs=%u cells=%u pack=%.2fV soc=%u.%u%% current=%.1fA socIdx=%u currentRaw=%u first=[%04X %04X %04X %04X]",
                      (unsigned)start,
                      (unsigned)count,
                      (unsigned)s->cellCount,
@@ -652,12 +678,14 @@ static bool dalyDecodeModbusRegisters(daly_task_ctx_t *ctx,
                      s->hasSocDeciPct ? (unsigned)(s->socDeciPct % 10u) : 0u,
                      s->hasCurrentDeciA ? ((double)s->currentDeciA / 10.0) : 0.0,
                      (socCandidateIndex == UINT16_MAX) ? 0u : (unsigned)socCandidateIndex,
+                     s->hasCurrentDeciA ? (unsigned)((int32_t)s->currentDeciA + 30000) : 0u,
                      (unsigned)((count > 0u) ? regs[0] : 0u),
                      (unsigned)((count > 1u) ? regs[1] : 0u),
                      (unsigned)((count > 2u) ? regs[2] : 0u),
                      (unsigned)((count > 3u) ? regs[3] : 0u));
             g_lastModbusLogUs = s->timestampUs;
         }
+
     }
 
     return updated;
@@ -1033,8 +1061,7 @@ static void dalyLogSnapshot(const daly_rs485_snapshot_t *s, const bms_decoded_pa
 static void dalyTask(void *pv)
 {
     daly_task_ctx_t *ctx = (daly_task_ctx_t *)pv;
-    bridge_runtime_settings_t settings = runtimeSettingsGet();
-    const uint8_t bmsPort = (settings.bms_port == 2u) ? 2u : 1u;
+    const uint8_t bmsPort = (ctx->bmsPort == 2u) ? 2u : 1u;
     const uart_port_t uart = (bmsPort == 2u) ? rs485GetUart2() : rs485GetUart1();
     const gpio_num_t dirPin = (bmsPort == 2u) ? rs485GetDir2() : rs485GetDir1();
     const char *ifName = (bmsPort == 2u) ? "DALY_RS485_2" : "DALY_RS485_1";
@@ -1111,7 +1138,9 @@ static void dalyTask(void *pv)
                      (nowUs - ctx->lastFrameUs) <= ((int64_t)DALY_RS485_SOURCE_STALE_MS * 1000LL);
 
         if (!fresh) {
-            batteryModelClear();
+            if (ctx->publishBatteryModel) {
+                batteryModelClear();
+            }
             dalyClearLatest();
             if ((nowUs - g_lastStaleLogUs) >= 1000000LL) {
                 ESP_LOGW(EXAMPLE_TAG,
@@ -1126,7 +1155,9 @@ static void dalyTask(void *pv)
             bms_decoded_packet_t packet = {0};
             ctx->snapshot.sequence = ++ctx->sequence;
             if (dalyRs485BuildDecodedPacket(&ctx->snapshot, ctx->sequence, &packet)) {
-                dalyPublishBatteryModel(&ctx->snapshot);
+                if (ctx->publishBatteryModel) {
+                    dalyPublishBatteryModel(&ctx->snapshot);
+                }
                 dalyStoreLatest(&ctx->snapshot, &packet);
                 dalyLogSnapshot(&ctx->snapshot, &packet);
                 if (ctx->outQueue != NULL && xQueueOverwrite(ctx->outQueue, &packet) != pdPASS) {
@@ -1140,7 +1171,15 @@ static void dalyTask(void *pv)
 
 esp_err_t dalyRs485BmsTaskStart(QueueHandle_t outQueue)
 {
-    if (outQueue == NULL) {
+    bridge_runtime_settings_t settings = runtimeSettingsGet();
+    return dalyRs485BmsTaskStartConfigured(outQueue, settings.bms_port, true);
+}
+
+esp_err_t dalyRs485BmsTaskStartConfigured(QueueHandle_t outQueue,
+                                         uint8_t bmsPort,
+                                         bool publishBatteryModel)
+{
+    if (outQueue == NULL || bmsPort < 1u || bmsPort > 2u) {
         return ESP_ERR_INVALID_ARG;
     }
     if (g_dalyTaskHandle != NULL) {
@@ -1149,10 +1188,14 @@ esp_err_t dalyRs485BmsTaskStart(QueueHandle_t outQueue)
 
     memset(&g_dalyCtx, 0, sizeof(g_dalyCtx));
     g_dalyCtx.outQueue = outQueue;
+    g_dalyCtx.bmsPort = bmsPort;
+    g_dalyCtx.publishBatteryModel = publishBatteryModel;
     g_lastStaleLogUs = 0;
     g_lastDecodeLogUs = 0;
     g_lastModbusLogUs = 0;
-    batteryModelClear();
+    if (publishBatteryModel) {
+        batteryModelClear();
+    }
     dalyClearLatest();
 
     BaseType_t ok = xTaskCreate(dalyTask,

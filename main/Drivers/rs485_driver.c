@@ -23,6 +23,19 @@ static uint32_t rs485BaudForPort(uint8_t port, const bridge_runtime_settings_t *
         haveBaud = true;
     }
 
+    if (settings->dual_bms && settings->bms2_port == port) {
+        uint32_t bms2Baud = bridgeProtocolRs485Baudrate(settings->bms2_protocol);
+        if (haveBaud && bms2Baud != baud) {
+            ESP_LOGW(EXAMPLE_TAG,
+                     "RS485_%u requested by both BMS slots with mixed baud rates (%u and %u); using BMS 2",
+                     (unsigned)port,
+                     (unsigned)baud,
+                     (unsigned)bms2Baud);
+        }
+        baud = bms2Baud;
+        haveBaud = true;
+    }
+
     if ((settings->inverter_line == LINE_RS485) && (settings->inverter_port == port)) {
         uint32_t inverterBaud = bridgeProtocolRs485Baudrate(settings->inverter_protocol);
         if (haveBaud && inverterBaud != baud) {

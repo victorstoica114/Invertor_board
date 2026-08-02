@@ -54,6 +54,7 @@ typedef struct {
 
 void bridgeReloadFromRuntimeSettings(void);
 void bridgeGetTelemetrySnapshot(bridgeTelemetrySnapshot_t *out);
+void bridgeGetSecondaryTelemetrySnapshot(bridgeTelemetrySnapshot_t *out);
 void bridgeSetTelemetrySnapshot(const bridgeTelemetrySnapshot_t *in);
 void bridgeGetDecodedLogSnapshot(char *out, uint32_t outSize);
 void bridgeSetDecodedLogSnapshot(const char *text);

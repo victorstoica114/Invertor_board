@@ -1,0 +1,25 @@
+[Unit]
+Description=Bluetooth BMS monitoring and control dashboard
+After=network-online.target bluetooth.target dbus.service
+Wants=network-online.target bluetooth.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+SupplementaryGroups=bluetooth
+WorkingDirectory=/home/pi/Documents/Inverter_Board
+EnvironmentFile=-/home/pi/.config/inverter-bms-dashboard.env
+Environment=PYTHONUNBUFFERED=1
+Environment=HOME=/home/pi
+ExecStart=/home/pi/.venvs/inverter-bms-dashboard/bin/python /home/pi/Documents/Inverter_Board/tools/bms_dashboard.py
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target
