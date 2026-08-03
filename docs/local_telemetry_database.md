@@ -89,6 +89,37 @@ Follow the background collector:
 tail -f data/telemetry_collector.log
 ```
 
+## PDF chart reports
+
+`tools/telemetry_report.py` generates an A4 landscape PDF containing a source
+summary, a BMS comparison, one detail page per BMS, an inverter comparison, and
+one detail page per inverter. Only valid BMS samples are charted. Database rows
+are never modified, and missing collection intervals are rendered as line
+breaks instead of being joined with misleading lines.
+
+Generate a report containing every stored sample:
+
+```bash
+python3 tools/telemetry_report.py
+```
+
+The default output is a timestamped file under `data/reports/`. Limit a report
+to the newest 24 hours in the database or select an explicit interval with:
+
+```bash
+python3 tools/telemetry_report.py --hours 24 --output data/reports/last-24-hours.pdf
+python3 tools/telemetry_report.py \
+  --since 2026-08-02T00:00:00Z \
+  --until 2026-08-03T00:00:00Z \
+  --output data/reports/custom-interval.pdf
+```
+
+The generator uses the system Matplotlib and NumPy packages. Large histories
+are reduced only for plotting with a bucketed minimum/maximum algorithm, so
+short peaks are retained while the source database remains untouched. Use
+`--max-points` to change the plotting limit and `--timezone` to select the
+display timezone.
+
 ## Schema
 
 Schema version 5 includes the original BMS source migration plus inverter
