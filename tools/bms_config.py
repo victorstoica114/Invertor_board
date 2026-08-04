@@ -184,6 +184,8 @@ DALY_SPECS: Final[tuple[SettingSpec, ...]] = (
 
 
 class _DalySession:
+    WRITE_ACK_TIMEOUT_SECONDS: Final[float] = 2.0
+
     def __init__(self, client: Any) -> None:
         self.client = client
         self.event = asyncio.Event()
@@ -211,13 +213,20 @@ class _DalySession:
             return
         self.event.set()
 
-    async def command(self, function: int, register: int, value_or_count: int) -> bytes:
+    async def command(
+        self,
+        function: int,
+        register: int,
+        value_or_count: int,
+        *,
+        timeout_seconds: float = 8,
+    ) -> bytes:
         self.buffer.clear()
         self.event.clear()
         frame = bytearray((0xD2, function, register >> 8, register & 0xFF, value_or_count >> 8, value_or_count & 0xFF))
         frame.extend(bms_ble.crc16_modbus(frame).to_bytes(2, "little"))
         await self.client.write_gatt_char(bms_ble.normalize_uuid("fff2"), bytes(frame), response=False)
-        await asyncio.wait_for(self.event.wait(), timeout=8)
+        await asyncio.wait_for(self.event.wait(), timeout=timeout_seconds)
         expected = self._expected_length()
         if expected is None:
             raise RuntimeError("Daly returned an incomplete response")
@@ -232,22 +241,44 @@ class _DalySession:
             raise RuntimeError("Daly returned the wrong register count")
         return frame[3:-2]
 
-    async def write(self, register: int, value: int) -> None:
-        frame = await self.command(0x06, register, value)
+    async def write(self, register: int, value: int) -> bool:
+        """Write one register and verify firmware that omits the Modbus echo.
+
+        Some Daly D2 BLE firmware applies function-0x06 writes but does not
+        return the standard echo frame.  A missing echo is accepted only when
+        an immediate register read returns the exact requested raw value.
+        """
+        try:
+            frame = await self.command(
+                0x06,
+                register,
+                value,
+                timeout_seconds=self.WRITE_ACK_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            readback = await self.read(register, 1)
+            if int.from_bytes(readback, "big") != value:
+                raise RuntimeError("Daly write was not acknowledged and read-back did not match")
+            return False
         if int.from_bytes(frame[2:4], "big") != register or int.from_bytes(frame[4:6], "big") != value:
             raise RuntimeError("Daly write acknowledgement does not match the request")
+        return True
 
 
-async def _read_daly_session(session: _DalySession) -> dict[str, Any]:
+async def _read_daly_session(
+    session: _DalySession, *, include_version: bool = True
+) -> dict[str, Any]:
     settings = await session.read(0x0080, 41)
     balancer = await session.read(0x00CF, 1)
-    try:
-        version = await session.read(0x00A9, 32)
-    except TimeoutError:
-        # Some Daly BLE bridges intermittently omit this optional 64-byte
-        # identity block.  Configuration registers and the MAC identity are
-        # still valid, so a missing version must not disable guarded writes.
-        version = b""
+    version = b""
+    if include_version:
+        try:
+            version = await session.read(0x00A9, 32)
+        except TimeoutError:
+            # Some Daly BLE bridges intermittently omit this optional 64-byte
+            # identity block.  Configuration registers and the MAC identity
+            # are still valid, so a missing version must not disable reads.
+            pass
     registers = {
         f"0x{address:04X}": int.from_bytes(settings[(address - 0x80) * 2 : (address - 0x80) * 2 + 2], "big")
         for address in range(0x80, 0xA9)
@@ -293,17 +324,27 @@ async def write_daly_setting(key: str, value: Any, confirmation: str) -> dict[st
     async with BleakClient(device, timeout=15) as client:
         session = _DalySession(client)
         await client.start_notify(bms_ble.normalize_uuid("fff1"), session.notification)
-        before_configuration = await _read_daly_session(session)
+        # The optional version block often costs a full eight-second timeout
+        # and can leave a late notification racing the following write.  It is
+        # identity-only and is deliberately skipped for guarded writes.
+        before_configuration = await _read_daly_session(session, include_version=False)
         before = next(item for group in before_configuration["groups"] for item in group["settings"] if item["key"] == key)
         if before["raw"] == target_raw:
             return {"written": False, "verified": True, "before": before["value"], "after": before["value"], "after_configuration": before_configuration}
-        await session.write(spec.register, target_raw)
+        acknowledged = await session.write(spec.register, target_raw)
         await asyncio.sleep(0.5)
-        after_configuration = await _read_daly_session(session)
+        after_configuration = await _read_daly_session(session, include_version=False)
     after = next(item for group in after_configuration["groups"] for item in group["settings"] if item["key"] == key)
     if after["raw"] != target_raw:
         raise RuntimeError("Daly did not report the requested value after the write")
-    return {"written": True, "verified": True, "before": before["value"], "after": after["value"], "after_configuration": after_configuration}
+    return {
+        "written": True,
+        "acknowledged": acknowledged,
+        "verified": True,
+        "before": before["value"],
+        "after": after["value"],
+        "after_configuration": after_configuration,
+    }
 
 
 def _seplos_spec(
