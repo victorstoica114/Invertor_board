@@ -1,45 +1,45 @@
 {
   "database_file": "telemetry-data/telemetry.sqlite3",
   "format_version": 1,
-  "generated_at_utc": "2026-08-05T06:20:40Z",
-  "inverter_sample_count": 16049,
+  "generated_at_utc": "2026-08-05T18:20:45Z",
+  "inverter_sample_count": 18925,
   "inverters": [
     {
       "configured_ip": "192.168.1.18",
       "inverter_id": "inverter-anenji",
       "latest_protocol": "ANENJI_MODBUS_201_234",
-      "latest_sample_utc": "2026-08-05T06:20:19.968Z",
+      "latest_sample_utc": "2026-08-05T18:20:20.109Z",
       "latest_working_mode": "OFF_GRID",
       "linked_board_id": "inverter-board-2",
       "name": "Anenji",
-      "sample_count": 8029
+      "sample_count": 9469
     },
     {
       "configured_ip": "192.168.1.185",
       "inverter_id": "inverter-easun",
       "latest_protocol": "EASUN_VOLTRONIC_QPIGS",
-      "latest_sample_utc": "2026-08-05T06:20:22.594Z",
+      "latest_sample_utc": "2026-08-05T18:20:22.730Z",
       "latest_working_mode": "BATTERY",
       "linked_board_id": "inverter-board-1",
       "name": "EASUN",
-      "sample_count": 8020
+      "sample_count": 9456
     }
   ],
-  "latest_inverter_sample_utc": "2026-08-05T06:20:22.594Z",
-  "latest_sample_utc": "2026-08-05T06:20:19.472Z",
-  "sample_count": 24499,
+  "latest_inverter_sample_utc": "2026-08-05T18:20:22.730Z",
+  "latest_sample_utc": "2026-08-05T18:20:19.642Z",
+  "sample_count": 28819,
   "schema_version": 5,
-  "sha256": "bbbb0a7ce7f609adcbc9df8368801a25cc239bbb3769ba7438d8ff8a858b101a",
-  "size_bytes": 70508544,
+  "sha256": "eae70fa6ccf9b4985ccdf4364f7076b168b34f8a51e2af5c2a7b64f195ac40c4",
+  "size_bytes": 82956288,
   "sources": [
     {
       "board_id": "inverter-board-1",
       "endpoint": "/api/telemetry",
       "latest_cell_count": 8,
       "latest_protocol": "JKBMS_MODBUS",
-      "latest_sample_utc": "2026-08-05T06:20:19.385Z",
+      "latest_sample_utc": "2026-08-05T18:20:19.632Z",
       "name": "JK BMS",
-      "sample_count": 8169,
+      "sample_count": 9609,
       "source_id": "inverter-board-1-bms1"
     },
     {
@@ -47,9 +47,9 @@
       "endpoint": "/api/telemetry2",
       "latest_cell_count": 8,
       "latest_protocol": "DALY_RS485",
-      "latest_sample_utc": "2026-08-05T06:20:19.396Z",
+      "latest_sample_utc": "2026-08-05T18:20:19.642Z",
       "name": "Daly BMS",
-      "sample_count": 8159,
+      "sample_count": 9599,
       "source_id": "inverter-board-1-bms2"
     },
     {
@@ -57,9 +57,9 @@
       "endpoint": "/api/telemetry",
       "latest_cell_count": 16,
       "latest_protocol": "RS485_GROWATT",
-      "latest_sample_utc": "2026-08-05T06:20:19.472Z",
+      "latest_sample_utc": "2026-08-05T18:20:19.629Z",
       "name": "Seplos BMS",
-      "sample_count": 8171,
+      "sample_count": 9611,
       "source_id": "inverter-board-2-bms1"
     }
   ]
