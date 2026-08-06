@@ -14,8 +14,6 @@ htmlcov/
 *.gcda
 *.gcno
 *.gcov
-/data/
-
 # KiCad local/generated files
 **/fp-info-cache
 **/*.bak
