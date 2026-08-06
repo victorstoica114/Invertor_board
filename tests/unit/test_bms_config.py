@@ -59,6 +59,52 @@ def test_daly_session_reassembles_fragmented_read_response():
     asyncio.run(exercise())
 
 
+def test_daly_write_without_echo_succeeds_only_after_exact_readback():
+    class Client:
+        pass
+
+    async def exercise():
+        session = bms_config._DalySession(Client())
+
+        async def command(_function, _register, _value, **_kwargs):
+            raise TimeoutError
+
+        async def matching_readback(register, count):
+            assert (register, count) == (0x00A7, 1)
+            return bytes.fromhex("03E8")
+
+        session.command = command
+        session.read = matching_readback
+        assert await session.write(0x00A7, 1000) is False
+
+    asyncio.run(exercise())
+
+
+def test_daly_write_without_echo_rejects_mismatched_readback():
+    class Client:
+        pass
+
+    async def exercise():
+        session = bms_config._DalySession(Client())
+
+        async def command(_function, _register, _value, **_kwargs):
+            raise TimeoutError
+
+        async def stale_readback(_register, _count):
+            return bytes.fromhex("032C")
+
+        session.command = command
+        session.read = stale_readback
+        try:
+            await session.write(0x00A7, 1000)
+        except RuntimeError as exc:
+            assert "read-back did not match" in str(exc)
+        else:
+            raise AssertionError("a missing acknowledgement must require an exact read-back")
+
+    asyncio.run(exercise())
+
+
 def test_seplos_single_coil_write_uses_modbus_function_0f():
     frame = bms_config._build_modbus_write_coil(0, 0x1400, True)
     assert frame[:8] == bytes.fromhex("000f140000010101")
