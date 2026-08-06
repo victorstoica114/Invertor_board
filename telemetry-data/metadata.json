@@ -1,0 +1,66 @@
+{
+  "database_file": "telemetry-data/telemetry.sqlite3",
+  "format_version": 1,
+  "generated_at_utc": "2026-08-06T11:37:58Z",
+  "inverter_sample_count": 23025,
+  "inverters": [
+    {
+      "configured_ip": "192.168.1.18",
+      "inverter_id": "inverter-anenji",
+      "latest_protocol": "ANENJI_MODBUS_201_234",
+      "latest_sample_utc": "2026-08-06T11:25:50.334Z",
+      "latest_working_mode": "OFF_GRID",
+      "linked_board_id": "inverter-board-2",
+      "name": "Anenji",
+      "sample_count": 11519
+    },
+    {
+      "configured_ip": "192.168.1.185",
+      "inverter_id": "inverter-easun",
+      "latest_protocol": "EASUN_VOLTRONIC_QPIGS",
+      "latest_sample_utc": "2026-08-06T11:25:52.973Z",
+      "latest_working_mode": "BATTERY",
+      "linked_board_id": "inverter-board-1",
+      "name": "EASUN",
+      "sample_count": 11506
+    }
+  ],
+  "latest_inverter_sample_utc": "2026-08-06T11:25:52.973Z",
+  "latest_sample_utc": "2026-08-06T11:25:49.883Z",
+  "sample_count": 34972,
+  "schema_version": 5,
+  "sha256": "4bfc88e0849c5f32b3126faab3a431c766fdf18cb823530271ec52718cee4b5c",
+  "size_bytes": 100716544,
+  "sources": [
+    {
+      "board_id": "inverter-board-1",
+      "endpoint": "/api/telemetry",
+      "latest_cell_count": 8,
+      "latest_protocol": "JKBMS_MODBUS",
+      "latest_sample_utc": "2026-08-06T11:25:49.883Z",
+      "name": "JK BMS",
+      "sample_count": 11660,
+      "source_id": "inverter-board-1-bms1"
+    },
+    {
+      "board_id": "inverter-board-1",
+      "endpoint": "/api/telemetry2",
+      "latest_cell_count": 8,
+      "latest_protocol": "DALY_RS485",
+      "latest_sample_utc": "2026-08-06T11:25:49.871Z",
+      "name": "Daly BMS",
+      "sample_count": 11650,
+      "source_id": "inverter-board-1-bms2"
+    },
+    {
+      "board_id": "inverter-board-2",
+      "endpoint": "/api/telemetry",
+      "latest_cell_count": 16,
+      "latest_protocol": "RS485_GROWATT",
+      "latest_sample_utc": "2026-08-06T11:25:49.874Z",
+      "name": "Seplos BMS",
+      "sample_count": 11662,
+      "source_id": "inverter-board-2-bms1"
+    }
+  ]
+}
