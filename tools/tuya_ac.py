@@ -46,6 +46,8 @@ class AcDefinition:
     minimum_temperature_c: float = 16.0
     maximum_temperature_c: float = 30.0
     temperature_step_c: float = 1.0
+    current_temperature_scale: float | None = None
+    target_temperature_scale: float | None = None
 
     def public_identity(self) -> dict[str, Any]:
         return {
@@ -88,8 +90,14 @@ def load_config(path: Path) -> AcDefinition:
     try:
         version = float(payload.get("version", 3.3))
         temperature_scale = float(payload.get("temperature_scale", 10))
+        current_temperature_scale = float(
+            payload.get("current_temperature_scale", temperature_scale)
+        )
+        target_temperature_scale = float(
+            payload.get("target_temperature_scale", temperature_scale)
+        )
     except (TypeError, ValueError) as exc:
-        raise TuyaAcError("version and temperature_scale must be numbers") from exc
+        raise TuyaAcError("version and temperature scales must be numbers") from exc
     raw_dps = payload.get("dps", {})
     if not isinstance(raw_dps, dict):
         raise TuyaAcError("dps must be an object")
@@ -133,8 +141,8 @@ def load_config(path: Path) -> AcDefinition:
         raise TuyaAcError("Tuya local_key must be exactly 16 bytes")
     if version not in (3.1, 3.2, 3.3, 3.4, 3.5):
         raise TuyaAcError("unsupported Tuya protocol version")
-    if temperature_scale <= 0:
-        raise TuyaAcError("temperature_scale must be greater than zero")
+    if min(temperature_scale, current_temperature_scale, target_temperature_scale) <= 0:
+        raise TuyaAcError("temperature scales must be greater than zero")
     if not 5 <= minimum_temperature_c < maximum_temperature_c <= 40:
         raise TuyaAcError("temperature limits must be between 5 and 40 C")
     if temperature_step_c <= 0 or temperature_step_c > 5:
@@ -142,20 +150,22 @@ def load_config(path: Path) -> AcDefinition:
     if not dps.get("power", "").isdigit():
         raise TuyaAcError("the power datapoint must be numeric")
     return AcDefinition(
-        ac_id,
-        name,
-        ip,
-        device_id,
-        local_key,
-        product_id,
-        version,
-        temperature_scale,
-        dps,
-        mode_values,
-        fan_values,
-        minimum_temperature_c,
-        maximum_temperature_c,
-        temperature_step_c,
+        id=ac_id,
+        name=name,
+        ip=ip,
+        device_id=device_id,
+        local_key=local_key,
+        product_id=product_id,
+        version=version,
+        temperature_scale=temperature_scale,
+        dps=dps,
+        mode_values=mode_values,
+        fan_values=fan_values,
+        minimum_temperature_c=minimum_temperature_c,
+        maximum_temperature_c=maximum_temperature_c,
+        temperature_step_c=temperature_step_c,
+        current_temperature_scale=current_temperature_scale,
+        target_temperature_scale=target_temperature_scale,
     )
 
 
@@ -182,6 +192,11 @@ def _temperature(value: Any, scale: float) -> float | None:
     return round(float(value) / scale, 1)
 
 
+def _temperature_scale(definition: AcDefinition, field: str) -> float:
+    configured = getattr(definition, f"{field}_temperature_scale")
+    return definition.temperature_scale if configured is None else configured
+
+
 def read_ac(definition: AcDefinition) -> dict[str, Any]:
     """Read the AC status and expose both mapped fields and non-secret raw DPS."""
     try:
@@ -203,11 +218,11 @@ def read_ac(definition: AcDefinition) -> dict[str, Any]:
         "temperature_unit": _mapped_value(dps, definition, "temperature_unit"),
         "current_temperature_c": _temperature(
             _mapped_value(dps, definition, "current_temperature"),
-            definition.temperature_scale,
+            _temperature_scale(definition, "current"),
         ),
         "target_temperature_c": _temperature(
             _mapped_value(dps, definition, "target_temperature"),
-            definition.temperature_scale,
+            _temperature_scale(definition, "target"),
         ),
         "raw_dps": dps,
     }
@@ -243,7 +258,7 @@ def _normalized_setting(definition: AcDefinition, setting: str, value: Any) -> t
         offset = (requested - definition.minimum_temperature_c) / definition.temperature_step_c
         if abs(offset - round(offset)) > 1e-6:
             raise ValueError("target temperature does not match the configured step")
-        raw = requested * definition.temperature_scale
+        raw = requested * _temperature_scale(definition, "target")
         raw_value: int | float = int(raw) if raw.is_integer() else raw
         return "target_temperature_c", requested, raw_value
     raise ValueError("unsupported air-conditioner setting")

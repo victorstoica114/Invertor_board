@@ -55,29 +55,34 @@ from the Tuya IoT project linked to the Smart Life account:
   "product_id": "hw50w7qvxluhslkk",
   "version": 3.3,
   "temperature_scale": 10,
+  "current_temperature_scale": 1,
+  "target_temperature_scale": 10,
   "dps": {
     "power": "1",
     "mode": "4",
     "fan": "5",
     "temperature_unit": "19",
-    "current_temperature": "23",
-    "target_temperature": "24"
+    "current_temperature": "3",
+    "target_temperature": "2"
   },
   "controls": {
     "modes": ["auto", "cold", "hot", "wet", "wind"],
-    "fan_speeds": ["auto", "low", "mid", "high"],
+    "fan_speeds": ["strong", "high", "mid_high", "mid", "mid_low", "low", "mute", "auto"],
     "temperature": {
       "minimum_c": 16,
       "maximum_c": 30,
-      "step_c": 1
+      "step_c": 0.5
     }
   }
 }
 ```
 
 The `dps` object overrides the defaults when a firmware variant exposes a
-different datapoint map. The first authenticated status response includes the
-non-secret raw datapoints in `/api/iot`, which can be used to validate that map.
+different datapoint map. `temperature_scale` remains the fallback for both
+temperature fields; the per-field scales handle devices such as this TCL model,
+which reports the target in tenths of a degree and the ambient value in whole
+degrees. The first authenticated status response includes the non-secret raw
+datapoints in `/api/iot`, which can be used to validate that map.
 
 Both files are rejected unless they are private:
 

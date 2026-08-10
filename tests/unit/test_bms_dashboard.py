@@ -268,6 +268,38 @@ def test_tuya_ac_setting_validation_uses_configured_limits_and_options():
         raise AssertionError("an unsupported AC mode was accepted")
 
 
+def test_tuya_ac_supports_distinct_current_and_target_temperature_scales():
+    definition = dashboard.tuya_ac.AcDefinition(
+        "air-conditioner", "AC", "192.168.1.200", "device", "k" * 16,
+        "product", 3.3, 10, {
+            **dashboard.tuya_ac.DEFAULT_DPS,
+            "current_temperature": "3",
+            "target_temperature": "2",
+        },
+        temperature_step_c=0.5,
+        current_temperature_scale=1,
+        target_temperature_scale=10,
+    )
+
+    class Device:
+        @staticmethod
+        def status():
+            return {"dps": {"1": False, "2": 260, "3": 28, "4": "wet", "5": "auto"}}
+
+    original = dashboard.tuya_ac._device
+    dashboard.tuya_ac._device = lambda _definition: Device()
+    try:
+        telemetry = dashboard.tuya_ac.read_ac(definition)["telemetry"]
+    finally:
+        dashboard.tuya_ac._device = original
+
+    assert telemetry["current_temperature_c"] == 28.0
+    assert telemetry["target_temperature_c"] == 26.0
+    assert dashboard.tuya_ac._normalized_setting(
+        definition, "target_temperature_c", 22.5
+    ) == ("target_temperature_c", 22.5, 225)
+
+
 def test_polling_preserves_last_data_when_one_device_disappears():
     calls = {"daly": 0, "seplos": 0, "jk": 0}
 
