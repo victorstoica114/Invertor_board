@@ -23248,3 +23248,15 @@ Starting telemetry collector: boards=2 sources=3 inverters=2 interval=30s databa
 2026-08-06T11:25:49.890Z telemetry cycle: 3 stored, 0 skipped (inverter-board-1-bms1@192.168.1.5/api/telemetry=stored, inverter-board-1-bms2@192.168.1.5/api/telemetry2=stored, inverter-board-2-bms1@192.168.1.167/api/telemetry=stored)
 2026-08-06T11:25:52.975Z inverter cycle: 2 stored, 0 skipped (inverter-anenji@192.168.1.18=stored, inverter-easun@192.168.1.185=stored)
 Telemetry collector stopped
+Starting telemetry collector: boards=2 sources=3 inverters=2 interval=30s database=/home/pi/Documents/Inverter_Board/data/telemetry.sqlite3
+2026-08-10T15:40:31.049Z telemetry cycle: 3 stored, 0 skipped (inverter-board-1-bms1@192.168.1.5/api/telemetry=stored, inverter-board-1-bms2@192.168.1.5/api/telemetry2=stored, inverter-board-2-bms1@192.168.1.167/api/telemetry=stored)
+2026-08-10T15:40:34.135Z inverter cycle: 2 stored, 0 skipped (inverter-anenji@192.168.1.18=stored, inverter-easun@192.168.1.185=stored)
+2026-08-10T15:41:01.026Z telemetry cycle: 3 stored, 0 skipped (inverter-board-1-bms1@192.168.1.5/api/telemetry=stored, inverter-board-1-bms2@192.168.1.5/api/telemetry2=stored, inverter-board-2-bms1@192.168.1.167/api/telemetry=stored)
+2026-08-10T15:41:04.120Z inverter cycle: 2 stored, 0 skipped (inverter-anenji@192.168.1.18=stored, inverter-easun@192.168.1.185=stored)
+2026-08-10T15:41:31.012Z telemetry cycle: 3 stored, 0 skipped (inverter-board-1-bms1@192.168.1.5/api/telemetry=stored, inverter-board-1-bms2@192.168.1.5/api/telemetry2=stored, inverter-board-2-bms1@192.168.1.167/api/telemetry=stored)
+2026-08-10T15:41:34.024Z inverter cycle: 2 stored, 0 skipped (inverter-anenji@192.168.1.18=stored, inverter-easun@192.168.1.185=stored)
+2026-08-10T15:42:00.998Z telemetry cycle: 3 stored, 0 skipped (inverter-board-1-bms1@192.168.1.5/api/telemetry=stored, inverter-board-1-bms2@192.168.1.5/api/telemetry2=stored, inverter-board-2-bms1@192.168.1.167/api/telemetry=stored)
+2026-08-10T15:42:04.093Z inverter cycle: 2 stored, 0 skipped (inverter-anenji@192.168.1.18=stored, inverter-easun@192.168.1.185=stored)
+2026-08-10T15:42:31.083Z telemetry cycle: 3 stored, 0 skipped (inverter-board-1-bms1@192.168.1.5/api/telemetry=stored, inverter-board-1-bms2@192.168.1.5/api/telemetry2=stored, inverter-board-2-bms1@192.168.1.167/api/telemetry=stored)
+2026-08-10T15:42:34.184Z inverter cycle: 2 stored, 0 skipped (inverter-anenji@192.168.1.18=stored, inverter-easun@192.168.1.185=stored)
+Telemetry collector stopped
