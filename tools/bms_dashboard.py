@@ -41,6 +41,7 @@ MIN_REFRESH_SECONDS: Final[float] = 3.0
 DEFAULT_INVERTER_STALE_SECONDS: Final[float] = 90.0
 DEFAULT_INVERTER_POLL_SECONDS: Final[float] = 30.0
 INVERTER_VOLTAGE_MAX_AGE_SECONDS: Final[float] = 300.0
+INVERTER_VOLTAGE_PREFERRED_SOURCE_ID: Final[str] = "inverter-anenji"
 INVERTER_CONTROL_TIMEOUT_SECONDS: Final[float] = 12.0
 INVERTER_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
@@ -220,7 +221,7 @@ def load_inverter_inventory(path: Path) -> dict[str, dict[str, Any]]:
 
 
 def inverter_voltage_reference_from_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
-    """Select the freshest valid AC-output voltage from an inverter snapshot."""
+    """Prefer Anenji's fresh output voltage, then another inverter output."""
     if not snapshot["available"]:
         return {
             "available": False,
@@ -236,10 +237,6 @@ def inverter_voltage_reference_from_snapshot(snapshot: Mapping[str, Any]) -> dic
     for device in snapshot["devices"].values():
         telemetry = device.get("telemetry", {})
         voltage = finite_number(telemetry.get("output_voltage_v"))
-        measurement = "output_voltage_v"
-        if voltage is None or not 100 <= float(voltage) <= 260:
-            voltage = finite_number(telemetry.get("grid_voltage_v"))
-            measurement = "grid_voltage_v"
         age = finite_number(device.get("age_seconds"))
         if (
             voltage is not None
@@ -247,7 +244,12 @@ def inverter_voltage_reference_from_snapshot(snapshot: Mapping[str, Any]) -> dic
             and age is not None
             and float(age) <= INVERTER_VOLTAGE_MAX_AGE_SECONDS
         ):
-            candidates.append((float(age), float(voltage), measurement, device))
+            priority = (
+                0
+                if device.get("id") == INVERTER_VOLTAGE_PREFERRED_SOURCE_ID
+                else 1
+            )
+            candidates.append((priority, float(age), float(voltage), device))
     if not candidates:
         return {
             "available": False,
@@ -257,9 +259,9 @@ def inverter_voltage_reference_from_snapshot(snapshot: Mapping[str, Any]) -> dic
             "sampled_at": None,
             "age_seconds": None,
             "measurement": None,
-            "error": "No fresh inverter AC-voltage sample is available",
+            "error": "No fresh inverter output-voltage sample is available",
         }
-    age, voltage, measurement, device = min(candidates, key=lambda item: item[0])
+    _, age, voltage, device = min(candidates, key=lambda item: (item[0], item[1]))
     return {
         "available": True,
         "voltage_v": voltage,
@@ -267,7 +269,7 @@ def inverter_voltage_reference_from_snapshot(snapshot: Mapping[str, Any]) -> dic
         "source_name": device["name"],
         "sampled_at": device["last_sample"],
         "age_seconds": age,
-        "measurement": measurement,
+        "measurement": "output_voltage_v",
         "error": None,
     }
 

@@ -199,6 +199,60 @@ def test_voltage_reference_uses_freshest_valid_inverter_output():
     }
 
 
+def test_voltage_reference_prefers_anenji_output_over_newer_easun_sample():
+    reference = dashboard.inverter_voltage_reference_from_snapshot({
+        "available": True,
+        "error": None,
+        "devices": {
+            "inverter-anenji": {
+                "id": "inverter-anenji",
+                "name": "Anenji",
+                "age_seconds": 20,
+                "last_sample": "anenji-sample",
+                "telemetry": {"output_voltage_v": 228.6, "grid_voltage_v": 239.0},
+            },
+            "inverter-easun": {
+                "id": "inverter-easun",
+                "name": "EASUN",
+                "age_seconds": 2,
+                "last_sample": "easun-sample",
+                "telemetry": {"output_voltage_v": 231.0, "grid_voltage_v": 240.0},
+            },
+        },
+    })
+
+    assert reference["source_id"] == "inverter-anenji"
+    assert reference["voltage_v"] == 228.6
+    assert reference["measurement"] == "output_voltage_v"
+
+
+def test_voltage_reference_never_uses_grid_input_voltage():
+    reference = dashboard.inverter_voltage_reference_from_snapshot({
+        "available": True,
+        "error": None,
+        "devices": {
+            "inverter-anenji": {
+                "id": "inverter-anenji",
+                "name": "Anenji",
+                "age_seconds": 2,
+                "last_sample": "anenji-sample",
+                "telemetry": {"output_voltage_v": 0.0, "grid_voltage_v": 239.0},
+            },
+            "inverter-easun": {
+                "id": "inverter-easun",
+                "name": "EASUN",
+                "age_seconds": 8,
+                "last_sample": "easun-sample",
+                "telemetry": {"output_voltage_v": 230.5, "grid_voltage_v": 240.0},
+            },
+        },
+    })
+
+    assert reference["source_id"] == "inverter-easun"
+    assert reference["voltage_v"] == 230.5
+    assert reference["measurement"] == "output_voltage_v"
+
+
 def test_direct_inverter_polling_exposes_live_output_without_database_writes():
     calls = []
 

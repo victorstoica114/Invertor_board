@@ -34,11 +34,12 @@ Create `/home/pi/.config/iot-keys/xiaomi_plugs.json`:
 ```
 
 This plug model reports power and energy, but it does not expose current or
-voltage through its MIoT schema. The dashboard takes the freshest valid grid
-AC-output voltage reported by either inverter and calculates plug current as
-`power / inverter voltage`. Grid-input voltage is used only when output voltage
-is unavailable. An inverter sample older than five minutes is rejected;
-`reference_voltage_v` is then used as an explicitly marked fallback.
+voltage through its MIoT schema. The dashboard prioritizes Anenji's fresh
+`output_voltage_v` and calculates plug current as `power / inverter voltage`.
+If Anenji is unavailable it uses another inverter's fresh output voltage; it
+never substitutes grid-input voltage. An inverter sample older than five
+minutes is rejected, and `reference_voltage_v` is then used as an explicitly
+marked fallback.
 
 ## Tuya air conditioner
 
