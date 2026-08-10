@@ -192,16 +192,16 @@ function inverterCard(device) {
 function renderInverters(data) {
   const monitor = data.inverters || { available: false, devices: {}, error: "Waiting for inverter data" };
   const devices = Object.values(monitor.devices || {});
-  const databaseState = $("#inverter-database-state");
+  const inverterState = $("#inverter-database-state");
   const online = devices.filter((device) => device.online).length;
-  databaseState.className = `status-pill ${monitor.available ? (online ? "live" : "") : ""}`;
-  databaseState.innerHTML = `<span class="dot"></span>${monitor.available ? `SQLite v${monitor.schema_version} · ${online}/${devices.length} online` : "SQLite unavailable"}`;
+  inverterState.className = `status-pill ${monitor.available ? (online ? "live" : "") : ""}`;
+  inverterState.innerHTML = `<span class="dot"></span>${monitor.available ? `Direct LAN · ${online}/${devices.length} online` : "Direct telemetry unavailable"}`;
   if (!monitor.available) {
-    $("#inverter-grid").innerHTML = `<article class="inverter-empty"><strong>Inverter telemetry is unavailable</strong><p>${esc(monitor.error || "The local database could not be read.")}</p></article>`;
+    $("#inverter-grid").innerHTML = `<article class="inverter-empty"><strong>Inverter telemetry is unavailable</strong><p>${esc(monitor.error || "The direct inverter inventory could not be loaded.")}</p></article>`;
     return;
   }
   if (!devices.length) {
-    $("#inverter-grid").innerHTML = `<article class="inverter-empty"><strong>No inverters configured</strong><p>The collector database does not contain inverter inventory yet.</p></article>`;
+    $("#inverter-grid").innerHTML = `<article class="inverter-empty"><strong>No inverters configured</strong><p>The direct inverter inventory is empty.</p></article>`;
     return;
   }
   $("#inverter-grid").innerHTML = devices.map(inverterCard).join("");

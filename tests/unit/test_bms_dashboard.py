@@ -199,6 +199,56 @@ def test_voltage_reference_uses_freshest_valid_inverter_output():
     }
 
 
+def test_direct_inverter_polling_exposes_live_output_without_database_writes():
+    calls = []
+
+    def inverter_reader(protocol, inverter_ip, local_ip, local_port, timeout):
+        calls.append((protocol, inverter_ip, local_ip, local_port, timeout))
+        return {
+            "protocol": "ANENJI_MODBUS_201_234",
+            "working_mode": "OFF_GRID",
+            "output_voltage_v": 230.3,
+            "output_frequency_hz": 50.0,
+            "output_power_w": 209.0,
+            "grid_voltage_v": 0.0,
+            "grid_frequency_hz": 0.0,
+        }
+
+    inventory = {
+        "inverter-anenji": {
+            "id": "inverter-anenji",
+            "name": "Anenji",
+            "protocol": "anenji_modbus",
+            "mac": "34:5f:45:48:cf:15",
+            "ip": "192.168.1.18",
+            "local_ip": "192.168.1.44",
+            "local_port": 8899,
+            "linked_board_id": "inverter-board-2",
+        }
+    }
+    with tempfile.TemporaryDirectory() as directory:
+        database = Path(directory) / "must-not-be-created.sqlite3"
+        state = dashboard.DashboardState(
+            dashboard.DashboardConfig(telemetry_database=database),
+            inverter_reader=inverter_reader,
+            inverter_inventory=inventory,
+            plug_inventory={},
+        )
+        assert asyncio.run(state.poll_iot_once()) is True
+        snapshot = state.public_snapshot()
+
+        assert not database.exists()
+    device = snapshot["inverters"]["devices"]["inverter-anenji"]
+    assert calls == [("anenji_modbus", "192.168.1.18", "192.168.1.44", 8899, 12.0)]
+    assert snapshot["inverters"]["source"] == "direct_lan"
+    assert device["online"] is True
+    assert device["stale"] is False
+    assert device["telemetry"]["output_voltage_v"] == 230.3
+    assert device["telemetry"]["grid_voltage_v"] == 0.0
+    assert snapshot["iot"]["inverter_voltage_reference"]["voltage_v"] == 230.3
+    assert snapshot["iot"]["inverter_voltage_reference"]["measurement"] == "output_voltage_v"
+
+
 def test_tuya_ac_setting_validation_uses_configured_limits_and_options():
     definition = dashboard.tuya_ac.AcDefinition(
         "air-conditioner", "AC", "192.168.1.200", "device", "k" * 16,
