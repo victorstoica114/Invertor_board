@@ -82,8 +82,9 @@ and Seplos inverter protocol selectors.
 
 The same tooling includes a Raspberry Pi web dashboard for LAN monitoring of
 the Bluetooth BMS devices, Wi-Fi inverters, Xiaomi smart plugs, and a local
-Tuya air conditioner. It includes live smart-load power charts, verified power
-switches, a complete **BMS Control** tab, and a dedicated Anenji/EASUN inverter-control tab
+Tuya air conditioner. It includes live smart-load power, calculated-current,
+and inverter-voltage charts, verified power switches, a complete **BMS Control**
+tab, and a dedicated Anenji/EASUN inverter-control tab
 (`tools/bms_dashboard.py`, default port `8765`). The dashboard trusts its local
 LAN/VPN and does not add a password prompt; changes still use the live device
 identity, strict protocol-map validation, a confirmation dialog, and full

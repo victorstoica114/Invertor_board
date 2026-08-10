@@ -127,6 +127,10 @@ def test_iot_polling_and_power_write_keep_secrets_out_of_snapshot():
     assert result["verified"] is True
     assert snapshot["iot"]["plugs"]["devices"]["boiler"]["online"] is True
     assert snapshot["iot"]["plugs"]["devices"]["boiler"]["telemetry"]["on"] is True
+    plug_telemetry = snapshot["iot"]["plugs"]["devices"]["boiler"]["telemetry"]
+    assert plug_telemetry["voltage_v"] == 230.0
+    assert plug_telemetry["voltage_source"] == "configured_fallback"
+    assert plug_telemetry["estimated_current_a"] == round(17.5 / 230, 4)
     assert snapshot["iot"]["air_conditioner"]["online"] is True
     assert len(snapshot["iot"]["plugs"]["history"]["boiler"]) == 2
     serialized = json.dumps(snapshot)
@@ -155,6 +159,63 @@ def test_private_iot_config_files_require_mode_0600():
         plug_path.chmod(0o600)
         inventory = dashboard.miot_plugs.load_inventory(plug_path)
         assert inventory["boiler"].ip == "192.168.1.207"
+
+
+def test_voltage_reference_uses_freshest_valid_inverter_output():
+    original = dashboard.read_inverter_snapshot
+    dashboard.read_inverter_snapshot = lambda *_args, **_kwargs: {
+        "available": True,
+        "error": None,
+        "devices": {
+            "old": {
+                "id": "old",
+                "name": "Old inverter",
+                "age_seconds": 350,
+                "last_sample": "old",
+                "telemetry": {"output_voltage_v": 229.0, "grid_voltage_v": 228.0},
+            },
+            "fresh": {
+                "id": "fresh",
+                "name": "Fresh inverter",
+                "age_seconds": 8,
+                "last_sample": "now",
+                "telemetry": {"output_voltage_v": 232.4, "grid_voltage_v": 231.0},
+            },
+        },
+    }
+    try:
+        reference = dashboard.read_inverter_voltage_reference(Path("unused"))
+    finally:
+        dashboard.read_inverter_snapshot = original
+    assert reference == {
+        "available": True,
+        "voltage_v": 232.4,
+        "source_id": "fresh",
+        "source_name": "Fresh inverter",
+        "sampled_at": "now",
+        "age_seconds": 8.0,
+        "measurement": "output_voltage_v",
+        "error": None,
+    }
+
+
+def test_tuya_ac_setting_validation_uses_configured_limits_and_options():
+    definition = dashboard.tuya_ac.AcDefinition(
+        "air-conditioner", "AC", "192.168.1.200", "device", "k" * 16,
+        "product", 3.3, 10, dict(dashboard.tuya_ac.DEFAULT_DPS),
+    )
+    assert dashboard.tuya_ac._normalized_setting(
+        definition, "target_temperature_c", 22
+    ) == ("target_temperature_c", 22.0, 220)
+    assert dashboard.tuya_ac._normalized_setting(
+        definition, "mode", "cold"
+    ) == ("mode", "cold", "cold")
+    try:
+        dashboard.tuya_ac._normalized_setting(definition, "mode", "unsupported")
+    except ValueError as exc:
+        assert "unsupported" in str(exc)
+    else:
+        raise AssertionError("an unsupported AC mode was accepted")
 
 
 def test_polling_preserves_last_data_when_one_device_disappears():
@@ -265,9 +326,12 @@ def test_static_dashboard_is_english_and_renders_individual_cells():
     assert 'id="inverter-grid"' in index
     assert "function renderInverters(data)" in script
     assert 'data-tab="iot"' in index
+    assert 'data-tab="air-conditioner"' in index
+    assert 'id="ac-control-content"' in index
     assert 'id="iot-power-chart"' in index
     assert "function renderIot(data)" in script
     assert "async function applyIotPower(input)" in script
+    assert "async function applyAcSetting(setting, value)" in script
     assert "Anenji and EASUN inverters" in index
     assert 'data-tab="inverter-control"' in index
     assert 'id="inverter-config-content"' in index

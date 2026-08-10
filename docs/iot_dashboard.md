@@ -26,11 +26,19 @@ Create `/home/pi/.config/iot-keys/xiaomi_plugs.json`:
       "name": "Boiler",
       "ip": "192.168.1.207",
       "token": "<32 hexadecimal characters>",
-      "model": "cuco.plug.v2eur"
+      "model": "cuco.plug.v2eur",
+      "reference_voltage_v": 230
     }
   ]
 }
 ```
+
+This plug model reports power and energy, but it does not expose current or
+voltage through its MIoT schema. The dashboard takes the freshest valid grid
+AC-output voltage reported by either inverter and calculates plug current as
+`power / inverter voltage`. Grid-input voltage is used only when output voltage
+is unavailable. An inverter sample older than five minutes is rejected;
+`reference_voltage_v` is then used as an explicitly marked fallback.
 
 ## Tuya air conditioner
 
@@ -54,6 +62,15 @@ from the Tuya IoT project linked to the Smart Life account:
     "temperature_unit": "19",
     "current_temperature": "23",
     "target_temperature": "24"
+  },
+  "controls": {
+    "modes": ["auto", "cold", "hot", "wet", "wind"],
+    "fan_speeds": ["auto", "low", "mid", "high"],
+    "temperature": {
+      "minimum_c": 16,
+      "maximum_c": 30,
+      "step_c": 1
+    }
   }
 }
 ```
@@ -78,6 +95,8 @@ in memory and starts again when the dashboard service restarts.
 - `GET /api/iot` returns device state and smart-plug history without credentials.
 - `POST /api/iot/plugs/{plug_id}/power` accepts `{"on": true}` or `{"on": false}`.
 - `POST /api/iot/air-conditioner/power` accepts the same body.
+- `POST /api/iot/air-conditioner/setting` accepts a validated `setting` and
+  `value` for mode, fan speed, or target temperature.
 
 The API trusts the LAN/VPN like the rest of the dashboard. Restrict port `8765`
 at the network boundary.

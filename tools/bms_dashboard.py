@@ -38,6 +38,7 @@ HISTORY_LIMIT: Final[int] = 180
 IOT_HISTORY_LIMIT: Final[int] = 360
 MIN_REFRESH_SECONDS: Final[float] = 3.0
 DEFAULT_INVERTER_STALE_SECONDS: Final[float] = 90.0
+INVERTER_VOLTAGE_MAX_AGE_SECONDS: Final[float] = 300.0
 INVERTER_CONTROL_TIMEOUT_SECONDS: Final[float] = 12.0
 INVERTER_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
@@ -51,6 +52,7 @@ PlugReader = Callable[[miot_plugs.PlugDefinition], dict[str, Any]]
 PlugPowerWriter = Callable[[miot_plugs.PlugDefinition, bool], dict[str, Any]]
 AcReader = Callable[[tuya_ac.AcDefinition], dict[str, Any]]
 AcPowerWriter = Callable[[tuya_ac.AcDefinition, bool], dict[str, Any]]
+AcSettingWriter = Callable[[tuya_ac.AcDefinition, str, Any], dict[str, Any]]
 
 
 def utc_now() -> str:
@@ -170,6 +172,63 @@ def read_inverter_snapshot(
     }
 
 
+def read_inverter_voltage_reference(database: Path) -> dict[str, Any]:
+    """Select the freshest valid AC-output voltage reported by an inverter."""
+    snapshot = read_inverter_snapshot(
+        database,
+        stale_after_seconds=INVERTER_VOLTAGE_MAX_AGE_SECONDS,
+    )
+    if not snapshot["available"]:
+        return {
+            "available": False,
+            "voltage_v": None,
+            "source_id": None,
+            "source_name": None,
+            "sampled_at": None,
+            "age_seconds": None,
+            "measurement": None,
+            "error": snapshot["error"],
+        }
+    candidates = []
+    for device in snapshot["devices"].values():
+        telemetry = device.get("telemetry", {})
+        voltage = finite_number(telemetry.get("output_voltage_v"))
+        measurement = "output_voltage_v"
+        if voltage is None or not 100 <= float(voltage) <= 260:
+            voltage = finite_number(telemetry.get("grid_voltage_v"))
+            measurement = "grid_voltage_v"
+        age = finite_number(device.get("age_seconds"))
+        if (
+            voltage is not None
+            and 100 <= float(voltage) <= 260
+            and age is not None
+            and float(age) <= INVERTER_VOLTAGE_MAX_AGE_SECONDS
+        ):
+            candidates.append((float(age), float(voltage), measurement, device))
+    if not candidates:
+        return {
+            "available": False,
+            "voltage_v": None,
+            "source_id": None,
+            "source_name": None,
+            "sampled_at": None,
+            "age_seconds": None,
+            "measurement": None,
+            "error": "No fresh inverter AC-voltage sample is available",
+        }
+    age, voltage, measurement, device = min(candidates, key=lambda item: item[0])
+    return {
+        "available": True,
+        "voltage_v": voltage,
+        "source_id": device["id"],
+        "source_name": device["name"],
+        "sampled_at": device["last_sample"],
+        "age_seconds": age,
+        "measurement": measurement,
+        "error": None,
+    }
+
+
 def read_inverter_target(database: Path, inverter_id: str) -> dict[str, Any]:
     """Resolve one configured inverter from the collector's local inventory."""
     if not INVERTER_ID_PATTERN.fullmatch(inverter_id):
@@ -280,6 +339,7 @@ class DashboardState:
         plug_power_writer: PlugPowerWriter = miot_plugs.write_power,
         ac_reader: AcReader = tuya_ac.read_ac,
         ac_power_writer: AcPowerWriter = tuya_ac.write_power,
+        ac_setting_writer: AcSettingWriter = tuya_ac.write_setting,
         plug_inventory: Mapping[str, miot_plugs.PlugDefinition] | None = None,
         ac_definition: tuya_ac.AcDefinition | None = None,
     ) -> None:
@@ -295,6 +355,7 @@ class DashboardState:
         self.plug_power_writer = plug_power_writer
         self.ac_reader = ac_reader
         self.ac_power_writer = ac_power_writer
+        self.ac_setting_writer = ac_setting_writer
         self.operation_lock = asyncio.Lock()
         self.inverter_operation_lock = asyncio.Lock()
         self.iot_operation_lock = asyncio.Lock()
@@ -340,6 +401,16 @@ class DashboardState:
                 self.plug_config_error = str(exc)
                 plug_inventory = {}
         self.plug_inventory = dict(plug_inventory)
+        self.inverter_voltage_reference: dict[str, Any] = {
+            "available": False,
+            "voltage_v": None,
+            "source_id": None,
+            "source_name": None,
+            "sampled_at": None,
+            "age_seconds": None,
+            "measurement": None,
+            "error": "Waiting for inverter AC-voltage telemetry",
+        }
         self.plugs: dict[str, dict[str, Any]] = {}
         self.plug_history: dict[str, deque[dict[str, Any]]] = {}
         for plug_id, definition in self.plug_inventory.items():
@@ -369,6 +440,15 @@ class DashboardState:
                 "ip": None,
                 "product_id": None,
                 "version": None,
+                "controls": {
+                    "modes": list(tuya_ac.DEFAULT_MODE_VALUES),
+                    "fan_speeds": list(tuya_ac.DEFAULT_FAN_VALUES),
+                    "temperature": {
+                        "minimum_c": 16.0,
+                        "maximum_c": 30.0,
+                        "step_c": 1.0,
+                    },
+                },
             }),
             "configured": ac_definition is not None,
             "online": False,
@@ -543,6 +623,12 @@ class DashboardState:
                 "timestamp": timestamp,
                 "electric_power_w": finite_number(telemetry.get("electric_power_w")),
                 "energy_counter": finite_number(telemetry.get("energy_counter")),
+                "estimated_current_a": finite_number(
+                    telemetry.get("estimated_current_a")
+                ),
+                "voltage_v": finite_number(telemetry.get("voltage_v")),
+                "voltage_source": telemetry.get("voltage_source"),
+                "voltage_source_name": telemetry.get("voltage_source_name"),
                 "on": telemetry.get("on") if isinstance(telemetry.get("on"), bool) else None,
             }
         )
@@ -557,6 +643,27 @@ class DashboardState:
             }
         )
 
+    def apply_inverter_voltage_reference(
+        self, plug_id: str, result: dict[str, Any]
+    ) -> dict[str, Any]:
+        definition = self.plug_inventory[plug_id]
+        reference = self.inverter_voltage_reference
+        if reference["available"]:
+            miot_plugs.apply_voltage_reference(
+                result.setdefault("telemetry", {}),
+                reference["voltage_v"],
+                "inverter_output" if reference["measurement"] == "output_voltage_v" else "inverter_grid",
+                reference["source_name"],
+                reference["sampled_at"],
+            )
+        else:
+            miot_plugs.apply_voltage_reference(
+                result.setdefault("telemetry", {}),
+                definition.reference_voltage_v,
+                "configured_fallback",
+            )
+        return result
+
     async def _poll_one_plug(self, plug_id: str) -> None:
         timestamp = utc_now()
         self.plugs[plug_id]["updating"] = True
@@ -567,6 +674,7 @@ class DashboardState:
             LOGGER.warning("%s smart-plug telemetry failed: %s", plug_id, exc)
             self.record_plug_error(plug_id, exc, utc_now())
         else:
+            self.apply_inverter_voltage_reference(plug_id, result)
             self.record_plug_success(plug_id, result, utc_now())
 
     async def _poll_air_conditioner(self) -> None:
@@ -608,6 +716,10 @@ class DashboardState:
             self.iot_polling = True
             self.iot_last_poll_started = utc_now()
             try:
+                self.inverter_voltage_reference = await asyncio.to_thread(
+                    read_inverter_voltage_reference,
+                    self.config.telemetry_database,
+                )
                 operations = [self._poll_one_plug(plug_id) for plug_id in self.plugs]
                 if self.ac_definition is not None:
                     operations.append(self._poll_air_conditioner())
@@ -645,6 +757,7 @@ class DashboardState:
             raise KeyError(plug_id)
         async with self.iot_operation_lock:
             result = await asyncio.to_thread(self.plug_power_writer, definition, enabled)
+            self.apply_inverter_voltage_reference(plug_id, result["device"])
             self.record_plug_success(plug_id, result["device"], utc_now())
             self.iot_generation += 1
         self.iot_refresh_event.set()
@@ -673,6 +786,29 @@ class DashboardState:
         self.iot_refresh_event.set()
         return result
 
+    async def set_ac_setting(self, setting: str, value: Any) -> dict[str, Any]:
+        if self.ac_definition is None:
+            raise LookupError("air conditioner is not configured")
+        async with self.iot_operation_lock:
+            result = await asyncio.to_thread(
+                self.ac_setting_writer, self.ac_definition, setting, value
+            )
+            timestamp = utc_now()
+            self.air_conditioner.update(
+                {
+                    **result["device"],
+                    "configured": True,
+                    "online": True,
+                    "updating": False,
+                    "last_attempt": timestamp,
+                    "last_success": timestamp,
+                    "error": None,
+                }
+            )
+            self.iot_generation += 1
+        self.iot_refresh_event.set()
+        return result
+
     def public_iot_snapshot(self) -> dict[str, Any]:
         return {
             "polling": self.iot_polling,
@@ -680,6 +816,7 @@ class DashboardState:
             "poll_interval_seconds": self.config.iot_poll_interval_seconds,
             "last_poll_started": self.iot_last_poll_started,
             "last_poll_finished": self.iot_last_poll_finished,
+            "inverter_voltage_reference": copy.deepcopy(self.inverter_voltage_reference),
             "plugs": {
                 "available": bool(self.plug_inventory),
                 "configured": bool(self.plug_inventory),
@@ -821,6 +958,34 @@ async def ac_power_handler(request: web.Request) -> web.Response:
     except (OSError, tuya_ac.TuyaAcError) as exc:
         LOGGER.error("air-conditioner command failed: %s", exc)
         raise web.HTTPBadGateway(text=f"air-conditioner command failed: {exc}") from exc
+    return web.json_response({"ok": True, "result": result})
+
+
+async def ac_setting_handler(request: web.Request) -> web.Response:
+    state = dashboard_state(request)
+    if state.ac_definition is None:
+        raise web.HTTPServiceUnavailable(text="air conditioner is not configured")
+    try:
+        body = await request.json()
+    except (ValueError, TypeError) as exc:
+        raise web.HTTPBadRequest(text="invalid JSON body") from exc
+    setting = str(body.get("setting", "")).strip()
+    if setting not in {"mode", "fan", "target_temperature_c"}:
+        raise web.HTTPBadRequest(text="unsupported air-conditioner setting")
+    if "value" not in body:
+        raise web.HTTPBadRequest(text="value is required")
+    LOGGER.warning(
+        "air-conditioner setting requested: setting=%s peer=%s",
+        setting,
+        request.remote or "unknown",
+    )
+    try:
+        result = await state.set_ac_setting(setting, body["value"])
+    except ValueError as exc:
+        raise web.HTTPBadRequest(text=str(exc)) from exc
+    except (OSError, tuya_ac.TuyaAcError) as exc:
+        LOGGER.error("air-conditioner setting failed: setting=%s reason=%s", setting, exc)
+        raise web.HTTPBadGateway(text=f"air-conditioner setting failed: {exc}") from exc
     return web.json_response({"ok": True, "result": result})
 
 
@@ -1081,6 +1246,7 @@ def create_app(config: DashboardConfig, state: DashboardState | None = None) -> 
     app.router.add_get("/api/iot", iot_handler)
     app.router.add_post("/api/iot/plugs/{plug_id}/power", plug_power_handler)
     app.router.add_post("/api/iot/air-conditioner/power", ac_power_handler)
+    app.router.add_post("/api/iot/air-conditioner/setting", ac_setting_handler)
     app.router.add_get("/api/bms/{alias}/configuration", bms_configuration_handler)
     app.router.add_post("/api/bms/{alias}/setting", bms_setting_handler)
     app.router.add_get("/api/inverters/{inverter_id}/configuration", inverter_configuration_handler)

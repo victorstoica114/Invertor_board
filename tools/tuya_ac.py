@@ -22,6 +22,8 @@ DEFAULT_DPS: Final[dict[str, str]] = {
     "current_temperature": "23",
     "target_temperature": "24",
 }
+DEFAULT_MODE_VALUES: Final[tuple[str, ...]] = ("auto", "cold", "hot", "wet", "wind")
+DEFAULT_FAN_VALUES: Final[tuple[str, ...]] = ("auto", "low", "mid", "high")
 
 
 class TuyaAcError(RuntimeError):
@@ -39,6 +41,11 @@ class AcDefinition:
     version: float
     temperature_scale: float
     dps: dict[str, str]
+    mode_values: tuple[str, ...] = DEFAULT_MODE_VALUES
+    fan_values: tuple[str, ...] = DEFAULT_FAN_VALUES
+    minimum_temperature_c: float = 16.0
+    maximum_temperature_c: float = 30.0
+    temperature_step_c: float = 1.0
 
     def public_identity(self) -> dict[str, Any]:
         return {
@@ -47,6 +54,15 @@ class AcDefinition:
             "ip": self.ip,
             "product_id": self.product_id,
             "version": self.version,
+            "controls": {
+                "modes": list(self.mode_values),
+                "fan_speeds": list(self.fan_values),
+                "temperature": {
+                    "minimum_c": self.minimum_temperature_c,
+                    "maximum_c": self.maximum_temperature_c,
+                    "step_c": self.temperature_step_c,
+                },
+            },
         }
 
 
@@ -78,6 +94,30 @@ def load_config(path: Path) -> AcDefinition:
     if not isinstance(raw_dps, dict):
         raise TuyaAcError("dps must be an object")
     dps = {**DEFAULT_DPS, **{str(key): str(value) for key, value in raw_dps.items()}}
+    raw_controls = payload.get("controls", {})
+    if not isinstance(raw_controls, dict):
+        raise TuyaAcError("controls must be an object")
+
+    def string_options(name: str, defaults: tuple[str, ...]) -> tuple[str, ...]:
+        values = raw_controls.get(name, defaults)
+        if not isinstance(values, (list, tuple)) or not values:
+            raise TuyaAcError(f"controls.{name} must be a non-empty list")
+        options = tuple(str(value).strip() for value in values)
+        if any(not value or len(value) > 32 for value in options) or len(set(options)) != len(options):
+            raise TuyaAcError(f"controls.{name} contains invalid values")
+        return options
+
+    mode_values = string_options("modes", DEFAULT_MODE_VALUES)
+    fan_values = string_options("fan_speeds", DEFAULT_FAN_VALUES)
+    raw_temperature = raw_controls.get("temperature", {})
+    if not isinstance(raw_temperature, dict):
+        raise TuyaAcError("controls.temperature must be an object")
+    try:
+        minimum_temperature_c = float(raw_temperature.get("minimum_c", 16))
+        maximum_temperature_c = float(raw_temperature.get("maximum_c", 30))
+        temperature_step_c = float(raw_temperature.get("step_c", 1))
+    except (TypeError, ValueError) as exc:
+        raise TuyaAcError("temperature control limits must be numbers") from exc
 
     if not DEVICE_ID_PATTERN.fullmatch(ac_id):
         raise TuyaAcError("AC configuration has an invalid id")
@@ -95,6 +135,10 @@ def load_config(path: Path) -> AcDefinition:
         raise TuyaAcError("unsupported Tuya protocol version")
     if temperature_scale <= 0:
         raise TuyaAcError("temperature_scale must be greater than zero")
+    if not 5 <= minimum_temperature_c < maximum_temperature_c <= 40:
+        raise TuyaAcError("temperature limits must be between 5 and 40 C")
+    if temperature_step_c <= 0 or temperature_step_c > 5:
+        raise TuyaAcError("temperature step must be greater than zero and at most 5 C")
     if not dps.get("power", "").isdigit():
         raise TuyaAcError("the power datapoint must be numeric")
     return AcDefinition(
@@ -107,6 +151,11 @@ def load_config(path: Path) -> AcDefinition:
         version,
         temperature_scale,
         dps,
+        mode_values,
+        fan_values,
+        minimum_temperature_c,
+        maximum_temperature_c,
+        temperature_step_c,
     )
 
 
@@ -165,38 +214,87 @@ def read_ac(definition: AcDefinition) -> dict[str, Any]:
     return {**definition.public_identity(), "telemetry": telemetry}
 
 
-def write_power(definition: AcDefinition, enabled: bool) -> dict[str, Any]:
-    """Set AC power and verify the requested state by reading it back."""
-    if not isinstance(enabled, bool):
-        raise ValueError("on must be a boolean")
+def _normalized_setting(definition: AcDefinition, setting: str, value: Any) -> tuple[str, Any, Any]:
+    if setting == "power":
+        if not isinstance(value, bool):
+            raise ValueError("power must be a boolean")
+        return "on", value, value
+    if setting == "mode":
+        requested = str(value)
+        if requested not in definition.mode_values:
+            raise ValueError("unsupported air-conditioner mode")
+        return "mode", requested, requested
+    if setting == "fan":
+        requested = str(value)
+        if requested not in definition.fan_values:
+            raise ValueError("unsupported air-conditioner fan speed")
+        return "fan", requested, requested
+    if setting == "target_temperature_c":
+        if isinstance(value, bool):
+            raise ValueError("target temperature must be a number")
+        try:
+            requested = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("target temperature must be a number") from exc
+        if not definition.minimum_temperature_c <= requested <= definition.maximum_temperature_c:
+            raise ValueError(
+                "target temperature is outside the configured control range"
+            )
+        offset = (requested - definition.minimum_temperature_c) / definition.temperature_step_c
+        if abs(offset - round(offset)) > 1e-6:
+            raise ValueError("target temperature does not match the configured step")
+        raw = requested * definition.temperature_scale
+        raw_value: int | float = int(raw) if raw.is_integer() else raw
+        return "target_temperature_c", requested, raw_value
+    raise ValueError("unsupported air-conditioner setting")
+
+
+def _values_match(first: Any, second: Any) -> bool:
+    if isinstance(first, (int, float)) and isinstance(second, (int, float)):
+        return abs(float(first) - float(second)) < 1e-6
+    return first == second
+
+
+def write_setting(definition: AcDefinition, setting: str, value: Any) -> dict[str, Any]:
+    """Set one supported AC field and verify it by reading the device back."""
+    telemetry_key, requested, raw_value = _normalized_setting(definition, setting, value)
     before_device = read_ac(definition)
-    before = before_device["telemetry"].get("on")
-    if not isinstance(before, bool):
-        raise TuyaAcError("configured power datapoint did not return a boolean")
-    if before != enabled:
+    before = before_device["telemetry"].get(telemetry_key)
+    if not _values_match(before, requested):
+        datapoint_name = "power" if setting == "power" else (
+            "target_temperature" if setting == "target_temperature_c" else setting
+        )
         try:
             response = _device(definition).set_value(
-                int(definition.dps["power"]), enabled, nowait=False
+                int(definition.dps[datapoint_name]), raw_value, nowait=False
             )
         except Exception as exc:
             raise TuyaAcError(f"{type(exc).__name__}: {exc}") from exc
         if not isinstance(response, dict) or response.get("Error") or response.get("Err"):
-            raise TuyaAcError(f"device rejected the power command: {response}")
+            raise TuyaAcError(f"device rejected the {setting} command: {response}")
 
     after_device = before_device
     for attempt in range(3):
         if attempt:
             time.sleep(0.35)
         after_device = read_ac(definition)
-        if after_device["telemetry"].get("on") is enabled:
+        if _values_match(after_device["telemetry"].get(telemetry_key), requested):
             break
-    after = after_device["telemetry"].get("on")
-    if after is not enabled:
-        raise TuyaAcError("power state did not verify after write")
+    after = after_device["telemetry"].get(telemetry_key)
+    if not _values_match(after, requested):
+        raise TuyaAcError(f"{setting} did not verify after write")
     return {
-        "written": before != enabled,
+        "setting": setting,
+        "written": not _values_match(before, requested),
         "verified": True,
         "before": before,
         "after": after,
         "device": after_device,
     }
+
+
+def write_power(definition: AcDefinition, enabled: bool) -> dict[str, Any]:
+    """Set AC power and verify the requested state by reading it back."""
+    if not isinstance(enabled, bool):
+        raise ValueError("on must be a boolean")
+    return write_setting(definition, "power", enabled)

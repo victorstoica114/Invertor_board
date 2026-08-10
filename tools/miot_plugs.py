@@ -42,9 +42,16 @@ class PlugDefinition:
     ip: str
     token: str
     model: str = SUPPORTED_MODEL
+    reference_voltage_v: float = 230.0
 
-    def public_identity(self) -> dict[str, str]:
-        return {"id": self.id, "name": self.name, "ip": self.ip, "model": self.model}
+    def public_identity(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "ip": self.ip,
+            "model": self.model,
+            "reference_voltage_v": self.reference_voltage_v,
+        }
 
 
 def load_inventory(path: Path) -> dict[str, PlugDefinition]:
@@ -71,6 +78,12 @@ def load_inventory(path: Path) -> dict[str, PlugDefinition]:
         ip = str(record.get("ip", "")).strip()
         token = str(record.get("token", "")).strip()
         model = str(record.get("model", SUPPORTED_MODEL)).strip()
+        try:
+            reference_voltage_v = float(record.get("reference_voltage_v", 230))
+        except (TypeError, ValueError) as exc:
+            raise MiotPlugError(
+                f"device {device_id or index} has an invalid reference voltage"
+            ) from exc
         if not DEVICE_ID_PATTERN.fullmatch(device_id):
             raise MiotPlugError(f"device {index} has an invalid id")
         if not name:
@@ -85,9 +98,20 @@ def load_inventory(path: Path) -> dict[str, PlugDefinition]:
             raise MiotPlugError(f"device {device_id} has an invalid token")
         if model != SUPPORTED_MODEL:
             raise MiotPlugError(f"device {device_id} uses unsupported model {model!r}")
+        if not 100 <= reference_voltage_v <= 260:
+            raise MiotPlugError(
+                f"device {device_id} reference voltage must be between 100 and 260 V"
+            )
         if device_id in inventory or ip in seen_ips:
             raise MiotPlugError(f"duplicate plug id or IP for {device_id}")
-        inventory[device_id] = PlugDefinition(device_id, name, ip, token.lower(), model)
+        inventory[device_id] = PlugDefinition(
+            device_id,
+            name,
+            ip,
+            token.lower(),
+            model,
+            reference_voltage_v,
+        )
         seen_ips.add(ip)
     return inventory
 
@@ -105,6 +129,32 @@ def _device(definition: PlugDefinition) -> Device:
 def _property_batches(size: int = 4):
     for index in range(0, len(PROPERTY_SPECS), size):
         yield PROPERTY_SPECS[index : index + size]
+
+
+def apply_voltage_reference(
+    telemetry: dict[str, Any],
+    voltage_v: float,
+    source: str,
+    source_name: str | None = None,
+    source_sample: str | None = None,
+) -> None:
+    """Attach voltage provenance and calculate current from measured power."""
+    telemetry["voltage_v"] = round(float(voltage_v), 2)
+    telemetry["voltage_source"] = source
+    telemetry["voltage_source_name"] = source_name
+    telemetry["voltage_source_sample"] = source_sample
+    power = telemetry.get("electric_power_w")
+    telemetry["estimated_current_a"] = (
+        round(float(power) / float(voltage_v), 4)
+        if isinstance(power, (int, float)) and not isinstance(power, bool)
+        else None
+    )
+    telemetry["measurement_sources"] = {
+        "electric_power_w": "device",
+        "energy_counter": "device",
+        "estimated_current_a": "calculated_from_power_and_voltage",
+        "voltage_v": source,
+    }
 
 
 def read_plug(definition: PlugDefinition) -> dict[str, Any]:
@@ -134,6 +184,11 @@ def read_plug(definition: PlugDefinition) -> dict[str, Any]:
         raise MiotPlugError(f"{type(exc).__name__}: {exc}") from exc
     fault = telemetry.get("fault")
     telemetry["fault_label"] = FAULT_LABELS.get(fault, f"Unknown fault ({fault})")
+    apply_voltage_reference(
+        telemetry,
+        definition.reference_voltage_v,
+        "configured_fallback",
+    )
     if property_errors:
         telemetry["property_errors"] = property_errors
     return {**definition.public_identity(), "telemetry": telemetry}

@@ -17,7 +17,23 @@ const state = {
   bmsConfigWriting: false,
   bmsConfigTimer: null,
   iotWriting: new Set(),
+  iotChartMetric: "power",
   toastTimer: null,
+};
+
+const IOT_CHART_METRICS = {
+  power: {
+    key: "electric_power_w", title: "Power history", unit: "W", digits: 1,
+    note: "Power is measured by each smart plug.", startsAtZero: true, minimumMaximum: 1,
+  },
+  current: {
+    key: "estimated_current_a", title: "Calculated current history", unit: "A", digits: 3,
+    note: "Calculated from plug power and the latest valid inverter AC voltage.", startsAtZero: true, minimumMaximum: .05,
+  },
+  voltage: {
+    key: "voltage_v", title: "Inverter voltage history", unit: "V", digits: 1,
+    note: "Voltage is sourced from the freshest valid inverter AC-output sample.", startsAtZero: false, minimumMaximum: 0,
+  },
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -219,6 +235,8 @@ function plugCard(device) {
     <div class="iot-metrics">
       <div><span>Power state</span><strong>${typeof telemetry.on === "boolean" ? (telemetry.on ? "On" : "Off") : "—"}</strong></div>
       <div><span>Energy counter</span><strong>${esc(iotReading(telemetry.energy_counter, 3, "kWh"))}</strong></div>
+      <div><span>Calculated current</span><strong>${esc(iotReading(telemetry.estimated_current_a, 3, "A"))}</strong></div>
+      <div><span>${String(telemetry.voltage_source).startsWith("inverter_") ? "Inverter voltage" : "Fallback voltage"}</span><strong>${esc(iotReading(telemetry.voltage_v, 1, "V"))}</strong></div>
       <div><span>Protection</span><strong>${esc(telemetry.fault_label || "—")}</strong></div>
       <div><span>Last reading</span><strong>${device.last_success ? esc(new Date(device.last_success).toLocaleTimeString("en-GB")) : "—"}</strong></div>
     </div>
@@ -226,81 +244,146 @@ function plugCard(device) {
   </article>`;
 }
 
-function acCard(device) {
+function controlLabel(value) {
+  const labels = {
+    auto: "Auto", cold: "Cool", hot: "Heat", wet: "Dry", wind: "Fan",
+    low: "Low", mid: "Medium", high: "High", strong: "Strong",
+  };
+  return labels[value] || String(value).replaceAll("_", " ");
+}
+
+function acSegment(setting, values, selected, enabled) {
+  return `<div class="ac-segmented">${values.map((value) =>
+    `<button class="${String(selected) === String(value) ? "active" : ""}" type="button" data-ac-setting="${esc(setting)}" data-ac-value="${esc(value)}" ${enabled ? "" : "disabled"}>${esc(controlLabel(value))}</button>`
+  ).join("")}</div>`;
+}
+
+function renderAirConditioner(device) {
   const telemetry = device.telemetry || {};
   const canControl = device.configured && device.online && typeof telemetry.on === "boolean" && !state.iotWriting.has(device.id);
-  const status = !device.configured ? "Local key required" : device.updating ? "Reading" : device.online ? "Online" : "Offline";
-  return `<article class="iot-device-card ac-card ${device.online ? "online" : "offline"}">
-    <div class="device-head">
-      <div><span class="eyebrow">${esc(device.ip || "192.168.1.200")}</span><h3>${esc(device.name)}</h3><span class="device-subtitle">Tuya local control</span></div>
-      <span class="device-status ${device.online ? "online" : ""}"><span class="dot"></span>${esc(status)}</span>
-    </div>
-    <div class="iot-power-row">
-      <div><span>Room temperature</span><strong>${esc(iotReading(telemetry.current_temperature_c, 1, "°C"))}</strong></div>
-      ${powerSwitch(device.id, device.name, canControl, telemetry.on === true, "ac")}
-    </div>
-    <div class="iot-metrics">
-      <div><span>Power state</span><strong>${typeof telemetry.on === "boolean" ? (telemetry.on ? "On" : "Off") : "—"}</strong></div>
-      <div><span>Target</span><strong>${esc(iotReading(telemetry.target_temperature_c, 1, "°C"))}</strong></div>
-      <div><span>Mode</span><strong>${esc(telemetry.mode)}</strong></div>
-      <div><span>Fan</span><strong>${esc(telemetry.fan)}</strong></div>
-    </div>
-    ${!device.configured ? `<div class="iot-config-note">Waiting for the Tuya local key.</div>` : ""}
-    ${device.configured && device.error ? `<div class="device-error">${esc(device.error)}</div>` : ""}
-  </article>`;
+  const statusText = !device.configured ? "Local key required" : device.updating ? "Reading" : device.online ? "Online" : "Offline";
+  const status = $("#ac-state");
+  status.className = `status-pill ${device.updating ? "busy" : device.online ? "live" : ""}`;
+  status.innerHTML = `<span class="dot"></span>${esc(statusText)}`;
+  const controls = device.controls || {};
+  const temperature = controls.temperature || { minimum_c: 16, maximum_c: 30, step_c: 1 };
+  const currentTarget = Number(telemetry.target_temperature_c);
+  const target = Number.isFinite(currentTarget) ? currentTarget : Number(temperature.minimum_c);
+  const writable = canControl && !device.updating;
+  const temperatureWritable = writable && Number.isFinite(currentTarget);
+  $("#ac-control-content").innerHTML = `
+    <section class="ac-overview">
+      <div>
+        <span class="eyebrow">${esc(device.ip || "192.168.1.200")}</span>
+        <h4>${esc(device.name)}</h4>
+        <p>${device.last_success ? `Last reading ${esc(new Date(device.last_success).toLocaleString("en-GB"))}` : "Waiting for local telemetry"}</p>
+      </div>
+      <div class="ac-room-reading"><span>Room</span><strong>${esc(iotReading(telemetry.current_temperature_c, 1, "°C"))}</strong></div>
+      <div class="ac-power-control"><span>${telemetry.on === true ? "On" : telemetry.on === false ? "Off" : "Power"}</span>${powerSwitch(device.id, device.name, canControl, telemetry.on === true, "ac")}</div>
+    </section>
+    <section class="ac-controls-panel">
+      <div class="ac-control-section">
+        <div class="ac-control-title"><span>Target temperature</span><strong>${esc(iotReading(target, 1, "°C"))}</strong></div>
+        <div class="temperature-stepper">
+          <button type="button" data-ac-temperature="decrease" title="Decrease target temperature" ${temperatureWritable && target > Number(temperature.minimum_c) ? "" : "disabled"}>−</button>
+          <output>${esc(iotReading(target, 1, "°C"))}</output>
+          <button type="button" data-ac-temperature="increase" title="Increase target temperature" ${temperatureWritable && target < Number(temperature.maximum_c) ? "" : "disabled"}>+</button>
+        </div>
+      </div>
+      <div class="ac-control-section">
+        <div class="ac-control-title"><span>Operating mode</span><strong>${esc(controlLabel(telemetry.mode ?? "—"))}</strong></div>
+        ${acSegment("mode", controls.modes || [], telemetry.mode, writable)}
+      </div>
+      <div class="ac-control-section">
+        <div class="ac-control-title"><span>Fan speed</span><strong>${esc(controlLabel(telemetry.fan ?? "—"))}</strong></div>
+        ${acSegment("fan", controls.fan_speeds || [], telemetry.fan, writable)}
+      </div>
+    </section>
+    ${!device.configured ? `<div class="ac-unavailable"><strong>Local control is not authenticated</strong><span>The panel is ready and will unlock after the Tuya local key is installed.</span></div>` : ""}
+    ${device.configured && device.error ? `<div class="device-error">${esc(device.error)}</div>` : ""}`;
 }
 
 function renderIotPowerChart(iot) {
   const svg = $("#iot-power-chart");
   const devices = Object.values(iot.plugs?.devices || {});
   const history = iot.plugs?.history || {};
+  const metric = IOT_CHART_METRICS[state.iotChartMetric] || IOT_CHART_METRICS.power;
+  const voltageReference = iot.inverter_voltage_reference || {};
   const colors = ["#4de0a4", "#65d6df", "#f4c76d", "#ff7b75"];
   const series = devices.map((device, index) => ({
     device,
     color: colors[index % colors.length],
     values: (history[device.id] || []).filter((sample) =>
-      sample.electric_power_w !== null && sample.electric_power_w !== undefined
-      && Number.isFinite(Number(sample.electric_power_w))
+      sample[metric.key] !== null && sample[metric.key] !== undefined
+      && Number.isFinite(Number(sample[metric.key]))
     ),
   }));
+  $("#iot-chart-title").textContent = metric.title;
+  $("#iot-chart-note").textContent = state.iotChartMetric === "power"
+    ? metric.note
+    : voltageReference.available
+      ? `${metric.note} Source: ${voltageReference.source_name}, sampled ${new Date(voltageReference.sampled_at).toLocaleString("en-GB")}.`
+      : `${metric.note} No fresh inverter sample is available, so the configured 230 V fallback is marked in the data.`;
+  svg.setAttribute("aria-label", `${metric.title} chart`);
+  document.querySelectorAll("[data-iot-chart]").forEach((button) =>
+    button.classList.toggle("active", button.dataset.iotChart === state.iotChartMetric)
+  );
   $("#iot-chart-legend").innerHTML = series.map(({ device, color }) =>
     `<span><i style="background:${color}"></i>${esc(device.name)}</span>`
   ).join("");
-  const allValues = series.flatMap((item) => item.values.map((sample) => Number(sample.electric_power_w)));
+  const allValues = series.flatMap((item) => item.values.map((sample) => Number(sample[metric.key])));
   const latestTotal = series.reduce((total, item) =>
-    total + (item.values.length ? Number(item.values.at(-1).electric_power_w) : 0), 0
+    total + (item.values.length ? Number(item.values.at(-1)[metric.key]) : 0), 0
   );
-  $("#iot-chart-value").textContent = allValues.length ? `${num(latestTotal, 1)} W total` : "—";
+  const latestDisplay = state.iotChartMetric === "voltage" && series.length
+    ? latestTotal / series.filter((item) => item.values.length).length
+    : latestTotal;
+  $("#iot-chart-value").textContent = allValues.length
+    ? `${num(latestDisplay, metric.digits)} ${metric.unit}${state.iotChartMetric === "voltage" ? " reference" : " total"}`
+    : "—";
   if (series.every((item) => item.values.length < 2)) {
     svg.innerHTML = `<text x="400" y="125" class="chart-empty">History appears after the first two readings</text>`;
     $("#iot-chart-range").textContent = "latest readings";
     return;
   }
   const width = 800, height = 240, pad = 24;
-  const maximum = Math.max(1, ...allValues) * 1.08;
+  const observedMinimum = Math.min(...allValues);
+  const observedMaximum = Math.max(...allValues);
+  let minimum = metric.startsAtZero ? 0 : observedMinimum;
+  let maximum = Math.max(metric.minimumMaximum, observedMaximum);
+  if (Math.abs(maximum - minimum) < .01) {
+    const padding = Math.max(1, Math.abs(maximum) * .015);
+    minimum = metric.startsAtZero ? 0 : minimum - padding;
+    maximum += padding;
+  } else {
+    maximum += (maximum - minimum) * .08;
+  }
   const longest = Math.max(...series.map((item) => item.values.length), 2);
   const x = (index) => pad + index * (width - pad * 2) / (longest - 1);
-  const y = (value) => height - pad - value * (height - pad * 2) / maximum;
+  const y = (value) => height - pad - (value - minimum) * (height - pad * 2) / (maximum - minimum);
   const paths = series.map(({ values, color }) => {
     if (values.length < 2) return "";
-    const points = values.map((sample, index) => `${x(index)},${y(Number(sample.electric_power_w))}`).join(" ");
+    const points = values.map((sample, index) => `${x(index)},${y(Number(sample[metric.key]))}`).join(" ");
     return `<polyline class="iot-chart-line" style="stroke:${color}" points="${points}"/>`;
   }).join("");
   svg.innerHTML = `${[.25, .5, .75].map((part) => `<line class="chart-grid" x1="${pad}" y1="${height * part}" x2="${width - pad}" y2="${height * part}"/>`).join("")}${paths}`;
-  $("#iot-chart-range").textContent = `0…${num(maximum, 0)} W · ${longest} samples`;
+  const observedRange = Math.abs(observedMaximum - observedMinimum) < 1e-9
+    ? num(observedMinimum, metric.digits)
+    : `${num(observedMinimum, metric.digits)}…${num(observedMaximum, metric.digits)}`;
+  $("#iot-chart-range").textContent = `${observedRange} ${metric.unit} · ${longest} samples`;
 }
 
 function renderIot(data) {
   const iot = data.iot || {};
   const plugs = Object.values(iot.plugs?.devices || {});
   const ac = iot.air_conditioner || { configured: false, id: "air-conditioner", name: "Air conditioner", telemetry: {} };
-  const online = plugs.filter((device) => device.online).length + (ac.online ? 1 : 0);
-  const configured = plugs.length + (ac.configured ? 1 : 0);
+  const online = plugs.filter((device) => device.online).length;
   const status = $("#iot-state");
   status.className = `status-pill ${iot.polling ? "busy" : online ? "live" : ""}`;
-  status.innerHTML = `<span class="dot"></span>${iot.polling ? "Reading local devices" : `${online}/${configured || plugs.length + 1} online`}`;
-  $("#iot-grid").innerHTML = `${plugs.map(plugCard).join("")}${acCard(ac)}`;
+  status.innerHTML = `<span class="dot"></span>${iot.polling ? "Reading smart plugs" : `${online}/${plugs.length} online`}`;
+  $("#iot-grid").innerHTML = plugs.map(plugCard).join("");
   renderIotPowerChart(iot);
+  renderAirConditioner(ac);
 }
 
 async function applyIotPower(input) {
@@ -334,6 +417,29 @@ async function applyIotPower(input) {
     toast(`Power command failed: ${error.message}`, true);
   } finally {
     state.iotWriting.delete(id);
+    renderIot(state.data);
+  }
+}
+
+async function applyAcSetting(setting, value) {
+  const device = state.data?.iot?.air_conditioner;
+  if (!device?.configured || !device.online || state.iotWriting.has(device.id)) return;
+  state.iotWriting.add(device.id);
+  renderIot(state.data);
+  try {
+    const response = await api("/api/iot/air-conditioner/setting", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ setting, value }),
+    });
+    toast(response.result.written
+      ? `Air-conditioner ${setting.replaceAll("_", " ")} changed and verified.`
+      : "The requested air-conditioner setting was already active.");
+    await loadStatus();
+  } catch (error) {
+    toast(`Air-conditioner command failed: ${error.message}`, true);
+  } finally {
+    state.iotWriting.delete(device.id);
     renderIot(state.data);
   }
 }
@@ -992,6 +1098,29 @@ $("#iot-grid").addEventListener("change", (event) => {
   const input = event.target.closest("[data-iot-power]");
   if (input) applyIotPower(input);
 });
+$("#ac-control-content").addEventListener("change", (event) => {
+  const input = event.target.closest('[data-iot-power][data-iot-kind="ac"]');
+  if (input) applyIotPower(input);
+});
+$("#ac-control-content").addEventListener("click", (event) => {
+  const settingButton = event.target.closest("[data-ac-setting]");
+  if (settingButton) {
+    applyAcSetting(settingButton.dataset.acSetting, settingButton.dataset.acValue);
+    return;
+  }
+  const temperatureButton = event.target.closest("[data-ac-temperature]");
+  if (!temperatureButton) return;
+  const device = state.data?.iot?.air_conditioner;
+  const current = Number(device?.telemetry?.target_temperature_c);
+  const step = Number(device?.controls?.temperature?.step_c || 1);
+  if (!Number.isFinite(current) || !Number.isFinite(step)) return;
+  const direction = temperatureButton.dataset.acTemperature === "increase" ? 1 : -1;
+  applyAcSetting("target_temperature_c", current + direction * step);
+});
+document.querySelectorAll("[data-iot-chart]").forEach((button) => button.addEventListener("click", () => {
+  state.iotChartMetric = button.dataset.iotChart;
+  renderIotPowerChart(state.data?.iot || {});
+}));
 
 $("#inverter-control-selector").addEventListener("change", (event) => {
   state.selectedInverter = event.target.value;
