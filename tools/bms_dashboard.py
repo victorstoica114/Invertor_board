@@ -21,11 +21,13 @@ from typing import Any, Awaitable, Callable, Final, Mapping
 from aiohttp import web
 
 try:
-    from tools import bms_ble, bms_config, inverter_protocols
+    from tools import bms_ble, bms_config, inverter_protocols, miot_plugs, tuya_ac
 except ModuleNotFoundError:  # Direct execution: python tools/bms_dashboard.py
     import bms_ble  # type: ignore[no-redef]
     import bms_config  # type: ignore[no-redef]
     import inverter_protocols  # type: ignore[no-redef]
+    import miot_plugs  # type: ignore[no-redef]
+    import tuya_ac  # type: ignore[no-redef]
 
 
 LOGGER = logging.getLogger("bms_dashboard")
@@ -33,6 +35,7 @@ PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 STATIC_ROOT: Final[Path] = PROJECT_ROOT / "tools" / "bms_dashboard_static"
 DEFAULT_TELEMETRY_DATABASE: Final[Path] = PROJECT_ROOT / "data" / "telemetry.sqlite3"
 HISTORY_LIMIT: Final[int] = 180
+IOT_HISTORY_LIMIT: Final[int] = 360
 MIN_REFRESH_SECONDS: Final[float] = 3.0
 DEFAULT_INVERTER_STALE_SECONDS: Final[float] = 90.0
 INVERTER_CONTROL_TIMEOUT_SECONDS: Final[float] = 12.0
@@ -44,6 +47,10 @@ JkProtocolWriter = Callable[[str, str, str], Awaitable[dict[str, Any]]]
 SeplosProtocolWriter = Callable[[str, str], Awaitable[dict[str, Any]]]
 BmsConfigurationReader = Callable[[str], Awaitable[dict[str, Any]]]
 BmsSettingWriter = Callable[[str, str, Any, str], Awaitable[dict[str, Any]]]
+PlugReader = Callable[[miot_plugs.PlugDefinition], dict[str, Any]]
+PlugPowerWriter = Callable[[miot_plugs.PlugDefinition, bool], dict[str, Any]]
+AcReader = Callable[[tuya_ac.AcDefinition], dict[str, Any]]
+AcPowerWriter = Callable[[tuya_ac.AcDefinition, bool], dict[str, Any]]
 
 
 def utc_now() -> str:
@@ -198,6 +205,9 @@ class DashboardConfig:
     protocol_interval_seconds: float = 300.0
     telemetry_database: Path = DEFAULT_TELEMETRY_DATABASE
     inverter_stale_seconds: float = DEFAULT_INVERTER_STALE_SECONDS
+    iot_poll_interval_seconds: float = 10.0
+    plug_inventory: Path = Path.home() / ".config" / "iot-keys" / "xiaomi_plugs.json"
+    ac_configuration: Path = Path.home() / ".config" / "iot-keys" / "tuya_ac.json"
 
     @classmethod
     def from_env_and_args(cls, args: argparse.Namespace) -> "DashboardConfig":
@@ -221,6 +231,15 @@ class DashboardConfig:
                 DEFAULT_INVERTER_STALE_SECONDS,
             )
         )
+        iot_poll_interval_seconds = float(
+            os.environ.get("BMS_DASHBOARD_IOT_POLL_INTERVAL", cls.iot_poll_interval_seconds)
+        )
+        plug_inventory = Path(
+            os.environ.get("BMS_DASHBOARD_PLUG_INVENTORY", str(cls.plug_inventory))
+        ).expanduser()
+        ac_configuration = Path(
+            os.environ.get("BMS_DASHBOARD_AC_CONFIGURATION", str(cls.ac_configuration))
+        ).expanduser()
         if not 1 <= port <= 65535:
             raise ValueError("port must be between 1 and 65535")
         if poll_interval < 5:
@@ -229,6 +248,8 @@ class DashboardConfig:
             raise ValueError("protocol interval must be at least 30 seconds")
         if inverter_stale_seconds < 30:
             raise ValueError("inverter stale interval must be at least 30 seconds")
+        if iot_poll_interval_seconds < 5:
+            raise ValueError("IoT poll interval must be at least 5 seconds")
         return cls(
             host=host,
             port=port,
@@ -236,6 +257,9 @@ class DashboardConfig:
             protocol_interval_seconds=protocol_interval,
             telemetry_database=database.resolve(),
             inverter_stale_seconds=inverter_stale_seconds,
+            iot_poll_interval_seconds=iot_poll_interval_seconds,
+            plug_inventory=plug_inventory.resolve(),
+            ac_configuration=ac_configuration.resolve(),
         )
 
 
@@ -252,6 +276,12 @@ class DashboardState:
         seplos_protocol_writer: SeplosProtocolWriter = bms_ble.set_seplos_protocol,
         bms_configuration_reader: BmsConfigurationReader = bms_config.read_bms_configuration,
         bms_setting_writer: BmsSettingWriter = bms_config.write_bms_setting,
+        plug_reader: PlugReader = miot_plugs.read_plug,
+        plug_power_writer: PlugPowerWriter = miot_plugs.write_power,
+        ac_reader: AcReader = tuya_ac.read_ac,
+        ac_power_writer: AcPowerWriter = tuya_ac.write_power,
+        plug_inventory: Mapping[str, miot_plugs.PlugDefinition] | None = None,
+        ac_definition: tuya_ac.AcDefinition | None = None,
     ) -> None:
         self.config = config
         self.telemetry_reader = telemetry_reader
@@ -261,16 +291,28 @@ class DashboardState:
         self.seplos_protocol_writer = seplos_protocol_writer
         self.bms_configuration_reader = bms_configuration_reader
         self.bms_setting_writer = bms_setting_writer
+        self.plug_reader = plug_reader
+        self.plug_power_writer = plug_power_writer
+        self.ac_reader = ac_reader
+        self.ac_power_writer = ac_power_writer
         self.operation_lock = asyncio.Lock()
         self.inverter_operation_lock = asyncio.Lock()
+        self.iot_operation_lock = asyncio.Lock()
         self.refresh_event = asyncio.Event()
+        self.iot_refresh_event = asyncio.Event()
         self.poll_task: asyncio.Task[None] | None = None
+        self.iot_poll_task: asyncio.Task[None] | None = None
         self.polling = False
+        self.iot_polling = False
         self.generation = 0
+        self.iot_generation = 0
         self.last_poll_started: str | None = None
         self.last_poll_finished: str | None = None
+        self.iot_last_poll_started: str | None = None
+        self.iot_last_poll_finished: str | None = None
         self.last_protocol_monotonic = 0.0
         self.last_refresh_request_monotonic = 0.0
+        self.last_iot_refresh_request_monotonic = 0.0
         self.devices: dict[str, dict[str, Any]] = {}
         self.history: dict[str, deque[dict[str, Any]]] = {}
         self.protocols: dict[str, Any] = {}
@@ -288,6 +330,54 @@ class DashboardState:
                 "telemetry": {},
             }
             self.history[alias] = deque(maxlen=HISTORY_LIMIT)
+
+        self.plug_config_error: str | None = None
+        if plug_inventory is None:
+            try:
+                plug_inventory = miot_plugs.load_inventory(config.plug_inventory)
+            except miot_plugs.MiotPlugError as exc:
+                LOGGER.warning("smart-plug inventory unavailable: %s", exc)
+                self.plug_config_error = str(exc)
+                plug_inventory = {}
+        self.plug_inventory = dict(plug_inventory)
+        self.plugs: dict[str, dict[str, Any]] = {}
+        self.plug_history: dict[str, deque[dict[str, Any]]] = {}
+        for plug_id, definition in self.plug_inventory.items():
+            self.plugs[plug_id] = {
+                **definition.public_identity(),
+                "online": False,
+                "updating": False,
+                "last_attempt": None,
+                "last_success": None,
+                "error": "Waiting for first local-network poll",
+                "telemetry": {},
+            }
+            self.plug_history[plug_id] = deque(maxlen=IOT_HISTORY_LIMIT)
+
+        self.ac_config_error: str | None = None
+        if ac_definition is None:
+            try:
+                ac_definition = tuya_ac.load_config(config.ac_configuration)
+            except tuya_ac.TuyaAcError as exc:
+                LOGGER.warning("air-conditioner configuration unavailable: %s", exc)
+                self.ac_config_error = str(exc)
+        self.ac_definition = ac_definition
+        self.air_conditioner: dict[str, Any] = {
+            **(ac_definition.public_identity() if ac_definition else {
+                "id": "air-conditioner",
+                "name": "Air conditioner",
+                "ip": None,
+                "product_id": None,
+                "version": None,
+            }),
+            "configured": ac_definition is not None,
+            "online": False,
+            "updating": False,
+            "last_attempt": None,
+            "last_success": None,
+            "error": self.ac_config_error or "Waiting for first local-network poll",
+            "telemetry": {},
+        }
 
     def record_success(self, alias: str, result: Mapping[str, Any], timestamp: str) -> None:
         device = self.devices[alias]
@@ -434,8 +524,177 @@ class DashboardState:
         self.refresh_event.set()
         return result
 
-    def public_snapshot(self) -> dict[str, Any]:
+    def record_plug_success(
+        self, plug_id: str, result: Mapping[str, Any], timestamp: str
+    ) -> None:
+        telemetry = copy.deepcopy(result.get("telemetry", {}))
+        self.plugs[plug_id].update(
+            {
+                "online": True,
+                "updating": False,
+                "last_attempt": timestamp,
+                "last_success": timestamp,
+                "error": None,
+                "telemetry": telemetry,
+            }
+        )
+        self.plug_history[plug_id].append(
+            {
+                "timestamp": timestamp,
+                "electric_power_w": finite_number(telemetry.get("electric_power_w")),
+                "energy_counter": finite_number(telemetry.get("energy_counter")),
+                "on": telemetry.get("on") if isinstance(telemetry.get("on"), bool) else None,
+            }
+        )
+
+    def record_plug_error(self, plug_id: str, error: BaseException, timestamp: str) -> None:
+        self.plugs[plug_id].update(
+            {
+                "online": False,
+                "updating": False,
+                "last_attempt": timestamp,
+                "error": f"{type(error).__name__}: {error}",
+            }
+        )
+
+    async def _poll_one_plug(self, plug_id: str) -> None:
+        timestamp = utc_now()
+        self.plugs[plug_id]["updating"] = True
+        self.plugs[plug_id]["last_attempt"] = timestamp
+        try:
+            result = await asyncio.to_thread(self.plug_reader, self.plug_inventory[plug_id])
+        except Exception as exc:
+            LOGGER.warning("%s smart-plug telemetry failed: %s", plug_id, exc)
+            self.record_plug_error(plug_id, exc, utc_now())
+        else:
+            self.record_plug_success(plug_id, result, utc_now())
+
+    async def _poll_air_conditioner(self) -> None:
+        if self.ac_definition is None:
+            return
+        timestamp = utc_now()
+        self.air_conditioner["updating"] = True
+        self.air_conditioner["last_attempt"] = timestamp
+        try:
+            result = await asyncio.to_thread(self.ac_reader, self.ac_definition)
+        except Exception as exc:
+            LOGGER.warning("air-conditioner telemetry failed: %s", exc)
+            self.air_conditioner.update(
+                {
+                    "online": False,
+                    "updating": False,
+                    "last_attempt": utc_now(),
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
+        else:
+            timestamp = utc_now()
+            self.air_conditioner.update(
+                {
+                    **result,
+                    "configured": True,
+                    "online": True,
+                    "updating": False,
+                    "last_attempt": timestamp,
+                    "last_success": timestamp,
+                    "error": None,
+                }
+            )
+
+    async def poll_iot_once(self) -> bool:
+        if self.iot_operation_lock.locked():
+            return False
+        async with self.iot_operation_lock:
+            self.iot_polling = True
+            self.iot_last_poll_started = utc_now()
+            try:
+                operations = [self._poll_one_plug(plug_id) for plug_id in self.plugs]
+                if self.ac_definition is not None:
+                    operations.append(self._poll_air_conditioner())
+                if operations:
+                    await asyncio.gather(*operations)
+            finally:
+                self.iot_polling = False
+                self.iot_last_poll_finished = utc_now()
+                self.iot_generation += 1
+        return True
+
+    async def iot_polling_loop(self) -> None:
+        while True:
+            await self.poll_iot_once()
+            try:
+                await asyncio.wait_for(
+                    self.iot_refresh_event.wait(),
+                    timeout=self.config.iot_poll_interval_seconds,
+                )
+            except asyncio.TimeoutError:
+                pass
+            self.iot_refresh_event.clear()
+
+    def request_iot_refresh(self) -> bool:
+        now = time.monotonic()
+        if now - self.last_iot_refresh_request_monotonic < MIN_REFRESH_SECONDS:
+            return False
+        self.last_iot_refresh_request_monotonic = now
+        self.iot_refresh_event.set()
+        return True
+
+    async def set_plug_power(self, plug_id: str, enabled: bool) -> dict[str, Any]:
+        definition = self.plug_inventory.get(plug_id)
+        if definition is None:
+            raise KeyError(plug_id)
+        async with self.iot_operation_lock:
+            result = await asyncio.to_thread(self.plug_power_writer, definition, enabled)
+            self.record_plug_success(plug_id, result["device"], utc_now())
+            self.iot_generation += 1
+        self.iot_refresh_event.set()
+        return result
+
+    async def set_ac_power(self, enabled: bool) -> dict[str, Any]:
+        if self.ac_definition is None:
+            raise LookupError("air conditioner is not configured")
+        async with self.iot_operation_lock:
+            result = await asyncio.to_thread(
+                self.ac_power_writer, self.ac_definition, enabled
+            )
+            timestamp = utc_now()
+            self.air_conditioner.update(
+                {
+                    **result["device"],
+                    "configured": True,
+                    "online": True,
+                    "updating": False,
+                    "last_attempt": timestamp,
+                    "last_success": timestamp,
+                    "error": None,
+                }
+            )
+            self.iot_generation += 1
+        self.iot_refresh_event.set()
+        return result
+
+    def public_iot_snapshot(self) -> dict[str, Any]:
         return {
+            "polling": self.iot_polling,
+            "generation": self.iot_generation,
+            "poll_interval_seconds": self.config.iot_poll_interval_seconds,
+            "last_poll_started": self.iot_last_poll_started,
+            "last_poll_finished": self.iot_last_poll_finished,
+            "plugs": {
+                "available": bool(self.plug_inventory),
+                "configured": bool(self.plug_inventory),
+                "error": self.plug_config_error,
+                "devices": copy.deepcopy(self.plugs),
+                "history": {
+                    plug_id: list(samples)
+                    for plug_id, samples in self.plug_history.items()
+                },
+            },
+            "air_conditioner": copy.deepcopy(self.air_conditioner),
+        }
+
+    def public_snapshot(self) -> dict[str, Any]:
+        snapshot = {
             "server_time": utc_now(),
             "generation": self.generation,
             "polling": self.polling,
@@ -457,6 +716,8 @@ class DashboardState:
                 "jk": {"telemetry": True, "protocol_read": True, "protocol_write": True},
             },
         }
+        snapshot["iot"] = self.public_iot_snapshot()
+        return snapshot
 
 
 @web.middleware
@@ -470,7 +731,8 @@ async def response_headers(request: web.Request, handler: Callable[[web.Request]
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'self'"
+        "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; "
+        "img-src 'self' data:; connect-src 'self'"
     )
     return response
 
@@ -502,6 +764,64 @@ async def inverters_handler(request: web.Request) -> web.Response:
         state.config.inverter_stale_seconds,
     )
     return web.json_response(snapshot)
+
+
+async def iot_handler(request: web.Request) -> web.Response:
+    return web.json_response(dashboard_state(request).public_iot_snapshot())
+
+
+async def plug_power_handler(request: web.Request) -> web.Response:
+    state = dashboard_state(request)
+    plug_id = request.match_info.get("plug_id", "")
+    if plug_id not in state.plug_inventory:
+        raise web.HTTPNotFound(text="unknown smart plug")
+    try:
+        body = await request.json()
+    except (ValueError, TypeError) as exc:
+        raise web.HTTPBadRequest(text="invalid JSON body") from exc
+    enabled = body.get("on")
+    if not isinstance(enabled, bool):
+        raise web.HTTPBadRequest(text="on must be a boolean")
+    LOGGER.warning(
+        "smart-plug power requested: plug=%s on=%s peer=%s",
+        plug_id,
+        enabled,
+        request.remote or "unknown",
+    )
+    try:
+        result = await state.set_plug_power(plug_id, enabled)
+    except ValueError as exc:
+        raise web.HTTPBadRequest(text=str(exc)) from exc
+    except (OSError, miot_plugs.MiotPlugError) as exc:
+        LOGGER.error("smart-plug command failed: plug=%s reason=%s", plug_id, exc)
+        raise web.HTTPBadGateway(text=f"smart-plug command failed: {exc}") from exc
+    return web.json_response({"ok": True, "result": result})
+
+
+async def ac_power_handler(request: web.Request) -> web.Response:
+    state = dashboard_state(request)
+    if state.ac_definition is None:
+        raise web.HTTPServiceUnavailable(text="air conditioner is not configured")
+    try:
+        body = await request.json()
+    except (ValueError, TypeError) as exc:
+        raise web.HTTPBadRequest(text="invalid JSON body") from exc
+    enabled = body.get("on")
+    if not isinstance(enabled, bool):
+        raise web.HTTPBadRequest(text="on must be a boolean")
+    LOGGER.warning(
+        "air-conditioner power requested: on=%s peer=%s",
+        enabled,
+        request.remote or "unknown",
+    )
+    try:
+        result = await state.set_ac_power(enabled)
+    except ValueError as exc:
+        raise web.HTTPBadRequest(text=str(exc)) from exc
+    except (OSError, tuya_ac.TuyaAcError) as exc:
+        LOGGER.error("air-conditioner command failed: %s", exc)
+        raise web.HTTPBadGateway(text=f"air-conditioner command failed: {exc}") from exc
+    return web.json_response({"ok": True, "result": result})
 
 
 def bms_alias_for_request(request: web.Request) -> str:
@@ -648,19 +968,35 @@ async def inverter_setting_handler(request: web.Request) -> web.Response:
 
 async def health_handler(request: web.Request) -> web.Response:
     state = dashboard_state(request)
+    bms_ok = state.poll_task is not None and not state.poll_task.done()
+    iot_ok = state.iot_poll_task is not None and not state.iot_poll_task.done()
     return web.json_response(
         {
-            "ok": state.poll_task is not None and not state.poll_task.done(),
+            "ok": bms_ok and iot_ok,
+            "bms_poller_ok": bms_ok,
+            "iot_poller_ok": iot_ok,
             "polling": state.polling,
+            "iot_polling": state.iot_polling,
             "generation": state.generation,
+            "iot_generation": state.iot_generation,
             "server_time": utc_now(),
         }
     )
 
 
 async def refresh_handler(request: web.Request) -> web.Response:
-    accepted = dashboard_state(request).request_refresh()
-    return web.json_response({"accepted": accepted, "reason": None if accepted else "refresh rate limited"})
+    state = dashboard_state(request)
+    bms_accepted = state.request_refresh()
+    iot_accepted = state.request_iot_refresh()
+    accepted = bms_accepted or iot_accepted
+    return web.json_response(
+        {
+            "accepted": accepted,
+            "bms_accepted": bms_accepted,
+            "iot_accepted": iot_accepted,
+            "reason": None if accepted else "refresh rate limited",
+        }
+    )
 
 
 async def protocol_refresh_handler(request: web.Request) -> web.Response:
@@ -721,17 +1057,17 @@ STATE_KEY: Final[web.AppKey[DashboardState]] = web.AppKey("dashboard_state", Das
 async def start_background(app: web.Application) -> None:
     state = app[STATE_KEY]
     state.poll_task = asyncio.create_task(state.polling_loop(), name="bms-dashboard-poller")
+    state.iot_poll_task = asyncio.create_task(
+        state.iot_polling_loop(), name="iot-dashboard-poller"
+    )
 
 
 async def stop_background(app: web.Application) -> None:
-    task = app[STATE_KEY].poll_task
-    if task is None:
-        return
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
+    state = app[STATE_KEY]
+    tasks = [task for task in (state.poll_task, state.iot_poll_task) if task is not None]
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def create_app(config: DashboardConfig, state: DashboardState | None = None) -> web.Application:
@@ -742,6 +1078,9 @@ def create_app(config: DashboardConfig, state: DashboardState | None = None) -> 
     app.router.add_get("/", index_handler)
     app.router.add_get("/api/status", status_handler)
     app.router.add_get("/api/inverters", inverters_handler)
+    app.router.add_get("/api/iot", iot_handler)
+    app.router.add_post("/api/iot/plugs/{plug_id}/power", plug_power_handler)
+    app.router.add_post("/api/iot/air-conditioner/power", ac_power_handler)
     app.router.add_get("/api/bms/{alias}/configuration", bms_configuration_handler)
     app.router.add_post("/api/bms/{alias}/setting", bms_setting_handler)
     app.router.add_get("/api/inverters/{inverter_id}/configuration", inverter_configuration_handler)

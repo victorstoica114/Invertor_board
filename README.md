@@ -81,12 +81,15 @@ JK operating configuration maps one parameter at a time, including JK UART/CAN
 and Seplos inverter protocol selectors.
 
 The same tooling includes a Raspberry Pi web dashboard for LAN monitoring of
-the Bluetooth BMS devices and Wi-Fi inverters, plus a complete **BMS Control**
-tab and a dedicated Anenji/EASUN inverter-control tab
+the Bluetooth BMS devices, Wi-Fi inverters, Xiaomi smart plugs, and a local
+Tuya air conditioner. It includes live smart-load power charts, verified power
+switches, a complete **BMS Control** tab, and a dedicated Anenji/EASUN inverter-control tab
 (`tools/bms_dashboard.py`, default port `8765`). The dashboard trusts its local
 LAN/VPN and does not add a password prompt; changes still use the live device
 identity, strict protocol-map validation, a confirmation dialog, and full
-read-back. The current configuration can be downloaded as JSON first.
+read-back. The current configuration can be downloaded as JSON first. Private
+IoT inventory files, datapoint mapping, and service configuration are documented
+in [`docs/iot_dashboard.md`](docs/iot_dashboard.md).
 
 The local SQLite collector also polls the Wi-Fi-connected Anenji and EASUN
 inverters every 30 seconds through their Eybond reverse tunnels. It

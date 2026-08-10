@@ -1,3 +1,5 @@
 aiobmsble==0.26.0
 aiohttp==3.12.15
 bleak==3.0.2
+python-miio==0.5.12
+tinytuya==1.20.0

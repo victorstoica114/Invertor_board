@@ -1,0 +1,83 @@
+# Local IoT dashboard
+
+The dashboard polls Xiaomi `cuco.plug.v2eur` smart plugs and one Tuya air
+conditioner on a separate asynchronous loop. A Wi-Fi device timeout therefore
+does not block Bluetooth BMS polling. Power writes are serialized and verified
+by an immediate read-back.
+
+## Dependencies
+
+Install the pinned dashboard dependencies in its virtual environment:
+
+```sh
+/home/pi/.venvs/inverter-bms-dashboard/bin/pip install \
+  -r tools/bms_ble_requirements.txt
+```
+
+## Xiaomi inventory
+
+Create `/home/pi/.config/iot-keys/xiaomi_plugs.json`:
+
+```json
+{
+  "devices": [
+    {
+      "id": "boiler",
+      "name": "Boiler",
+      "ip": "192.168.1.207",
+      "token": "<32 hexadecimal characters>",
+      "model": "cuco.plug.v2eur"
+    }
+  ]
+}
+```
+
+## Tuya air conditioner
+
+Create `/home/pi/.config/iot-keys/tuya_ac.json` after obtaining the local key
+from the Tuya IoT project linked to the Smart Life account:
+
+```json
+{
+  "id": "air-conditioner",
+  "name": "Air conditioner",
+  "ip": "192.168.1.200",
+  "device_id": "021002208c4f0049a4ce",
+  "local_key": "<16-byte local key>",
+  "product_id": "hw50w7qvxluhslkk",
+  "version": 3.3,
+  "temperature_scale": 10,
+  "dps": {
+    "power": "1",
+    "mode": "4",
+    "fan": "5",
+    "temperature_unit": "19",
+    "current_temperature": "23",
+    "target_temperature": "24"
+  }
+}
+```
+
+The `dps` object overrides the defaults when a firmware variant exposes a
+different datapoint map. The first authenticated status response includes the
+non-secret raw datapoints in `/api/iot`, which can be used to validate that map.
+
+Both files are rejected unless they are private:
+
+```sh
+chmod 600 /home/pi/.config/iot-keys/xiaomi_plugs.json
+chmod 600 /home/pi/.config/iot-keys/tuya_ac.json
+```
+
+Paths and the default 10-second polling interval can be changed with the
+variables in `tools/bms_dashboard.env.example`. Smart-plug chart history is held
+in memory and starts again when the dashboard service restarts.
+
+## API
+
+- `GET /api/iot` returns device state and smart-plug history without credentials.
+- `POST /api/iot/plugs/{plug_id}/power` accepts `{"on": true}` or `{"on": false}`.
+- `POST /api/iot/air-conditioner/power` accepts the same body.
+
+The API trusts the LAN/VPN like the rest of the dashboard. Restrict port `8765`
+at the network boundary.

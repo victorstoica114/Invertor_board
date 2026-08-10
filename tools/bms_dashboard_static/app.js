@@ -16,6 +16,7 @@ const state = {
   bmsConfigLoading: false,
   bmsConfigWriting: false,
   bmsConfigTimer: null,
+  iotWriting: new Set(),
   toastTimer: null,
 };
 
@@ -190,6 +191,153 @@ function renderInverters(data) {
   $("#inverter-grid").innerHTML = devices.map(inverterCard).join("");
 }
 
+function iotReading(value, digits, unit = "") {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
+  return `${Number(value).toFixed(digits)}${unit ? ` ${unit}` : ""}`;
+}
+
+function powerSwitch(id, label, enabled, checked, kind = "plug") {
+  return `<label class="power-switch" title="Power ${esc(label)}">
+    <input type="checkbox" data-iot-power="${esc(id)}" data-iot-kind="${kind}" ${checked ? "checked" : ""} ${enabled ? "" : "disabled"} aria-label="Power ${esc(label)}">
+    <span aria-hidden="true"></span>
+  </label>`;
+}
+
+function plugCard(device) {
+  const telemetry = device.telemetry || {};
+  const canControl = device.online && typeof telemetry.on === "boolean" && !state.iotWriting.has(device.id);
+  const status = device.updating ? "Reading" : device.online ? "Online" : "Offline";
+  return `<article class="iot-device-card ${device.online ? "online" : "offline"}">
+    <div class="device-head">
+      <div><span class="eyebrow">${esc(device.ip)}</span><h3>${esc(device.name)}</h3><span class="device-subtitle">Xiaomi smart plug</span></div>
+      <span class="device-status ${device.online ? "online" : ""}"><span class="dot"></span>${status}</span>
+    </div>
+    <div class="iot-power-row">
+      <div><span>Live power</span><strong>${esc(iotReading(telemetry.electric_power_w, 1, "W"))}</strong></div>
+      ${powerSwitch(device.id, device.name, canControl, telemetry.on === true)}
+    </div>
+    <div class="iot-metrics">
+      <div><span>Power state</span><strong>${typeof telemetry.on === "boolean" ? (telemetry.on ? "On" : "Off") : "—"}</strong></div>
+      <div><span>Energy counter</span><strong>${esc(iotReading(telemetry.energy_counter, 3, "kWh"))}</strong></div>
+      <div><span>Protection</span><strong>${esc(telemetry.fault_label || "—")}</strong></div>
+      <div><span>Last reading</span><strong>${device.last_success ? esc(new Date(device.last_success).toLocaleTimeString("en-GB")) : "—"}</strong></div>
+    </div>
+    ${device.error ? `<div class="device-error">${esc(device.error)}</div>` : ""}
+  </article>`;
+}
+
+function acCard(device) {
+  const telemetry = device.telemetry || {};
+  const canControl = device.configured && device.online && typeof telemetry.on === "boolean" && !state.iotWriting.has(device.id);
+  const status = !device.configured ? "Local key required" : device.updating ? "Reading" : device.online ? "Online" : "Offline";
+  return `<article class="iot-device-card ac-card ${device.online ? "online" : "offline"}">
+    <div class="device-head">
+      <div><span class="eyebrow">${esc(device.ip || "192.168.1.200")}</span><h3>${esc(device.name)}</h3><span class="device-subtitle">Tuya local control</span></div>
+      <span class="device-status ${device.online ? "online" : ""}"><span class="dot"></span>${esc(status)}</span>
+    </div>
+    <div class="iot-power-row">
+      <div><span>Room temperature</span><strong>${esc(iotReading(telemetry.current_temperature_c, 1, "°C"))}</strong></div>
+      ${powerSwitch(device.id, device.name, canControl, telemetry.on === true, "ac")}
+    </div>
+    <div class="iot-metrics">
+      <div><span>Power state</span><strong>${typeof telemetry.on === "boolean" ? (telemetry.on ? "On" : "Off") : "—"}</strong></div>
+      <div><span>Target</span><strong>${esc(iotReading(telemetry.target_temperature_c, 1, "°C"))}</strong></div>
+      <div><span>Mode</span><strong>${esc(telemetry.mode)}</strong></div>
+      <div><span>Fan</span><strong>${esc(telemetry.fan)}</strong></div>
+    </div>
+    ${!device.configured ? `<div class="iot-config-note">Waiting for the Tuya local key.</div>` : ""}
+    ${device.configured && device.error ? `<div class="device-error">${esc(device.error)}</div>` : ""}
+  </article>`;
+}
+
+function renderIotPowerChart(iot) {
+  const svg = $("#iot-power-chart");
+  const devices = Object.values(iot.plugs?.devices || {});
+  const history = iot.plugs?.history || {};
+  const colors = ["#4de0a4", "#65d6df", "#f4c76d", "#ff7b75"];
+  const series = devices.map((device, index) => ({
+    device,
+    color: colors[index % colors.length],
+    values: (history[device.id] || []).filter((sample) =>
+      sample.electric_power_w !== null && sample.electric_power_w !== undefined
+      && Number.isFinite(Number(sample.electric_power_w))
+    ),
+  }));
+  $("#iot-chart-legend").innerHTML = series.map(({ device, color }) =>
+    `<span><i style="background:${color}"></i>${esc(device.name)}</span>`
+  ).join("");
+  const allValues = series.flatMap((item) => item.values.map((sample) => Number(sample.electric_power_w)));
+  const latestTotal = series.reduce((total, item) =>
+    total + (item.values.length ? Number(item.values.at(-1).electric_power_w) : 0), 0
+  );
+  $("#iot-chart-value").textContent = allValues.length ? `${num(latestTotal, 1)} W total` : "—";
+  if (series.every((item) => item.values.length < 2)) {
+    svg.innerHTML = `<text x="400" y="125" class="chart-empty">History appears after the first two readings</text>`;
+    $("#iot-chart-range").textContent = "latest readings";
+    return;
+  }
+  const width = 800, height = 240, pad = 24;
+  const maximum = Math.max(1, ...allValues) * 1.08;
+  const longest = Math.max(...series.map((item) => item.values.length), 2);
+  const x = (index) => pad + index * (width - pad * 2) / (longest - 1);
+  const y = (value) => height - pad - value * (height - pad * 2) / maximum;
+  const paths = series.map(({ values, color }) => {
+    if (values.length < 2) return "";
+    const points = values.map((sample, index) => `${x(index)},${y(Number(sample.electric_power_w))}`).join(" ");
+    return `<polyline class="iot-chart-line" style="stroke:${color}" points="${points}"/>`;
+  }).join("");
+  svg.innerHTML = `${[.25, .5, .75].map((part) => `<line class="chart-grid" x1="${pad}" y1="${height * part}" x2="${width - pad}" y2="${height * part}"/>`).join("")}${paths}`;
+  $("#iot-chart-range").textContent = `0…${num(maximum, 0)} W · ${longest} samples`;
+}
+
+function renderIot(data) {
+  const iot = data.iot || {};
+  const plugs = Object.values(iot.plugs?.devices || {});
+  const ac = iot.air_conditioner || { configured: false, id: "air-conditioner", name: "Air conditioner", telemetry: {} };
+  const online = plugs.filter((device) => device.online).length + (ac.online ? 1 : 0);
+  const configured = plugs.length + (ac.configured ? 1 : 0);
+  const status = $("#iot-state");
+  status.className = `status-pill ${iot.polling ? "busy" : online ? "live" : ""}`;
+  status.innerHTML = `<span class="dot"></span>${iot.polling ? "Reading local devices" : `${online}/${configured || plugs.length + 1} online`}`;
+  $("#iot-grid").innerHTML = `${plugs.map(plugCard).join("")}${acCard(ac)}`;
+  renderIotPowerChart(iot);
+}
+
+async function applyIotPower(input) {
+  const id = input.dataset.iotPower;
+  const isAc = input.dataset.iotKind === "ac";
+  const device = isAc
+    ? state.data?.iot?.air_conditioner
+    : state.data?.iot?.plugs?.devices?.[id];
+  if (!device || state.iotWriting.has(id)) return;
+  const enabled = input.checked;
+  if (!window.confirm(`${enabled ? "Turn on" : "Turn off"} ${device.name}?`)) {
+    renderIot(state.data);
+    return;
+  }
+  state.iotWriting.add(id);
+  renderIot(state.data);
+  try {
+    const path = isAc
+      ? "/api/iot/air-conditioner/power"
+      : `/api/iot/plugs/${encodeURIComponent(id)}/power`;
+    const response = await api(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ on: enabled }),
+    });
+    toast(response.result.written
+      ? `${device.name} power changed and verified.`
+      : `${device.name} was already ${enabled ? "on" : "off"}.`);
+    await loadStatus();
+  } catch (error) {
+    toast(`Power command failed: ${error.message}`, true);
+  } finally {
+    state.iotWriting.delete(id);
+    renderIot(state.data);
+  }
+}
+
 function setInverterConfigStatus(message, mode = "") {
   const element = $("#inverter-config-status");
   element.className = `status-pill ${mode}`.trim();
@@ -205,6 +353,9 @@ function renderInverterControlShell(data) {
   const options = devices.map((device) => `<option value="${esc(device.id)}" ${device.id === state.selectedInverter ? "selected" : ""}>${esc(device.name)} · ${esc(device.configured_ip)}</option>`).join("");
   if (selector.innerHTML !== options) selector.innerHTML = options;
   selector.disabled = !devices.length || state.inverterConfigLoading || state.inverterConfigWriting;
+  const actionsDisabled = !state.inverterConfig || state.inverterConfigLoading || state.inverterConfigWriting;
+  $("#inverter-config-backup").disabled = actionsDisabled;
+  $("#inverter-config-restore").disabled = actionsDisabled;
 }
 
 function configurationValueLabel(item) {
@@ -212,6 +363,74 @@ function configurationValueLabel(item) {
   if (option) return option.label;
   if (item.display_value !== undefined) return item.display_value;
   return `${item.value ?? "—"}${item.unit ? ` ${item.unit}` : ""}`;
+}
+
+function configurationItems(configuration) {
+  if (!configuration || !Array.isArray(configuration.groups)) return [];
+  return configuration.groups.flatMap((group) => Array.isArray(group.settings) ? group.settings : []);
+}
+
+function sameConfigurationValue(first, second) {
+  const firstBoolean = typeof first === "boolean" || /^(true|false)$/i.test(String(first));
+  const secondBoolean = typeof second === "boolean" || /^(true|false)$/i.test(String(second));
+  if (firstBoolean && secondBoolean) return String(first).toLowerCase() === String(second).toLowerCase();
+  const firstNumber = Number(first);
+  const secondNumber = Number(second);
+  if (String(first).trim() !== "" && String(second).trim() !== ""
+      && Number.isFinite(firstNumber) && Number.isFinite(secondNumber)) {
+    return firstNumber === secondNumber;
+  }
+  return String(first) === String(second);
+}
+
+function configurationRestorePlan(liveConfiguration, backupConfiguration) {
+  const backupValues = new Map(configurationItems(backupConfiguration)
+    .filter((item) => item && typeof item.key === "string"
+      && Object.prototype.hasOwnProperty.call(item, "value"))
+    .map((item) => [item.key, item.value]));
+  const compatible = configurationItems(liveConfiguration)
+    .filter((item) => item?.writable && item.type !== "action" && backupValues.has(item.key));
+  return {
+    compatibleCount: compatible.length,
+    changes: compatible
+      .filter((item) => !sameConfigurationValue(item.value, backupValues.get(item.key)))
+      .map((item) => ({ item, value: backupValues.get(item.key) })),
+  };
+}
+
+function requestedConfigurationValueLabel(item, value) {
+  const option = (item.options || []).find((candidate) => sameConfigurationValue(candidate.value, value));
+  if (option) return option.label;
+  return `${value}${item.unit ? ` ${item.unit}` : ""}`;
+}
+
+function configurationRestorePrompt(title, file, changes, identityWarning = "") {
+  const previewLimit = 10;
+  const preview = changes.slice(0, previewLimit).map(({ item, value }) =>
+    `• ${item.label}: ${configurationValueLabel(item)} → ${requestedConfigurationValueLabel(item, value)}`
+  );
+  if (changes.length > previewLimit) preview.push(`• …and ${changes.length - previewLimit} more`);
+  const criticalCount = changes.filter(({ item }) => item.critical).length;
+  const criticalWarning = criticalCount
+    ? `\n\n${criticalCount} critical setting${criticalCount === 1 ? "" : "s"} will be changed.`
+    : "";
+  return `${title}\n\nFile: ${file.name}\nChanges: ${changes.length}\n\n${preview.join("\n")}${identityWarning}${criticalWarning}\n\nEach setting will be written and verified by read-back. Continue?`;
+}
+
+async function readConfigurationBackup(file) {
+  if (!file) throw new Error("No JSON backup was selected.");
+  if (file.size > 5 * 1024 * 1024) throw new Error("The JSON backup is larger than 5 MB.");
+  let configuration;
+  try {
+    configuration = JSON.parse(await file.text());
+  } catch (error) {
+    throw new Error("The selected file is not valid JSON.", { cause: error });
+  }
+  if (!configuration || Array.isArray(configuration) || typeof configuration !== "object"
+      || !Array.isArray(configuration.groups)) {
+    throw new Error("The selected JSON does not contain a configuration backup.");
+  }
+  return configuration;
 }
 
 function configurationInput(item) {
@@ -262,7 +481,6 @@ function renderInverterConfiguration(configuration) {
           </div>
         </div>`).join("")}</div>
     </article>`).join("");
-  $("#inverter-config-backup").disabled = false;
   setInverterConfigStatus(`Updated ${new Date().toLocaleTimeString("en-GB")} · every 30s`, "live");
 }
 
@@ -356,6 +574,73 @@ async function applyInverterSetting(key, button) {
   }
 }
 
+async function restoreInverterConfiguration(file, button) {
+  const originalText = button.textContent;
+  let restoreStarted = false;
+  let completed = 0;
+  try {
+    const backup = await readConfigurationBackup(file);
+    const live = state.inverterConfig;
+    if (!live) throw new Error("Load the live inverter configuration before uploading a backup.");
+    if (!backup.protocol || backup.protocol !== live.protocol) {
+      throw new Error(`This backup uses ${backup.protocol || "an unknown protocol"}; the selected inverter uses ${live.protocol}.`);
+    }
+    const confirmation = live.identity?.serial;
+    if (!confirmation) throw new Error("The live inverter serial number is unavailable.");
+    const plan = configurationRestorePlan(live, backup);
+    if (!plan.compatibleCount) throw new Error("The backup contains no writable settings compatible with this inverter.");
+    if (!plan.changes.length) {
+      toast("All compatible backup settings are already active.");
+      return;
+    }
+
+    const identityNotes = [];
+    if (backup.identity?.serial && backup.identity.serial !== confirmation) {
+      identityNotes.push(`backup serial ${backup.identity.serial} differs from live serial ${confirmation}`);
+    }
+    if (backup.inverter?.id && backup.inverter.id !== state.selectedInverter) {
+      identityNotes.push(`backup inverter ${backup.inverter.id} differs from selected inverter ${state.selectedInverter}`);
+    }
+    const identityWarning = identityNotes.length ? `\n\nIdentity warning: ${identityNotes.join("; ")}.` : "";
+    const target = live.inverter?.name || state.selectedInverter;
+    if (!window.confirm(configurationRestorePrompt(
+      `Restore the JSON backup to ${target}?`, file, plan.changes, identityWarning
+    ))) return;
+
+    restoreStarted = true;
+    state.inverterConfigWriting = true;
+    renderInverterControlShell(state.data);
+    button.textContent = "Uploading…";
+    let pending = plan.changes;
+    const maximumWrites = Math.max(plan.compatibleCount * 2, pending.length);
+    while (pending.length && completed < maximumWrites) {
+      const { item, value } = pending[0];
+      setInverterConfigStatus(`Restoring backup · write ${completed + 1}: ${item.label}…`, "busy");
+      const response = await api(`/api/inverters/${encodeURIComponent(state.selectedInverter)}/setting`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ setting: item.key, value, confirmation }),
+      });
+      state.inverterConfig = response.result.after_configuration;
+      completed += 1;
+      pending = configurationRestorePlan(state.inverterConfig, backup).changes;
+    }
+    if (pending.length) throw new Error(`${pending.length} settings still differ after ${completed} verified writes.`);
+    renderInverterConfiguration(state.inverterConfig);
+    toast(`JSON backup restored: ${completed} verified write${completed === 1 ? "" : "s"}.`);
+  } catch (error) {
+    if (restoreStarted && state.inverterConfig) {
+      renderInverterConfiguration(state.inverterConfig);
+      setInverterConfigStatus(`Restore stopped after ${completed} setting${completed === 1 ? "" : "s"}`);
+    }
+    toast(`Cannot restore inverter backup: ${error.message}`, true);
+  } finally {
+    if (restoreStarted) state.inverterConfigWriting = false;
+    button.textContent = originalText;
+    renderInverterControlShell(state.data);
+  }
+}
+
 function setBmsConfigStatus(message, mode = "") {
   const element = $("#bms-config-status");
   element.className = `status-pill ${mode}`.trim();
@@ -366,6 +651,9 @@ function renderBmsControlShell() {
   const selector = $("#bms-control-selector");
   selector.value = state.selectedBms;
   selector.disabled = state.bmsConfigLoading || state.bmsConfigWriting;
+  const actionsDisabled = !state.bmsConfig || state.bmsConfigLoading || state.bmsConfigWriting;
+  $("#bms-config-backup").disabled = actionsDisabled;
+  $("#bms-config-restore").disabled = actionsDisabled;
 }
 
 function bmsConfigurationInput(item) {
@@ -413,7 +701,6 @@ function renderBmsConfiguration(configuration) {
           </div>
         </div>`).join("")}</div>
     </article>`).join("");
-  $("#bms-config-backup").disabled = false;
   setBmsConfigStatus(`Updated ${new Date().toLocaleTimeString("en-GB")} · every 30s`, "live");
 }
 
@@ -505,6 +792,71 @@ async function applyBmsSetting(key, button) {
   }
 }
 
+async function restoreBmsConfiguration(file, button) {
+  const originalText = button.textContent;
+  let restoreStarted = false;
+  let completed = 0;
+  try {
+    const backup = await readConfigurationBackup(file);
+    const live = state.bmsConfig;
+    if (!live) throw new Error("Load the live BMS configuration before uploading a backup.");
+    if (!backup.device || backup.device !== state.selectedBms || backup.device !== live.device) {
+      throw new Error(`This is a ${DEVICE_LABELS[backup.device] || backup.device || "different device"} backup, not a ${DEVICE_LABELS[state.selectedBms]} backup.`);
+    }
+    if (backup.protocol && live.protocol && backup.protocol !== live.protocol) {
+      throw new Error(`This backup uses ${backup.protocol}; the selected BMS uses ${live.protocol}.`);
+    }
+    const confirmation = live.identity?.confirmation;
+    if (!confirmation) throw new Error("The live BMS identity is unavailable.");
+    const plan = configurationRestorePlan(live, backup);
+    if (!plan.compatibleCount) throw new Error("The backup contains no writable settings compatible with this BMS.");
+    if (!plan.changes.length) {
+      toast("All compatible backup settings are already active.");
+      return;
+    }
+
+    const backupIdentity = backup.identity?.confirmation;
+    const identityWarning = backupIdentity && backupIdentity !== confirmation
+      ? `\n\nIdentity warning: backup identity ${backupIdentity} differs from live identity ${confirmation}.`
+      : "";
+    if (!window.confirm(configurationRestorePrompt(
+      `Restore the JSON backup to ${DEVICE_LABELS[state.selectedBms]}?`, file, plan.changes, identityWarning
+    ))) return;
+
+    restoreStarted = true;
+    state.bmsConfigWriting = true;
+    renderBmsControlShell();
+    button.textContent = "Uploading…";
+    let pending = plan.changes;
+    const maximumWrites = Math.max(plan.compatibleCount * 2, pending.length);
+    while (pending.length && completed < maximumWrites) {
+      const { item, value } = pending[0];
+      setBmsConfigStatus(`Restoring backup · write ${completed + 1}: ${item.label}…`, "busy");
+      const response = await api(`/api/bms/${encodeURIComponent(state.selectedBms)}/setting`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ setting: item.key, value, confirmation }),
+      });
+      state.bmsConfig = response.result.after_configuration;
+      completed += 1;
+      pending = configurationRestorePlan(state.bmsConfig, backup).changes;
+    }
+    if (pending.length) throw new Error(`${pending.length} settings still differ after ${completed} verified writes.`);
+    renderBmsConfiguration(state.bmsConfig);
+    toast(`JSON backup restored: ${completed} verified write${completed === 1 ? "" : "s"}.`);
+  } catch (error) {
+    if (restoreStarted && state.bmsConfig) {
+      renderBmsConfiguration(state.bmsConfig);
+      setBmsConfigStatus(`Restore stopped after ${completed} setting${completed === 1 ? "" : "s"}`);
+    }
+    toast(`Cannot restore BMS backup: ${error.message}`, true);
+  } finally {
+    if (restoreStarted) state.bmsConfigWriting = false;
+    button.textContent = originalText;
+    renderBmsControlShell();
+  }
+}
+
 function renderHeader(data) {
   const devices = Object.values(data.devices || {});
   const online = devices.filter((device) => device.online).length;
@@ -512,10 +864,13 @@ function renderHeader(data) {
   const inverters = Object.values(data.inverters?.devices || {});
   const onlineInverters = inverters.filter((device) => device.online).length;
   const inverterOutput = inverters.reduce((sum, device) => sum + (Number(device.telemetry?.output_power_w) || 0), 0);
+  const plugs = Object.values(data.iot?.plugs?.devices || {});
+  const iotPower = plugs.reduce((sum, device) => sum + (Number(device.telemetry?.electric_power_w) || 0), 0);
   $("#online-count").textContent = online;
   $("#total-power").textContent = `${num(totalPower, 0)} W`;
   $("#inverter-output-total").textContent = `${num(inverterOutput, 0)} W`;
   $("#inverter-online-summary").textContent = `${onlineInverters}/${inverters.length || 2} online`;
+  $("#iot-power-summary").textContent = plugs.length ? `${num(iotPower, 1)} W` : "—";
   $("#control-state").textContent = data.control_auth_required ? "Protected" : "Trusted LAN";
   $("#poll-interval").textContent = `${data.poll_interval_seconds}s`;
   $("#last-update").textContent = data.last_poll_finished ? `Last cycle: ${new Date(data.last_poll_finished).toLocaleString("en-GB")}` : "Initializing Bluetooth connections…";
@@ -611,6 +966,7 @@ function renderAll() {
   renderCards(state.data);
   renderDetails(state.data);
   renderInverters(state.data);
+  renderIot(state.data);
   renderInverterControlShell(state.data);
   renderBmsControlShell();
 }
@@ -627,9 +983,14 @@ async function loadStatus(showError = false) {
 $("#refresh-button").addEventListener("click", async () => {
   try {
     const result = await api("/api/refresh", { method: "POST" });
-    toast(result.accepted ? "Bluetooth refresh scheduled." : "A recent refresh is already pending.");
+    toast(result.accepted ? "Device refresh scheduled." : "A recent refresh is already pending.");
     await loadStatus();
   } catch (error) { toast(error.message, true); }
+});
+
+$("#iot-grid").addEventListener("change", (event) => {
+  const input = event.target.closest("[data-iot-power]");
+  if (input) applyIotPower(input);
 });
 
 $("#inverter-control-selector").addEventListener("change", (event) => {
@@ -638,6 +999,7 @@ $("#inverter-control-selector").addEventListener("change", (event) => {
   $("#inverter-config-identity").innerHTML = "";
   $("#inverter-config-content").innerHTML = `<article class="inverter-empty"><strong>Reading selected inverter</strong><p>Waiting for its live configuration.</p></article>`;
   $("#inverter-config-backup").disabled = true;
+  $("#inverter-config-restore").disabled = true;
   setInverterConfigStatus("Waiting for automatic read");
   startInverterConfigPolling();
 });
@@ -655,6 +1017,16 @@ $("#inverter-config-backup").addEventListener("click", () => {
   link.click();
   URL.revokeObjectURL(url);
 });
+$("#inverter-config-restore").addEventListener("click", () => {
+  const input = $("#inverter-config-file");
+  input.value = "";
+  input.click();
+});
+$("#inverter-config-file").addEventListener("change", async (event) => {
+  const file = event.target.files?.[0];
+  if (file) await restoreInverterConfiguration(file, $("#inverter-config-restore"));
+  event.target.value = "";
+});
 
 $("#bms-control-selector").addEventListener("change", (event) => {
   state.selectedBms = event.target.value;
@@ -662,6 +1034,7 @@ $("#bms-control-selector").addEventListener("change", (event) => {
   $("#bms-config-identity").innerHTML = "";
   $("#bms-config-content").innerHTML = `<article class="inverter-empty"><strong>Reading selected BMS</strong><p>Waiting for its live Bluetooth configuration.</p></article>`;
   $("#bms-config-backup").disabled = true;
+  $("#bms-config-restore").disabled = true;
   setBmsConfigStatus("Waiting for automatic read");
   startBmsConfigPolling();
 });
@@ -678,6 +1051,16 @@ $("#bms-config-backup").addEventListener("click", () => {
   link.download = `${state.selectedBms}-bms-configuration-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
   link.click();
   URL.revokeObjectURL(url);
+});
+$("#bms-config-restore").addEventListener("click", () => {
+  const input = $("#bms-config-file");
+  input.value = "";
+  input.click();
+});
+$("#bms-config-file").addEventListener("change", async (event) => {
+  const file = event.target.files?.[0];
+  if (file) await restoreBmsConfiguration(file, $("#bms-config-restore"));
+  event.target.value = "";
 });
 
 document.querySelectorAll(".tab").forEach((button) => button.addEventListener("click", () => {

@@ -14,7 +14,7 @@
       <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
       <div>
         <h1>Energy Control Center</h1>
-        <p>Raspberry Pi · Bluetooth BMS · Wi-Fi inverters</p>
+        <p>Raspberry Pi · BMS · inverters · smart loads</p>
       </div>
     </div>
     <div class="top-actions">
@@ -34,6 +34,7 @@
         <div><span>BMS power</span><strong id="total-power">—</strong></div>
         <div><span>Inverter output</span><strong id="inverter-output-total">—</strong></div>
         <div><span>Inverters</span><strong id="inverter-online-summary">—</strong></div>
+        <div><span>Smart loads</span><strong id="iot-power-summary">—</strong></div>
         <div><span>Control</span><strong id="control-state">—</strong></div>
         <div><span>Polling</span><strong id="poll-interval">—</strong></div>
       </div>
@@ -45,6 +46,7 @@
       <div class="tabs" role="tablist" aria-label="Dashboard sections">
         <button class="tab active" data-tab="details" role="tab" type="button">Details and history</button>
         <button class="tab" data-tab="inverters" role="tab" type="button">Inverters</button>
+        <button class="tab" data-tab="iot" role="tab" type="button">Smart plugs and AC</button>
         <button class="tab" data-tab="inverter-control" role="tab" type="button">Inverter control</button>
         <button class="tab" data-tab="bms-control" role="tab" type="button">BMS control</button>
       </div>
@@ -90,6 +92,25 @@
         <div id="inverter-grid" class="inverter-grid" aria-live="polite"></div>
       </div>
 
+      <div id="iot-panel" class="tab-panel" role="tabpanel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Local network control</p>
+            <h3>Smart plugs and air conditioner</h3>
+          </div>
+          <span id="iot-state" class="status-pill"><span class="dot"></span>Waiting for devices</span>
+        </div>
+        <div id="iot-grid" class="iot-grid" aria-live="polite"></div>
+        <article class="chart-card iot-chart-card">
+          <div class="card-title">
+            <div><span>Smart-plug history</span><strong id="iot-chart-value">—</strong></div>
+            <span id="iot-chart-range" class="muted">latest readings</span>
+          </div>
+          <div id="iot-chart-legend" class="iot-chart-legend"></div>
+          <svg id="iot-power-chart" viewBox="0 0 800 240" role="img" aria-label="Smart-plug power history chart"></svg>
+        </article>
+      </div>
+
       <div id="inverter-control-panel" class="tab-panel" role="tabpanel">
         <div class="panel-heading inverter-control-heading">
           <div>
@@ -103,6 +124,8 @@
             <select id="inverter-control-selector"></select>
           </label>
           <div class="inverter-control-buttons">
+            <button id="inverter-config-restore" class="button secondary" type="button" disabled>Upload JSON backup</button>
+            <input id="inverter-config-file" type="file" accept=".json,application/json" hidden>
             <button id="inverter-config-backup" class="button secondary" type="button" disabled>Download JSON backup</button>
           </div>
         </article>
@@ -132,6 +155,8 @@
             </select>
           </label>
           <div class="inverter-control-buttons">
+            <button id="bms-config-restore" class="button secondary" type="button" disabled>Upload JSON backup</button>
+            <input id="bms-config-file" type="file" accept=".json,application/json" hidden>
             <button id="bms-config-backup" class="button secondary" type="button" disabled>Download JSON backup</button>
           </div>
         </article>
