@@ -43,6 +43,7 @@ class PlugDefinition:
     token: str
     model: str = SUPPORTED_MODEL
     reference_voltage_v: float = 230.0
+    voltage_source_inverter_id: str | None = None
 
     def public_identity(self) -> dict[str, Any]:
         return {
@@ -51,6 +52,7 @@ class PlugDefinition:
             "ip": self.ip,
             "model": self.model,
             "reference_voltage_v": self.reference_voltage_v,
+            "voltage_source_inverter_id": self.voltage_source_inverter_id,
         }
 
 
@@ -78,6 +80,9 @@ def load_inventory(path: Path) -> dict[str, PlugDefinition]:
         ip = str(record.get("ip", "")).strip()
         token = str(record.get("token", "")).strip()
         model = str(record.get("model", SUPPORTED_MODEL)).strip()
+        voltage_source_inverter_id = (
+            str(record.get("voltage_source_inverter_id", "")).strip() or None
+        )
         try:
             reference_voltage_v = float(record.get("reference_voltage_v", 230))
         except (TypeError, ValueError) as exc:
@@ -98,6 +103,13 @@ def load_inventory(path: Path) -> dict[str, PlugDefinition]:
             raise MiotPlugError(f"device {device_id} has an invalid token")
         if model != SUPPORTED_MODEL:
             raise MiotPlugError(f"device {device_id} uses unsupported model {model!r}")
+        if (
+            voltage_source_inverter_id is not None
+            and not DEVICE_ID_PATTERN.fullmatch(voltage_source_inverter_id)
+        ):
+            raise MiotPlugError(
+                f"device {device_id} has an invalid voltage-source inverter id"
+            )
         if not 100 <= reference_voltage_v <= 260:
             raise MiotPlugError(
                 f"device {device_id} reference voltage must be between 100 and 260 V"
@@ -111,6 +123,7 @@ def load_inventory(path: Path) -> dict[str, PlugDefinition]:
             token.lower(),
             model,
             reference_voltage_v,
+            voltage_source_inverter_id,
         )
         seen_ips.add(ip)
     return inventory

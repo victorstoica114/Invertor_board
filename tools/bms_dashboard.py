@@ -220,7 +220,11 @@ def load_inverter_inventory(path: Path) -> dict[str, dict[str, Any]]:
     return inventory
 
 
-def inverter_voltage_reference_from_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
+def inverter_voltage_reference_from_snapshot(
+    snapshot: Mapping[str, Any],
+    preferred_source_id: str = INVERTER_VOLTAGE_PREFERRED_SOURCE_ID,
+    allow_other_sources: bool = True,
+) -> dict[str, Any]:
     """Prefer Anenji's fresh output voltage, then another inverter output."""
     if not snapshot["available"]:
         return {
@@ -235,6 +239,8 @@ def inverter_voltage_reference_from_snapshot(snapshot: Mapping[str, Any]) -> dic
         }
     candidates = []
     for device in snapshot["devices"].values():
+        if not allow_other_sources and device.get("id") != preferred_source_id:
+            continue
         telemetry = device.get("telemetry", {})
         voltage = finite_number(telemetry.get("output_voltage_v"))
         age = finite_number(device.get("age_seconds"))
@@ -246,7 +252,7 @@ def inverter_voltage_reference_from_snapshot(snapshot: Mapping[str, Any]) -> dic
         ):
             priority = (
                 0
-                if device.get("id") == INVERTER_VOLTAGE_PREFERRED_SOURCE_ID
+                if device.get("id") == preferred_source_id
                 else 1
             )
             candidates.append((priority, float(age), float(voltage), device))
@@ -843,12 +849,20 @@ class DashboardState:
         self, plug_id: str, result: dict[str, Any]
     ) -> dict[str, Any]:
         definition = self.plug_inventory[plug_id]
-        reference = self.inverter_voltage_reference
+        reference = (
+            inverter_voltage_reference_from_snapshot(
+                self.public_inverter_snapshot(),
+                preferred_source_id=definition.voltage_source_inverter_id,
+                allow_other_sources=False,
+            )
+            if definition.voltage_source_inverter_id
+            else self.inverter_voltage_reference
+        )
         if reference["available"]:
             miot_plugs.apply_voltage_reference(
                 result.setdefault("telemetry", {}),
                 reference["voltage_v"],
-                "inverter_output" if reference["measurement"] == "output_voltage_v" else "inverter_grid",
+                "inverter_output",
                 reference["source_name"],
                 reference["sampled_at"],
             )

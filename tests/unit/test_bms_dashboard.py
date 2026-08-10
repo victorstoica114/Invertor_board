@@ -147,6 +147,7 @@ def test_private_iot_config_files_require_mode_0600():
             "ip": "192.168.1.207",
             "token": "a" * 32,
             "model": "cuco.plug.v2eur",
+            "voltage_source_inverter_id": "inverter-anenji",
         }]}), encoding="utf-8")
         plug_path.chmod(0o644)
         try:
@@ -159,6 +160,7 @@ def test_private_iot_config_files_require_mode_0600():
         plug_path.chmod(0o600)
         inventory = dashboard.miot_plugs.load_inventory(plug_path)
         assert inventory["boiler"].ip == "192.168.1.207"
+        assert inventory["boiler"].voltage_source_inverter_id == "inverter-anenji"
 
 
 def test_voltage_reference_uses_freshest_valid_inverter_output():
@@ -251,6 +253,62 @@ def test_voltage_reference_never_uses_grid_input_voltage():
     assert reference["source_id"] == "inverter-easun"
     assert reference["voltage_v"] == 230.5
     assert reference["measurement"] == "output_voltage_v"
+
+
+def test_each_plug_uses_its_configured_inverter_output_voltage():
+    inverter_inventory = {
+        inverter_id: {
+            "id": inverter_id,
+            "name": name,
+            "protocol": protocol,
+            "mac": "",
+            "ip": ip,
+            "local_ip": "192.168.1.44",
+            "local_port": 8899,
+            "linked_board_id": None,
+        }
+        for inverter_id, name, protocol, ip in (
+            ("inverter-anenji", "Anenji", "anenji_modbus", "192.168.1.18"),
+            ("inverter-easun", "EASUN", "easun_qpigs", "192.168.1.185"),
+        )
+    }
+    plugs = {
+        "boiler": dashboard.miot_plugs.PlugDefinition(
+            "boiler", "Boiler", "192.168.1.207", "a" * 32,
+            voltage_source_inverter_id="inverter-anenji",
+        ),
+        "ac-plug": dashboard.miot_plugs.PlugDefinition(
+            "ac-plug", "AC", "192.168.1.104", "b" * 32,
+            voltage_source_inverter_id="inverter-easun",
+        ),
+    }
+    state = dashboard.DashboardState(
+        dashboard.DashboardConfig(),
+        inverter_inventory=inverter_inventory,
+        plug_inventory=plugs,
+    )
+    for inverter_id, voltage in (
+        ("inverter-anenji", 229.9),
+        ("inverter-easun", 231.2),
+    ):
+        state.inverters[inverter_id].update({
+            "online": True,
+            "error": None,
+            "last_sample": dashboard.utc_now(),
+            "telemetry": {"output_voltage_v": voltage},
+        })
+
+    boiler = state.apply_inverter_voltage_reference(
+        "boiler", {"telemetry": {"electric_power_w": 100}}
+    )
+    ac_plug = state.apply_inverter_voltage_reference(
+        "ac-plug", {"telemetry": {"electric_power_w": 100}}
+    )
+
+    assert boiler["telemetry"]["voltage_v"] == 229.9
+    assert boiler["telemetry"]["voltage_source_name"] == "Anenji"
+    assert ac_plug["telemetry"]["voltage_v"] == 231.2
+    assert ac_plug["telemetry"]["voltage_source_name"] == "EASUN"
 
 
 def test_direct_inverter_polling_exposes_live_output_without_database_writes():

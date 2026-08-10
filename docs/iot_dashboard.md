@@ -27,19 +27,21 @@ Create `/home/pi/.config/iot-keys/xiaomi_plugs.json`:
       "ip": "192.168.1.207",
       "token": "<32 hexadecimal characters>",
       "model": "cuco.plug.v2eur",
-      "reference_voltage_v": 230
+      "reference_voltage_v": 230,
+      "voltage_source_inverter_id": "inverter-anenji"
     }
   ]
 }
 ```
 
 This plug model reports power and energy, but it does not expose current or
-voltage through its MIoT schema. The dashboard prioritizes Anenji's fresh
-`output_voltage_v` and calculates plug current as `power / inverter voltage`.
-If Anenji is unavailable it uses another inverter's fresh output voltage; it
-never substitutes grid-input voltage. An inverter sample older than five
-minutes is rejected, and `reference_voltage_v` is then used as an explicitly
-marked fallback.
+voltage through its MIoT schema. Set `voltage_source_inverter_id` independently
+for every plug; the deployed boiler uses `inverter-anenji` and the AC plug uses
+`inverter-easun`. The dashboard uses that inverter's fresh `output_voltage_v`
+and calculates plug current as `power / inverter voltage`. It never substitutes
+grid-input voltage or another inverter for an explicitly mapped plug. A sample
+older than five minutes is rejected, and `reference_voltage_v` is then used as
+an explicitly marked fallback.
 
 ## Tuya air conditioner
 
