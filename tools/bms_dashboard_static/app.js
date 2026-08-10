@@ -394,10 +394,6 @@ async function applyIotPower(input) {
     : state.data?.iot?.plugs?.devices?.[id];
   if (!device || state.iotWriting.has(id)) return;
   const enabled = input.checked;
-  if (!window.confirm(`${enabled ? "Turn on" : "Turn off"} ${device.name}?`)) {
-    renderIot(state.data);
-    return;
-  }
   state.iotWriting.add(id);
   renderIot(state.data);
   try {

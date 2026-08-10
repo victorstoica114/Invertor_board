@@ -525,6 +525,7 @@ def test_static_dashboard_is_english_and_renders_individual_cells():
     assert 'id="iot-power-chart"' in index
     assert "function renderIot(data)" in script
     assert "async function applyIotPower(input)" in script
+    assert 'window.confirm(`${enabled ? "Turn on" : "Turn off"}' not in script
     assert "async function applyAcSetting(setting, value)" in script
     assert "Anenji and EASUN inverters" in index
     assert 'data-tab="inverter-control"' in index
