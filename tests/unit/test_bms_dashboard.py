@@ -412,6 +412,183 @@ def test_tuya_ac_supports_distinct_current_and_target_temperature_scales():
     ) == ("target_temperature_c", 22.5, 225)
 
 
+def test_tuya_ac_decodes_tcl_airflow_features_and_diagnostics():
+    definition = dashboard.tuya_ac.AcDefinition(
+        "air-conditioner", "AC", "192.168.1.200", "device", "k" * 16,
+        "hw50w7qvxluhslkk", 3.3, 10, dict(dashboard.tuya_ac.DEFAULT_DPS),
+        current_temperature_scale=1,
+    )
+
+    class Device:
+        @staticmethod
+        def status():
+            return {"dps": {
+                "1": False, "2": 200, "3": 24, "4": "cold", "5": "high",
+                "18": 0, "20": 0, "101": 7, "105": "normal", "110": 135740,
+                "113": "2", "114": "3", "119": "0", "120": "L2",
+                "123": "0119", "125": "great", "126": "1", "127": "4",
+                "128": "0", "129": "1", "130": 26, "131": False,
+                "132": False, "133": "0", "134": '{"t":73,"s":false}',
+                "135": 1, "136": 61,
+            }}
+
+    original = dashboard.tuya_ac._device
+    dashboard.tuya_ac._device = lambda _definition: Device()
+    try:
+        result = dashboard.tuya_ac.read_ac(definition)
+    finally:
+        dashboard.tuya_ac._device = original
+
+    telemetry = result["telemetry"]
+    assert telemetry["temperature_unit"] == "C"
+    assert telemetry["current_humidity_pct"] is None
+    assert telemetry["sleep_label"] == "Standard"
+    assert telemetry["vertical_swing_label"] == "Upper"
+    assert telemetry["horizontal_position_label"] == "Slight right"
+    assert telemetry["generator_mode_label"] == "50%"
+    assert telemetry["eco"] is True
+    assert telemetry["display"] is True
+    assert telemetry["buzzer"] is True
+    assert telemetry["anti_mildew"] is True
+    assert telemetry["self_clean"] is False
+    assert telemetry["capabilities"]["vertical_positioning"] is True
+    assert telemetry["capabilities"]["self_clean"] is True
+    assert telemetry["fault_label"] == "No faults"
+    assert telemetry["statistics"] == {"t": 73, "s": False}
+    assert telemetry["service_value_136_raw"] == 61
+    assert telemetry["available_controls"]["horizontal_swing"] is True
+    assert telemetry["available_controls"]["eco_temperature_c"] is True
+    assert result["controls"]["generator_mode"][2] == {"value": "L2", "label": "50%"}
+
+
+def test_tuya_ac_advanced_flag_write_preserves_other_flags():
+    definition = dashboard.tuya_ac.AcDefinition(
+        "air-conditioner", "AC", "192.168.1.200", "device", "k" * 16,
+        "hw50w7qvxluhslkk", 3.3, 10, dict(dashboard.tuya_ac.DEFAULT_DPS),
+    )
+
+    class Device:
+        dps = {
+            "1": False, "2": 200, "3": 24, "4": "cold", "5": "auto",
+            "20": 0, "110": 0, "123": "0018",
+        }
+        writes = []
+
+        @classmethod
+        def status(cls):
+            return {"dps": dict(cls.dps)}
+
+        @classmethod
+        def set_value(cls, datapoint, value, nowait=False):
+            cls.writes.append((datapoint, value, nowait))
+            cls.dps[str(datapoint)] = value
+            return {"dps": {str(datapoint): value}}
+
+    original = dashboard.tuya_ac._device
+    dashboard.tuya_ac._device = lambda _definition: Device()
+    try:
+        result = dashboard.tuya_ac.write_setting(definition, "eco", True)
+    finally:
+        dashboard.tuya_ac._device = original
+
+    assert Device.writes == [(123, "0019", False)]
+    assert result["written"] is True
+    assert result["verified"] is True
+    assert result["after"] is True
+    assert result["device"]["telemetry"]["display"] is True
+    assert result["device"]["telemetry"]["buzzer"] is True
+
+
+def test_tuya_ac_rejects_self_cleaning_while_running():
+    definition = dashboard.tuya_ac.AcDefinition(
+        "air-conditioner", "AC", "192.168.1.200", "device", "k" * 16,
+        "product", 3.3, 10, dict(dashboard.tuya_ac.DEFAULT_DPS),
+    )
+
+    class Device:
+        @staticmethod
+        def status():
+            return {"dps": {"1": True, "20": 0, "110": 0, "123": "0018"}}
+
+    original = dashboard.tuya_ac._device
+    dashboard.tuya_ac._device = lambda _definition: Device()
+    try:
+        try:
+            dashboard.tuya_ac.write_setting(definition, "self_clean", True)
+        except ValueError as exc:
+            assert "only be started" in str(exc)
+        else:
+            raise AssertionError("self-cleaning was accepted while the AC was running")
+    finally:
+        dashboard.tuya_ac._device = original
+
+
+def test_ac_timer_is_persistent_and_executes_once():
+    ac = dashboard.tuya_ac.AcDefinition(
+        "air-conditioner", "AC", "192.168.1.200", "device", "k" * 16,
+        "product", 3.3, 10, dict(dashboard.tuya_ac.DEFAULT_DPS),
+    )
+    power = False
+
+    def ac_reader(definition):
+        return {**definition.public_identity(), "telemetry": {"on": power}}
+
+    def ac_power_writer(definition, enabled):
+        nonlocal power
+        before = power
+        power = enabled
+        return {
+            "written": before != enabled,
+            "verified": True,
+            "before": before,
+            "after": enabled,
+            "device": ac_reader(definition),
+        }
+
+    with tempfile.TemporaryDirectory() as directory:
+        schedule_file = Path(directory) / "ac-schedules.json"
+        state = dashboard.DashboardState(
+            dashboard.DashboardConfig(ac_schedule_file=schedule_file),
+            plug_inventory={},
+            ac_definition=ac,
+            ac_schedules=[],
+            ac_reader=ac_reader,
+            ac_power_writer=ac_power_writer,
+        )
+        timer = asyncio.run(state.create_ac_timer(15, True))
+        state.ac_schedules[0]["run_at"] = "2026-01-01T00:00:00Z"
+        completed = asyncio.run(state.run_due_ac_schedules(
+            dashboard.dt.datetime(2026, 1, 1, 0, 1, tzinfo=dashboard.dt.timezone.utc)
+        ))
+
+        assert timer["kind"] == "timer"
+        assert completed == 1
+        assert power is True
+        assert state.ac_schedules[0]["enabled"] is False
+        assert json.loads(schedule_file.read_text(encoding="utf-8"))[0]["last_run_at"]
+        assert schedule_file.stat().st_mode & 0o777 == 0o600
+
+
+def test_ac_reservation_validates_time_and_weekdays():
+    ac = dashboard.tuya_ac.AcDefinition(
+        "air-conditioner", "AC", "192.168.1.200", "device", "k" * 16,
+        "product", 3.3, 10, dict(dashboard.tuya_ac.DEFAULT_DPS),
+    )
+    with tempfile.TemporaryDirectory() as directory:
+        state = dashboard.DashboardState(
+            dashboard.DashboardConfig(ac_schedule_file=Path(directory) / "schedules.json"),
+            plug_inventory={}, ac_definition=ac, ac_schedules=[],
+        )
+        reservation = asyncio.run(state.create_ac_reservation("07:30", [4, 0, 4], False))
+        assert reservation["days"] == [0, 4]
+        try:
+            asyncio.run(state.create_ac_reservation("25:00", [0], True))
+        except ValueError as exc:
+            assert "HH:MM" in str(exc)
+        else:
+            raise AssertionError("an invalid reservation time was accepted")
+
+
 def test_polling_preserves_last_data_when_one_device_disappears():
     calls = {"daly": 0, "seplos": 0, "jk": 0}
 
@@ -527,6 +704,12 @@ def test_static_dashboard_is_english_and_renders_individual_cells():
     assert "async function applyIotPower(input)" in script
     assert 'window.confirm(`${enabled ? "Turn on" : "Turn off"}' not in script
     assert "async function applyAcSetting(setting, value)" in script
+    assert 'data-ac-select="${esc(setting)}"' in script
+    assert 'data-ac-toggle="${esc(setting)}"' in script
+    assert "Precision airflow" in script
+    assert "Self diagnostics and service" in script
+    assert "Timer and reservations" in script
+    assert "async function createAcReservation(button)" in script
     assert "Anenji and EASUN inverters" in index
     assert 'data-tab="inverter-control"' in index
     assert 'id="inverter-config-content"' in index

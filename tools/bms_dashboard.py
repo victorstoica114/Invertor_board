@@ -17,6 +17,7 @@ import re
 import sqlite3
 import time
 from typing import Any, Awaitable, Callable, Final, Mapping
+import uuid
 
 from aiohttp import web
 
@@ -44,6 +45,9 @@ INVERTER_VOLTAGE_MAX_AGE_SECONDS: Final[float] = 300.0
 INVERTER_VOLTAGE_PREFERRED_SOURCE_ID: Final[str] = "inverter-anenji"
 INVERTER_CONTROL_TIMEOUT_SECONDS: Final[float] = 12.0
 INVERTER_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+AC_RESERVATION_TIME_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"^(?:[01]\d|2[0-3]):[0-5]\d$"
+)
 
 TelemetryReader = Callable[[str], Awaitable[dict[str, Any]]]
 ProtocolReader = Callable[[], Awaitable[dict[str, Any]]]
@@ -61,6 +65,41 @@ InverterReader = Callable[[str, str, str, int, float], dict[str, Any]]
 
 def utc_now() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def load_ac_schedules(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        LOGGER.warning("cannot load AC schedules from %s: %s", path, exc)
+        return []
+    if not isinstance(payload, list):
+        LOGGER.warning("ignoring invalid AC schedule file %s", path)
+        return []
+    schedules = []
+    for item in payload:
+        if (
+            isinstance(item, dict)
+            and item.get("kind") in {"timer", "reservation"}
+            and isinstance(item.get("id"), str)
+            and isinstance(item.get("on"), bool)
+        ):
+            schedules.append(item)
+    return schedules[-32:]
+
+
+def save_ac_schedules(path: Path, schedules: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(schedules[-32:], indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    temporary.chmod(0o600)
+    temporary.replace(path)
+    path.chmod(0o600)
 
 
 def finite_number(value: Any) -> float | int | None:
@@ -330,6 +369,9 @@ class DashboardConfig:
     iot_poll_interval_seconds: float = 10.0
     plug_inventory: Path = Path.home() / ".config" / "iot-keys" / "xiaomi_plugs.json"
     ac_configuration: Path = Path.home() / ".config" / "iot-keys" / "tuya_ac.json"
+    ac_schedule_file: Path = Path(
+        "/var/lib/inverter-bms-dashboard/tuya_ac_schedules.json"
+    )
 
     @classmethod
     def from_env_and_args(cls, args: argparse.Namespace) -> "DashboardConfig":
@@ -373,6 +415,9 @@ class DashboardConfig:
         ac_configuration = Path(
             os.environ.get("BMS_DASHBOARD_AC_CONFIGURATION", str(cls.ac_configuration))
         ).expanduser()
+        ac_schedule_file = Path(
+            os.environ.get("BMS_DASHBOARD_AC_SCHEDULE_FILE", str(cls.ac_schedule_file))
+        ).expanduser()
         if not 1 <= port <= 65535:
             raise ValueError("port must be between 1 and 65535")
         if poll_interval < 5:
@@ -397,6 +442,7 @@ class DashboardConfig:
             iot_poll_interval_seconds=iot_poll_interval_seconds,
             plug_inventory=plug_inventory.resolve(),
             ac_configuration=ac_configuration.resolve(),
+            ac_schedule_file=ac_schedule_file.resolve(),
         )
 
 
@@ -423,6 +469,7 @@ class DashboardState:
         inverter_inventory_error: str | None = None,
         plug_inventory: Mapping[str, miot_plugs.PlugDefinition] | None = None,
         ac_definition: tuya_ac.AcDefinition | None = None,
+        ac_schedules: list[dict[str, Any]] | None = None,
     ) -> None:
         self.config = config
         self.telemetry_reader = telemetry_reader
@@ -441,10 +488,12 @@ class DashboardState:
         self.operation_lock = asyncio.Lock()
         self.inverter_operation_lock = asyncio.Lock()
         self.iot_operation_lock = asyncio.Lock()
+        self.ac_schedule_lock = asyncio.Lock()
         self.refresh_event = asyncio.Event()
         self.iot_refresh_event = asyncio.Event()
         self.poll_task: asyncio.Task[None] | None = None
         self.iot_poll_task: asyncio.Task[None] | None = None
+        self.ac_schedule_task: asyncio.Task[None] | None = None
         self.polling = False
         self.iot_polling = False
         self.generation = 0
@@ -541,6 +590,10 @@ class DashboardState:
                 LOGGER.warning("air-conditioner configuration unavailable: %s", exc)
                 self.ac_config_error = str(exc)
         self.ac_definition = ac_definition
+        self.ac_schedules = (
+            load_ac_schedules(config.ac_schedule_file)
+            if ac_schedules is None else copy.deepcopy(ac_schedules)
+        )
         self.air_conditioner: dict[str, Any] = {
             **(ac_definition.public_identity() if ac_definition else {
                 "id": "air-conditioner",
@@ -1019,7 +1072,161 @@ class DashboardState:
         self.iot_refresh_event.set()
         return result
 
+    async def create_ac_timer(self, minutes: Any, enabled: Any) -> dict[str, Any]:
+        if self.ac_definition is None:
+            raise LookupError("air conditioner is not configured")
+        if isinstance(minutes, bool) or not isinstance(minutes, int) or not 1 <= minutes <= 10080:
+            raise ValueError("timer minutes must be a whole number from 1 to 10080")
+        if not isinstance(enabled, bool):
+            raise ValueError("on must be a boolean")
+        run_at = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=minutes)
+        schedule = {
+            "id": uuid.uuid4().hex[:12],
+            "kind": "timer",
+            "on": enabled,
+            "run_at": run_at.isoformat(timespec="seconds").replace("+00:00", "Z"),
+            "enabled": True,
+            "created_at": utc_now(),
+            "last_run_at": None,
+            "last_error": None,
+        }
+        async with self.ac_schedule_lock:
+            updated = [*self.ac_schedules, schedule][-32:]
+            await asyncio.to_thread(
+                save_ac_schedules, self.config.ac_schedule_file, updated
+            )
+            self.ac_schedules = updated
+        return copy.deepcopy(schedule)
+
+    async def create_ac_reservation(
+        self, time_value: Any, days: Any, enabled: Any
+    ) -> dict[str, Any]:
+        if self.ac_definition is None:
+            raise LookupError("air conditioner is not configured")
+        time_text = str(time_value).strip()
+        if not AC_RESERVATION_TIME_PATTERN.fullmatch(time_text):
+            raise ValueError("reservation time must use HH:MM")
+        if (
+            not isinstance(days, list)
+            or not days
+            or any(isinstance(day, bool) or not isinstance(day, int) or not 0 <= day <= 6 for day in days)
+        ):
+            raise ValueError("reservation days must contain weekday numbers from 0 to 6")
+        if not isinstance(enabled, bool):
+            raise ValueError("on must be a boolean")
+        schedule = {
+            "id": uuid.uuid4().hex[:12],
+            "kind": "reservation",
+            "on": enabled,
+            "time": time_text,
+            "days": sorted(set(days)),
+            "enabled": True,
+            "created_at": utc_now(),
+            "last_run_at": None,
+            "last_run_local_date": None,
+            "last_error": None,
+        }
+        async with self.ac_schedule_lock:
+            updated = [*self.ac_schedules, schedule][-32:]
+            await asyncio.to_thread(
+                save_ac_schedules, self.config.ac_schedule_file, updated
+            )
+            self.ac_schedules = updated
+        return copy.deepcopy(schedule)
+
+    async def delete_ac_schedule(self, schedule_id: str) -> dict[str, Any]:
+        async with self.ac_schedule_lock:
+            for index, schedule in enumerate(self.ac_schedules):
+                if schedule.get("id") == schedule_id:
+                    removed = schedule
+                    updated = self.ac_schedules[:index] + self.ac_schedules[index + 1:]
+                    await asyncio.to_thread(
+                        save_ac_schedules, self.config.ac_schedule_file, updated
+                    )
+                    self.ac_schedules = updated
+                    return copy.deepcopy(removed)
+        raise KeyError(schedule_id)
+
+    @staticmethod
+    def _ac_schedule_due(schedule: Mapping[str, Any], now: dt.datetime) -> bool:
+        if not schedule.get("enabled", False):
+            return False
+        last_attempt = schedule.get("last_attempt_at")
+        if isinstance(last_attempt, str):
+            try:
+                parsed_attempt = dt.datetime.fromisoformat(last_attempt.replace("Z", "+00:00"))
+            except ValueError:
+                parsed_attempt = None
+            if parsed_attempt is not None and parsed_attempt.tzinfo is None:
+                parsed_attempt = parsed_attempt.replace(tzinfo=dt.timezone.utc)
+            if parsed_attempt is not None and now - parsed_attempt < dt.timedelta(seconds=60):
+                return False
+        if schedule.get("kind") == "timer":
+            run_at = schedule.get("run_at")
+            if not isinstance(run_at, str):
+                return False
+            try:
+                scheduled = dt.datetime.fromisoformat(run_at.replace("Z", "+00:00"))
+            except ValueError:
+                return False
+            if scheduled.tzinfo is None:
+                scheduled = scheduled.replace(tzinfo=dt.timezone.utc)
+            return scheduled <= now
+        if schedule.get("kind") != "reservation":
+            return False
+        local_now = now.astimezone()
+        return (
+            local_now.weekday() in schedule.get("days", [])
+            and schedule.get("time") == local_now.strftime("%H:%M")
+            and schedule.get("last_run_local_date") != local_now.date().isoformat()
+        )
+
+    async def run_due_ac_schedules(self, now: dt.datetime | None = None) -> int:
+        if self.ac_definition is None:
+            return 0
+        current = now or dt.datetime.now(dt.timezone.utc)
+        completed = 0
+        changed = False
+        async with self.ac_schedule_lock:
+            for schedule in self.ac_schedules:
+                if not self._ac_schedule_due(schedule, current):
+                    continue
+                schedule["last_attempt_at"] = current.isoformat(timespec="seconds").replace(
+                    "+00:00", "Z"
+                )
+                changed = True
+                try:
+                    await self.set_ac_power(bool(schedule["on"]))
+                except Exception as exc:
+                    schedule["last_error"] = f"{type(exc).__name__}: {exc}"
+                    LOGGER.error("AC schedule %s failed: %s", schedule.get("id"), exc)
+                else:
+                    schedule["last_run_at"] = utc_now()
+                    schedule["last_error"] = None
+                    completed += 1
+                    if schedule.get("kind") == "timer":
+                        schedule["enabled"] = False
+                    else:
+                        schedule["last_run_local_date"] = current.astimezone().date().isoformat()
+            if changed:
+                await asyncio.to_thread(
+                    save_ac_schedules, self.config.ac_schedule_file, self.ac_schedules
+                )
+        return completed
+
+    async def ac_schedule_loop(self) -> None:
+        while True:
+            try:
+                await self.run_due_ac_schedules()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                LOGGER.exception("AC schedule runner failed")
+            await asyncio.sleep(15)
+
     def public_iot_snapshot(self) -> dict[str, Any]:
+        air_conditioner = copy.deepcopy(self.air_conditioner)
+        air_conditioner["schedules"] = copy.deepcopy(self.ac_schedules)
         return {
             "polling": self.iot_polling,
             "generation": self.iot_generation,
@@ -1037,7 +1244,7 @@ class DashboardState:
                     for plug_id, samples in self.plug_history.items()
                 },
             },
-            "air_conditioner": copy.deepcopy(self.air_conditioner),
+            "air_conditioner": air_conditioner,
         }
 
     def public_snapshot(self) -> dict[str, Any]:
@@ -1168,7 +1375,7 @@ async def ac_setting_handler(request: web.Request) -> web.Response:
     except (ValueError, TypeError) as exc:
         raise web.HTTPBadRequest(text="invalid JSON body") from exc
     setting = str(body.get("setting", "")).strip()
-    if setting not in {"mode", "fan", "target_temperature_c"}:
+    if setting not in tuya_ac.WRITABLE_SETTINGS:
         raise web.HTTPBadRequest(text="unsupported air-conditioner setting")
     if "value" not in body:
         raise web.HTTPBadRequest(text="value is required")
@@ -1185,6 +1392,55 @@ async def ac_setting_handler(request: web.Request) -> web.Response:
         LOGGER.error("air-conditioner setting failed: setting=%s reason=%s", setting, exc)
         raise web.HTTPBadGateway(text=f"air-conditioner setting failed: {exc}") from exc
     return web.json_response({"ok": True, "result": result})
+
+
+async def ac_timer_handler(request: web.Request) -> web.Response:
+    state = dashboard_state(request)
+    try:
+        body = await request.json()
+    except (ValueError, TypeError) as exc:
+        raise web.HTTPBadRequest(text="invalid JSON body") from exc
+    try:
+        schedule = await state.create_ac_timer(body.get("minutes"), body.get("on"))
+    except LookupError as exc:
+        raise web.HTTPServiceUnavailable(text=str(exc)) from exc
+    except ValueError as exc:
+        raise web.HTTPBadRequest(text=str(exc)) from exc
+    except OSError as exc:
+        raise web.HTTPInternalServerError(text=f"cannot save AC timer: {exc}") from exc
+    return web.json_response({"ok": True, "schedule": schedule})
+
+
+async def ac_reservation_handler(request: web.Request) -> web.Response:
+    state = dashboard_state(request)
+    try:
+        body = await request.json()
+    except (ValueError, TypeError) as exc:
+        raise web.HTTPBadRequest(text="invalid JSON body") from exc
+    try:
+        schedule = await state.create_ac_reservation(
+            body.get("time"), body.get("days"), body.get("on")
+        )
+    except LookupError as exc:
+        raise web.HTTPServiceUnavailable(text=str(exc)) from exc
+    except ValueError as exc:
+        raise web.HTTPBadRequest(text=str(exc)) from exc
+    except OSError as exc:
+        raise web.HTTPInternalServerError(text=f"cannot save AC reservation: {exc}") from exc
+    return web.json_response({"ok": True, "schedule": schedule})
+
+
+async def ac_schedule_delete_handler(request: web.Request) -> web.Response:
+    schedule_id = request.match_info.get("schedule_id", "")
+    if not re.fullmatch(r"[a-f0-9]{12}", schedule_id):
+        raise web.HTTPNotFound(text="unknown AC schedule")
+    try:
+        removed = await dashboard_state(request).delete_ac_schedule(schedule_id)
+    except KeyError as exc:
+        raise web.HTTPNotFound(text="unknown AC schedule") from exc
+    except OSError as exc:
+        raise web.HTTPInternalServerError(text=f"cannot delete AC schedule: {exc}") from exc
+    return web.json_response({"ok": True, "schedule": removed})
 
 
 def bms_alias_for_request(request: web.Request) -> str:
@@ -1419,11 +1675,17 @@ async def start_background(app: web.Application) -> None:
     state.iot_poll_task = asyncio.create_task(
         state.iot_polling_loop(), name="iot-dashboard-poller"
     )
+    state.ac_schedule_task = asyncio.create_task(
+        state.ac_schedule_loop(), name="ac-schedule-runner"
+    )
 
 
 async def stop_background(app: web.Application) -> None:
     state = app[STATE_KEY]
-    tasks = [task for task in (state.poll_task, state.iot_poll_task) if task is not None]
+    tasks = [
+        task for task in (state.poll_task, state.iot_poll_task, state.ac_schedule_task)
+        if task is not None
+    ]
     for task in tasks:
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
@@ -1454,6 +1716,11 @@ def create_app(config: DashboardConfig, state: DashboardState | None = None) -> 
     app.router.add_post("/api/iot/plugs/{plug_id}/power", plug_power_handler)
     app.router.add_post("/api/iot/air-conditioner/power", ac_power_handler)
     app.router.add_post("/api/iot/air-conditioner/setting", ac_setting_handler)
+    app.router.add_post("/api/iot/air-conditioner/timers", ac_timer_handler)
+    app.router.add_post("/api/iot/air-conditioner/reservations", ac_reservation_handler)
+    app.router.add_delete(
+        "/api/iot/air-conditioner/schedules/{schedule_id}", ac_schedule_delete_handler
+    )
     app.router.add_get("/api/bms/{alias}/configuration", bms_configuration_handler)
     app.router.add_post("/api/bms/{alias}/setting", bms_setting_handler)
     app.router.add_get("/api/inverters/{inverter_id}/configuration", inverter_configuration_handler)

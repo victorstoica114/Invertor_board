@@ -247,7 +247,8 @@ function plugCard(device) {
 function controlLabel(value) {
   const labels = {
     auto: "Auto", cold: "Cool", hot: "Heat", wet: "Dry", wind: "Fan",
-    low: "Low", mid: "Medium", high: "High", strong: "Strong",
+    low: "Low", mid_low: "Medium low", mid: "Medium", mid_high: "Medium high",
+    high: "High", strong: "Turbo", mute: "Quiet", off: "Off",
   };
   return labels[value] || String(value).replaceAll("_", " ");
 }
@@ -256,6 +257,53 @@ function acSegment(setting, values, selected, enabled) {
   return `<div class="ac-segmented">${values.map((value) =>
     `<button class="${String(selected) === String(value) ? "active" : ""}" type="button" data-ac-setting="${esc(setting)}" data-ac-value="${esc(value)}" ${enabled ? "" : "disabled"}>${esc(controlLabel(value))}</button>`
   ).join("")}</div>`;
+}
+
+function acOptions(values) {
+  return (values || []).map((option) => typeof option === "object"
+    ? { value: String(option.value), label: String(option.label) }
+    : { value: String(option), label: controlLabel(option) });
+}
+
+function acSelect(setting, label, values, selected, enabled) {
+  const options = acOptions(values);
+  const selectedValue = selected === null || selected === undefined ? "" : String(selected);
+  return `<label class="ac-select-control">
+    <span>${esc(label)}</span>
+    <select data-ac-select="${esc(setting)}" ${enabled && options.length ? "" : "disabled"}>
+      ${selectedValue === "" ? '<option value="" selected>Unavailable</option>' : ""}
+      ${options.map((option) => `<option value="${esc(option.value)}" ${option.value === selectedValue ? "selected" : ""}>${esc(option.label)}</option>`).join("")}
+    </select>
+  </label>`;
+}
+
+function acToggle(setting, label, checked, enabled) {
+  return `<div class="ac-toggle-row">
+    <div><strong>${esc(label)}</strong><small>${checked === true ? "On" : checked === false ? "Off" : "Unavailable"}</small></div>
+    <label class="power-switch" title="${esc(label)}">
+      <input type="checkbox" data-ac-toggle="${esc(setting)}" ${checked ? "checked" : ""} ${enabled && typeof checked === "boolean" ? "" : "disabled"} aria-label="${esc(label)}">
+      <span aria-hidden="true"></span>
+    </label>
+  </div>`;
+}
+
+function acDiagnostic(label, value) {
+  const display = value === null || value === undefined || value === "" ? "—" : String(value);
+  return `<div><span>${esc(label)}</span><strong title="${esc(display)}">${esc(display)}</strong></div>`;
+}
+
+function acScheduleRow(schedule) {
+  const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const action = schedule.on ? "Turn on" : "Turn off";
+  const timing = schedule.kind === "timer"
+    ? new Date(schedule.run_at).toLocaleString("en-GB")
+    : `${schedule.time} · ${(schedule.days || []).map((day) => dayNames[day]).join(" ")}`;
+  const stateLabel = schedule.enabled ? "Active" : schedule.last_error ? "Failed" : "Completed";
+  return `<div class="ac-schedule-row ${schedule.enabled ? "active" : ""}">
+    <div><strong>${esc(action)}</strong><span>${esc(timing)}</span>${schedule.last_error ? `<small>${esc(schedule.last_error)}</small>` : ""}</div>
+    <span class="ac-schedule-state">${esc(stateLabel)}</span>
+    <button type="button" data-ac-delete-schedule="${esc(schedule.id)}" title="Delete schedule" aria-label="Delete schedule">×</button>
+  </div>`;
 }
 
 function renderAirConditioner(device) {
@@ -271,6 +319,23 @@ function renderAirConditioner(device) {
   const target = Number.isFinite(currentTarget) ? currentTarget : Number(temperature.minimum_c);
   const writable = canControl && !device.updating;
   const temperatureWritable = writable && Number.isFinite(currentTarget);
+  const available = telemetry.available_controls || {};
+  const canWrite = (setting) => writable && available[setting] !== false;
+  const activeCapabilities = Object.entries(telemetry.capabilities || {})
+    .filter(([, enabled]) => enabled)
+    .map(([name]) => controlLabel(name))
+    .join(", ");
+  const advancedSwitches = controls.advanced_switches || [];
+  const ecoTemperatures = Array.from({ length: 6 }, (_, index) => ({
+    value: 26 + index,
+    label: `${26 + index} °C`,
+  }));
+  const statistics = telemetry.statistics && typeof telemetry.statistics === "object"
+    ? JSON.stringify(telemetry.statistics)
+    : telemetry.statistics;
+  const schedules = [...(device.schedules || [])].reverse();
+  const reservationTime = new Date(Date.now() + 60 * 60 * 1000)
+    .toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
   $("#ac-control-content").innerHTML = `
     <section class="ac-overview">
       <div>
@@ -278,7 +343,11 @@ function renderAirConditioner(device) {
         <h4>${esc(device.name)}</h4>
         <p>${device.last_success ? `Last reading ${esc(new Date(device.last_success).toLocaleString("en-GB"))}` : "Waiting for local telemetry"}</p>
       </div>
-      <div class="ac-room-reading"><span>Room</span><strong>${esc(iotReading(telemetry.current_temperature_c, 1, "°C"))}</strong></div>
+      <div class="ac-overview-readings">
+        <div class="ac-room-reading"><span>Room</span><strong>${esc(iotReading(telemetry.current_temperature_c, 1, "°C"))}</strong></div>
+        <div class="ac-overview-metric"><span>Humidity</span><strong>${esc(iotReading(telemetry.current_humidity_pct, 0, "%"))}</strong></div>
+        <div class="ac-overview-metric"><span>Air quality</span><strong>${esc(telemetry.air_quality_label || "—")}</strong></div>
+      </div>
       <div class="ac-power-control"><span>${telemetry.on === true ? "On" : telemetry.on === false ? "Off" : "Power"}</span>${powerSwitch(device.id, device.name, canControl, telemetry.on === true, "ac")}</div>
     </section>
     <section class="ac-controls-panel">
@@ -298,6 +367,81 @@ function renderAirConditioner(device) {
         <div class="ac-control-title"><span>Fan speed</span><strong>${esc(controlLabel(telemetry.fan ?? "—"))}</strong></div>
         ${acSegment("fan", controls.fan_speeds || [], telemetry.fan, writable)}
       </div>
+    </section>
+    <section class="ac-feature-section">
+      <div class="ac-feature-heading"><span>Precision airflow</span><strong>Vertical and horizontal</strong></div>
+      <div class="ac-select-grid">
+        ${acSelect("vertical_swing", "Vertical sweep", controls.vertical_swing, telemetry.vertical_swing, canWrite("vertical_swing"))}
+        ${acSelect("vertical_position", "Vertical position", controls.vertical_position, telemetry.vertical_position, canWrite("vertical_position"))}
+        ${acSelect("horizontal_swing", "Horizontal sweep", controls.horizontal_swing, telemetry.horizontal_swing, canWrite("horizontal_swing"))}
+        ${acSelect("horizontal_position", "Horizontal position", controls.horizontal_position, telemetry.horizontal_position, canWrite("horizontal_position"))}
+      </div>
+    </section>
+    <section class="ac-feature-section">
+      <div class="ac-feature-heading"><span>Comfort and energy</span><strong>${esc(telemetry.sleep_label || "Sleep off")}</strong></div>
+      <div class="ac-select-grid">
+        ${acSelect("sleep", "Sleep profile", controls.sleep, telemetry.sleep, canWrite("sleep"))}
+        ${acSelect("generator_mode", "GEN mode", controls.generator_mode, telemetry.generator_mode, canWrite("generator_mode"))}
+        ${acSelect("energy_saving", "Electricity management", controls.energy_saving, telemetry.energy_saving, canWrite("energy_saving"))}
+        ${acSelect("eco_temperature_c", "ECO temperature", ecoTemperatures, telemetry.eco_temperature_c, canWrite("eco_temperature_c"))}
+      </div>
+    </section>
+    <section class="ac-feature-section">
+      <div class="ac-feature-heading"><span>Timer and reservations</span><strong>${schedules.filter((schedule) => schedule.enabled).length} active</strong></div>
+      <div class="ac-scheduler-grid">
+        <div class="ac-scheduler-control">
+          <strong>Relative timer</strong>
+          <div class="ac-scheduler-fields">
+            <select data-ac-timer-action aria-label="Timer action"><option value="off">Turn off</option><option value="on">Turn on</option></select>
+            <input type="number" data-ac-timer-minutes min="1" max="10080" step="1" value="60" aria-label="Timer minutes">
+            <span>min</span>
+            <button type="button" data-ac-create-timer ${device.configured ? "" : "disabled"}>Set timer</button>
+          </div>
+        </div>
+        <div class="ac-scheduler-control">
+          <strong>Weekly reservation</strong>
+          <div class="ac-scheduler-fields reservation">
+            <select data-ac-reservation-action aria-label="Reservation action"><option value="on">Turn on</option><option value="off">Turn off</option></select>
+            <input type="time" data-ac-reservation-time value="${esc(reservationTime)}" aria-label="Reservation time">
+            <button type="button" data-ac-create-reservation ${device.configured ? "" : "disabled"}>Add</button>
+          </div>
+          <div class="ac-day-selector">
+            ${["M", "T", "W", "T", "F", "S", "S"].map((day, index) => `<label title="${["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][index]}"><input type="checkbox" data-ac-reservation-day="${index}" checked><span>${day}</span></label>`).join("")}
+          </div>
+        </div>
+      </div>
+      <div class="ac-schedule-list">${schedules.length ? schedules.map(acScheduleRow).join("") : '<span class="ac-schedule-empty">No timers or reservations</span>'}</div>
+    </section>
+    <section class="ac-feature-section">
+      <div class="ac-feature-heading"><span>Advanced functions</span><strong>${advancedSwitches.filter((item) => telemetry[item.setting] === true).length} active</strong></div>
+      <div class="ac-toggle-grid">
+        ${advancedSwitches.map((item) => acToggle(
+          item.setting,
+          item.label,
+          telemetry[item.setting],
+          canWrite(item.setting) && !(item.setting === "self_clean" && telemetry.on === true),
+        )).join("")}
+        ${acToggle("hot_cold_air", "Hot/cold airflow", telemetry.hot_cold_air, canWrite("hot_cold_air"))}
+      </div>
+    </section>
+    <section class="ac-feature-section ac-diagnostics">
+      <div class="ac-feature-heading"><span>Self diagnostics and service</span><strong>${esc(telemetry.fault_label || "Unavailable")}</strong></div>
+      <div class="ac-diagnostic-grid">
+        ${acDiagnostic("Fault DP20", telemetry.fault_code)}
+        ${acDiagnostic("Secondary fault DP122", telemetry.fault_secondary_code)}
+        ${acDiagnostic("Filter", telemetry.filter_dirty === true ? "Service required" : telemetry.filter_dirty === false ? "Clean" : null)}
+        ${acDiagnostic("PM2.5", telemetry.pm25_ug_m3 === null || telemetry.pm25_ug_m3 === undefined ? null : `${telemetry.pm25_ug_m3} µg/m³`)}
+        ${acDiagnostic("Capability flags DP110", telemetry.capability_flags_raw)}
+        ${acDiagnostic("Advanced flags DP123", telemetry.advanced_flags_raw)}
+        ${acDiagnostic("Model code DP128", telemetry.model_code)}
+        ${acDiagnostic("Energy selector DP129", telemetry.energy_quota_raw)}
+        ${acDiagnostic("Swing action DP133", telemetry.swing_action_raw)}
+        ${acDiagnostic("Statistics DP134", statistics)}
+        ${acDiagnostic("Runtime DP135", telemetry.running_time_raw)}
+        ${acDiagnostic("Unmapped service DP136", telemetry.service_value_136_raw)}
+      </div>
+      <div class="ac-capabilities"><span>Reported capabilities</span><strong>${esc(activeCapabilities || "None reported")}</strong></div>
+      <details class="ac-raw-dps"><summary>Raw service datapoints</summary><pre>${esc(JSON.stringify(telemetry.raw_dps || {}, null, 2))}</pre></details>
     </section>
     ${!device.configured ? `<div class="ac-unavailable"><strong>Local control is not authenticated</strong><span>The panel is ready and will unlock after the Tuya local key is installed.</span></div>` : ""}
     ${device.configured && device.error ? `<div class="device-error">${esc(device.error)}</div>` : ""}`;
@@ -437,6 +581,60 @@ async function applyAcSetting(setting, value) {
   } finally {
     state.iotWriting.delete(device.id);
     renderIot(state.data);
+  }
+}
+
+async function createAcTimer(button) {
+  const root = $("#ac-control-content");
+  const minutes = Number(root.querySelector("[data-ac-timer-minutes]")?.value);
+  const on = root.querySelector("[data-ac-timer-action]")?.value === "on";
+  button.disabled = true;
+  try {
+    await api("/api/iot/air-conditioner/timers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ minutes, on }),
+    });
+    toast(`AC ${on ? "on" : "off"} timer saved.`);
+    await loadStatus();
+  } catch (error) {
+    toast(`Cannot save timer: ${error.message}`, true);
+    button.disabled = false;
+  }
+}
+
+async function createAcReservation(button) {
+  const root = $("#ac-control-content");
+  const time = root.querySelector("[data-ac-reservation-time]")?.value;
+  const on = root.querySelector("[data-ac-reservation-action]")?.value === "on";
+  const days = [...root.querySelectorAll("[data-ac-reservation-day]:checked")]
+    .map((input) => Number(input.dataset.acReservationDay));
+  button.disabled = true;
+  try {
+    await api("/api/iot/air-conditioner/reservations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ time, days, on }),
+    });
+    toast(`Weekly AC ${on ? "on" : "off"} reservation saved.`);
+    await loadStatus();
+  } catch (error) {
+    toast(`Cannot save reservation: ${error.message}`, true);
+    button.disabled = false;
+  }
+}
+
+async function deleteAcSchedule(button) {
+  button.disabled = true;
+  try {
+    await api(`/api/iot/air-conditioner/schedules/${encodeURIComponent(button.dataset.acDeleteSchedule)}`, {
+      method: "DELETE",
+    });
+    toast("AC schedule deleted.");
+    await loadStatus();
+  } catch (error) {
+    toast(`Cannot delete schedule: ${error.message}`, true);
+    button.disabled = false;
   }
 }
 
@@ -1095,10 +1293,35 @@ $("#iot-grid").addEventListener("change", (event) => {
   if (input) applyIotPower(input);
 });
 $("#ac-control-content").addEventListener("change", (event) => {
-  const input = event.target.closest('[data-iot-power][data-iot-kind="ac"]');
-  if (input) applyIotPower(input);
+  const powerInput = event.target.closest('[data-iot-power][data-iot-kind="ac"]');
+  if (powerInput) {
+    applyIotPower(powerInput);
+    return;
+  }
+  const toggle = event.target.closest("[data-ac-toggle]");
+  if (toggle) {
+    applyAcSetting(toggle.dataset.acToggle, toggle.checked);
+    return;
+  }
+  const select = event.target.closest("[data-ac-select]");
+  if (select) applyAcSetting(select.dataset.acSelect, select.value);
 });
 $("#ac-control-content").addEventListener("click", (event) => {
+  const timerButton = event.target.closest("[data-ac-create-timer]");
+  if (timerButton) {
+    createAcTimer(timerButton);
+    return;
+  }
+  const reservationButton = event.target.closest("[data-ac-create-reservation]");
+  if (reservationButton) {
+    createAcReservation(reservationButton);
+    return;
+  }
+  const deleteScheduleButton = event.target.closest("[data-ac-delete-schedule]");
+  if (deleteScheduleButton) {
+    deleteAcSchedule(deleteScheduleButton);
+    return;
+  }
   const settingButton = event.target.closest("[data-ac-setting]");
   if (settingButton) {
     applyAcSetting(settingButton.dataset.acSetting, settingButton.dataset.acValue);

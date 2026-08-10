@@ -16,14 +16,133 @@ import tinytuya
 DEVICE_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 DEFAULT_DPS: Final[dict[str, str]] = {
     "power": "1",
+    "target_temperature": "2",
+    "current_temperature": "3",
     "mode": "4",
     "fan": "5",
-    "temperature_unit": "19",
-    "current_temperature": "23",
-    "target_temperature": "24",
+    "current_humidity": "18",
+    "fault": "20",
+    "pm25": "101",
+    "sleep": "105",
+    "capability_flags": "110",
+    "vertical_swing": "113",
+    "horizontal_swing": "114",
+    "energy_saving": "119",
+    "generator_mode": "120",
+    "fault_secondary": "122",
+    "advanced_flags": "123",
+    "air_quality": "125",
+    "vertical_position": "126",
+    "horizontal_position": "127",
+    "model_code": "128",
+    "energy_quota": "129",
+    "eco_temperature": "130",
+    "filter_dirty": "131",
+    "hot_cold_air": "132",
+    "swing_action": "133",
+    "statistics": "134",
+    "running_time": "135",
+    "service_value": "136",
 }
 DEFAULT_MODE_VALUES: Final[tuple[str, ...]] = ("auto", "cold", "hot", "wet", "wind")
-DEFAULT_FAN_VALUES: Final[tuple[str, ...]] = ("auto", "low", "mid", "high")
+DEFAULT_FAN_VALUES: Final[tuple[str, ...]] = (
+    "strong", "high", "mid_high", "mid", "mid_low", "low", "mute", "auto"
+)
+DEFAULT_SLEEP_VALUES: Final[tuple[str, ...]] = ("off", "normal", "old", "child")
+DEFAULT_VERTICAL_SWING_VALUES: Final[tuple[str, ...]] = ("0", "1", "2", "3")
+DEFAULT_HORIZONTAL_SWING_VALUES: Final[tuple[str, ...]] = (
+    "0", "1", "2", "3", "4", "5", "6", "7"
+)
+DEFAULT_VERTICAL_POSITION_VALUES: Final[tuple[str, ...]] = ("0", "1", "2", "3", "4", "5")
+DEFAULT_HORIZONTAL_POSITION_VALUES: Final[tuple[str, ...]] = ("0", "1", "2", "3", "4", "5")
+DEFAULT_ENERGY_SAVING_VALUES: Final[tuple[str, ...]] = ("0", "1", "2", "3")
+DEFAULT_GENERATOR_MODE_VALUES: Final[tuple[str, ...]] = ("off", "L1", "L2", "L3")
+
+OPTION_LABELS: Final[dict[str, dict[str, str]]] = {
+    "sleep": {"off": "Off", "normal": "Standard", "old": "Elderly", "child": "Child"},
+    "vertical_swing": {"0": "Off", "1": "Full", "2": "Upper", "3": "Lower"},
+    "horizontal_swing": {
+        "0": "Off", "1": "Full", "2": "Left", "3": "Center", "4": "Right",
+        "5": "Slight left", "6": "Slight right", "7": "Wide angle",
+    },
+    "vertical_position": {
+        "0": "Hold current", "1": "Top", "2": "Slightly up", "3": "Middle",
+        "4": "Slightly down", "5": "Bottom",
+    },
+    "horizontal_position": {
+        "0": "Hold current", "1": "Leftmost", "2": "Slight left", "3": "Center",
+        "4": "Slight right", "5": "Rightmost",
+    },
+    "energy_saving": {
+        "0": "Off", "1": "Automatic", "2": "Power limit", "3": "Temperature limit",
+    },
+    "generator_mode": {"off": "Off", "L1": "30%", "L2": "50%", "L3": "80%"},
+}
+
+ADVANCED_FLAGS: Final[dict[str, int]] = {
+    "eco": 0x0001,
+    "self_clean": 0x0004,
+    "display": 0x0008,
+    "buzzer": 0x0010,
+    "health": 0x0020,
+    "anti_mildew": 0x0100,
+    "anti_frost": 0x1000,
+    "soft_wind": 0x8000,
+}
+ADVANCED_FLAG_LABELS: Final[dict[str, str]] = {
+    "eco": "ECO",
+    "display": "Display",
+    "buzzer": "Buzzer",
+    "anti_mildew": "Anti-mildew",
+    "health": "Health",
+    "self_clean": "Self-cleaning",
+    "anti_frost": "8 C heating",
+    "soft_wind": "Soft airflow",
+}
+CAPABILITY_FLAGS: Final[dict[str, int]] = {
+    "dry_temperature_control": 0,
+    "fan_temperature_control": 1,
+    "auto_temperature_control": 2,
+    "fresh_air_volume": 3,
+    "vertical_positioning": 4,
+    "horizontal_positioning": 5,
+    "light_sensor": 6,
+    "anti_mildew": 7,
+    "humidity_sensor": 8,
+    "self_clean": 9,
+    "energy_saving": 10,
+    "power_statistics": 11,
+    "generator_mode": 12,
+    "hot_cold_air": 13,
+    "air_quality": 14,
+    "anti_frost": 17,
+    "filter_dirty": 18,
+    "pm25": 20,
+    "fahrenheit": 21,
+    "soft_wind": 22,
+    "wide_horizontal_positioning": 23,
+    "fresh_air": 24,
+}
+AIR_QUALITY_LABELS: Final[dict[str, str]] = {
+    "great": "Excellent", "good": "Good", "middle": "Moderate", "bad": "Poor",
+    "varybad": "Severe",
+}
+ENUM_SETTING_ATTRIBUTES: Final[dict[str, str]] = {
+    "mode": "mode_values",
+    "fan": "fan_values",
+    "sleep": "sleep_values",
+    "vertical_swing": "vertical_swing_values",
+    "horizontal_swing": "horizontal_swing_values",
+    "vertical_position": "vertical_position_values",
+    "horizontal_position": "horizontal_position_values",
+    "energy_saving": "energy_saving_values",
+    "generator_mode": "generator_mode_values",
+}
+WRITABLE_SETTINGS: Final[frozenset[str]] = frozenset({
+    "mode", "fan", "target_temperature_c", "sleep", "vertical_swing",
+    "horizontal_swing", "vertical_position", "horizontal_position", "energy_saving",
+    "generator_mode", "eco_temperature_c", "hot_cold_air", *ADVANCED_FLAGS,
+})
 
 
 class TuyaAcError(RuntimeError):
@@ -48,6 +167,18 @@ class AcDefinition:
     temperature_step_c: float = 1.0
     current_temperature_scale: float | None = None
     target_temperature_scale: float | None = None
+    sleep_values: tuple[str, ...] = DEFAULT_SLEEP_VALUES
+    vertical_swing_values: tuple[str, ...] = DEFAULT_VERTICAL_SWING_VALUES
+    horizontal_swing_values: tuple[str, ...] = DEFAULT_HORIZONTAL_SWING_VALUES
+    vertical_position_values: tuple[str, ...] = DEFAULT_VERTICAL_POSITION_VALUES
+    horizontal_position_values: tuple[str, ...] = DEFAULT_HORIZONTAL_POSITION_VALUES
+    energy_saving_values: tuple[str, ...] = DEFAULT_ENERGY_SAVING_VALUES
+    generator_mode_values: tuple[str, ...] = DEFAULT_GENERATOR_MODE_VALUES
+
+    @staticmethod
+    def _options(setting: str, values: tuple[str, ...]) -> list[dict[str, str]]:
+        labels = OPTION_LABELS.get(setting, {})
+        return [{"value": value, "label": labels.get(value, value)} for value in values]
 
     def public_identity(self) -> dict[str, Any]:
         return {
@@ -64,6 +195,30 @@ class AcDefinition:
                     "maximum_c": self.maximum_temperature_c,
                     "step_c": self.temperature_step_c,
                 },
+                "sleep": self._options("sleep", self.sleep_values),
+                "vertical_swing": self._options(
+                    "vertical_swing", self.vertical_swing_values
+                ),
+                "horizontal_swing": self._options(
+                    "horizontal_swing", self.horizontal_swing_values
+                ),
+                "vertical_position": self._options(
+                    "vertical_position", self.vertical_position_values
+                ),
+                "horizontal_position": self._options(
+                    "horizontal_position", self.horizontal_position_values
+                ),
+                "energy_saving": self._options(
+                    "energy_saving", self.energy_saving_values
+                ),
+                "generator_mode": self._options(
+                    "generator_mode", self.generator_mode_values
+                ),
+                "eco_temperature": {"minimum_c": 26, "maximum_c": 31, "step_c": 1},
+                "advanced_switches": [
+                    {"setting": setting, "label": ADVANCED_FLAG_LABELS[setting]}
+                    for setting in ADVANCED_FLAGS
+                ],
             },
         }
 
@@ -117,6 +272,25 @@ def load_config(path: Path) -> AcDefinition:
 
     mode_values = string_options("modes", DEFAULT_MODE_VALUES)
     fan_values = string_options("fan_speeds", DEFAULT_FAN_VALUES)
+    sleep_values = string_options("sleep", DEFAULT_SLEEP_VALUES)
+    vertical_swing_values = string_options(
+        "vertical_swing", DEFAULT_VERTICAL_SWING_VALUES
+    )
+    horizontal_swing_values = string_options(
+        "horizontal_swing", DEFAULT_HORIZONTAL_SWING_VALUES
+    )
+    vertical_position_values = string_options(
+        "vertical_position", DEFAULT_VERTICAL_POSITION_VALUES
+    )
+    horizontal_position_values = string_options(
+        "horizontal_position", DEFAULT_HORIZONTAL_POSITION_VALUES
+    )
+    energy_saving_values = string_options(
+        "energy_saving", DEFAULT_ENERGY_SAVING_VALUES
+    )
+    generator_mode_values = string_options(
+        "generator_mode", DEFAULT_GENERATOR_MODE_VALUES
+    )
     raw_temperature = raw_controls.get("temperature", {})
     if not isinstance(raw_temperature, dict):
         raise TuyaAcError("controls.temperature must be an object")
@@ -166,6 +340,13 @@ def load_config(path: Path) -> AcDefinition:
         temperature_step_c=temperature_step_c,
         current_temperature_scale=current_temperature_scale,
         target_temperature_scale=target_temperature_scale,
+        sleep_values=sleep_values,
+        vertical_swing_values=vertical_swing_values,
+        horizontal_swing_values=horizontal_swing_values,
+        vertical_position_values=vertical_position_values,
+        horizontal_position_values=horizontal_position_values,
+        energy_saving_values=energy_saving_values,
+        generator_mode_values=generator_mode_values,
     )
 
 
@@ -197,6 +378,56 @@ def _temperature_scale(definition: AcDefinition, field: str) -> float:
     return definition.temperature_scale if configured is None else configured
 
 
+def _integer(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value.strip(), 10)
+        except ValueError:
+            return None
+    return None
+
+
+def _hex_flags(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value.strip(), 16)
+        except ValueError:
+            return None
+    return None
+
+
+def _json_value(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value
+
+
+def _number_or_none(value: Any) -> int | float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return value
+
+
+def _option_label(setting: str, value: Any) -> str | None:
+    if value is None:
+        return None
+    raw = str(value)
+    return OPTION_LABELS.get(setting, {}).get(raw, raw)
+
+
 def read_ac(definition: AcDefinition) -> dict[str, Any]:
     """Read the AC status and expose both mapped fields and non-secret raw DPS."""
     try:
@@ -211,11 +442,46 @@ def read_ac(definition: AcDefinition) -> dict[str, Any]:
     if not isinstance(raw_dps, dict):
         raise TuyaAcError("device response does not contain datapoints")
     dps = {str(key): value for key, value in raw_dps.items()}
+    capability_raw = _integer(_mapped_value(dps, definition, "capability_flags"))
+    advanced_raw_value = _mapped_value(dps, definition, "advanced_flags")
+    advanced_raw = _hex_flags(advanced_raw_value)
+    capabilities = {
+        name: bool(capability_raw & (1 << bit)) if capability_raw is not None else None
+        for name, bit in CAPABILITY_FLAGS.items()
+    }
+    advanced = {
+        name: bool(advanced_raw & mask) if advanced_raw is not None else None
+        for name, mask in ADVANCED_FLAGS.items()
+    }
+    explicit_temperature_unit = _mapped_value(dps, definition, "temperature_unit")
+    if explicit_temperature_unit is None:
+        temperature_unit = "F" if capabilities["fahrenheit"] else "C"
+    else:
+        temperature_unit = str(explicit_temperature_unit).upper()
+    fault_code = _integer(_mapped_value(dps, definition, "fault"))
+    fault_secondary = _integer(_mapped_value(dps, definition, "fault_secondary"))
+    active_faults = [value for value in (fault_code, fault_secondary) if value not in (None, 0)]
+    fault_label = "No faults" if not active_faults else ", ".join(
+        f"0x{value:X}" for value in active_faults
+    )
+    current_humidity = _number_or_none(_mapped_value(dps, definition, "current_humidity"))
+    if current_humidity == 0:
+        current_humidity = None
+    datapoint_names = {
+        "target_temperature_c": "target_temperature",
+        "eco_temperature_c": "eco_temperature",
+    }
+    available_controls = {
+        setting: definition.dps.get(datapoint_names.get(setting, setting), "") in dps
+        for setting in WRITABLE_SETTINGS - ADVANCED_FLAGS.keys()
+    }
+    available_controls.update({setting: advanced_raw is not None for setting in ADVANCED_FLAGS})
+    air_quality = _mapped_value(dps, definition, "air_quality")
     telemetry = {
         "on": _mapped_value(dps, definition, "power"),
         "mode": _mapped_value(dps, definition, "mode"),
         "fan": _mapped_value(dps, definition, "fan"),
-        "temperature_unit": _mapped_value(dps, definition, "temperature_unit"),
+        "temperature_unit": temperature_unit,
         "current_temperature_c": _temperature(
             _mapped_value(dps, definition, "current_temperature"),
             _temperature_scale(definition, "current"),
@@ -224,6 +490,56 @@ def read_ac(definition: AcDefinition) -> dict[str, Any]:
             _mapped_value(dps, definition, "target_temperature"),
             _temperature_scale(definition, "target"),
         ),
+        "current_humidity_pct": current_humidity,
+        "sleep": _mapped_value(dps, definition, "sleep"),
+        "sleep_label": _option_label("sleep", _mapped_value(dps, definition, "sleep")),
+        "vertical_swing": _mapped_value(dps, definition, "vertical_swing"),
+        "vertical_swing_label": _option_label(
+            "vertical_swing", _mapped_value(dps, definition, "vertical_swing")
+        ),
+        "horizontal_swing": _mapped_value(dps, definition, "horizontal_swing"),
+        "horizontal_swing_label": _option_label(
+            "horizontal_swing", _mapped_value(dps, definition, "horizontal_swing")
+        ),
+        "vertical_position": _mapped_value(dps, definition, "vertical_position"),
+        "vertical_position_label": _option_label(
+            "vertical_position", _mapped_value(dps, definition, "vertical_position")
+        ),
+        "horizontal_position": _mapped_value(dps, definition, "horizontal_position"),
+        "horizontal_position_label": _option_label(
+            "horizontal_position", _mapped_value(dps, definition, "horizontal_position")
+        ),
+        "energy_saving": _mapped_value(dps, definition, "energy_saving"),
+        "energy_saving_label": _option_label(
+            "energy_saving", _mapped_value(dps, definition, "energy_saving")
+        ),
+        "generator_mode": _mapped_value(dps, definition, "generator_mode"),
+        "generator_mode_label": _option_label(
+            "generator_mode", _mapped_value(dps, definition, "generator_mode")
+        ),
+        "eco_temperature_c": _number_or_none(
+            _mapped_value(dps, definition, "eco_temperature")
+        ),
+        "hot_cold_air": _mapped_value(dps, definition, "hot_cold_air"),
+        "air_quality": air_quality,
+        "air_quality_label": AIR_QUALITY_LABELS.get(str(air_quality), str(air_quality))
+        if air_quality is not None else None,
+        "pm25_ug_m3": _number_or_none(_mapped_value(dps, definition, "pm25")),
+        "filter_dirty": _mapped_value(dps, definition, "filter_dirty"),
+        "fault_code": fault_code,
+        "fault_secondary_code": fault_secondary,
+        "fault_label": fault_label,
+        "capability_flags_raw": capability_raw,
+        "capabilities": capabilities,
+        "advanced_flags_raw": advanced_raw_value,
+        **advanced,
+        "available_controls": available_controls,
+        "model_code": _mapped_value(dps, definition, "model_code"),
+        "energy_quota_raw": _mapped_value(dps, definition, "energy_quota"),
+        "swing_action_raw": _mapped_value(dps, definition, "swing_action"),
+        "statistics": _json_value(_mapped_value(dps, definition, "statistics")),
+        "running_time_raw": _mapped_value(dps, definition, "running_time"),
+        "service_value_136_raw": _mapped_value(dps, definition, "service_value"),
         "raw_dps": dps,
     }
     return {**definition.public_identity(), "telemetry": telemetry}
@@ -234,16 +550,12 @@ def _normalized_setting(definition: AcDefinition, setting: str, value: Any) -> t
         if not isinstance(value, bool):
             raise ValueError("power must be a boolean")
         return "on", value, value
-    if setting == "mode":
+    if setting in ENUM_SETTING_ATTRIBUTES:
         requested = str(value)
-        if requested not in definition.mode_values:
-            raise ValueError("unsupported air-conditioner mode")
-        return "mode", requested, requested
-    if setting == "fan":
-        requested = str(value)
-        if requested not in definition.fan_values:
-            raise ValueError("unsupported air-conditioner fan speed")
-        return "fan", requested, requested
+        allowed = getattr(definition, ENUM_SETTING_ATTRIBUTES[setting])
+        if requested not in allowed:
+            raise ValueError(f"unsupported air-conditioner {setting.replace('_', ' ')}")
+        return setting, requested, requested
     if setting == "target_temperature_c":
         if isinstance(value, bool):
             raise ValueError("target temperature must be a number")
@@ -261,6 +573,20 @@ def _normalized_setting(definition: AcDefinition, setting: str, value: Any) -> t
         raw = requested * _temperature_scale(definition, "target")
         raw_value: int | float = int(raw) if raw.is_integer() else raw
         return "target_temperature_c", requested, raw_value
+    if setting == "eco_temperature_c":
+        if isinstance(value, bool):
+            raise ValueError("ECO temperature must be a number")
+        try:
+            requested = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("ECO temperature must be a number") from exc
+        if not 26 <= requested <= 31 or not requested.is_integer():
+            raise ValueError("ECO temperature must be a whole number from 26 to 31 C")
+        return "eco_temperature_c", int(requested), int(requested)
+    if setting == "hot_cold_air" or setting in ADVANCED_FLAGS:
+        if not isinstance(value, bool):
+            raise ValueError(f"{setting.replace('_', ' ')} must be a boolean")
+        return setting, value, value
     raise ValueError("unsupported air-conditioner setting")
 
 
@@ -275,10 +601,22 @@ def write_setting(definition: AcDefinition, setting: str, value: Any) -> dict[st
     telemetry_key, requested, raw_value = _normalized_setting(definition, setting, value)
     before_device = read_ac(definition)
     before = before_device["telemetry"].get(telemetry_key)
-    if not _values_match(before, requested):
-        datapoint_name = "power" if setting == "power" else (
-            "target_temperature" if setting == "target_temperature_c" else setting
+    datapoint_name = "power" if setting == "power" else (
+        "target_temperature" if setting == "target_temperature_c" else (
+            "eco_temperature" if setting == "eco_temperature_c" else setting
         )
+    )
+    if setting in ADVANCED_FLAGS:
+        if setting == "self_clean" and requested and before_device["telemetry"].get("on"):
+            raise ValueError("self-cleaning can only be started while the air conditioner is off")
+        advanced_raw = _hex_flags(before_device["telemetry"].get("advanced_flags_raw"))
+        if advanced_raw is None:
+            raise TuyaAcError("advanced-function flags are unavailable")
+        mask = ADVANCED_FLAGS[setting]
+        updated_flags = advanced_raw | mask if requested else advanced_raw & ~mask
+        raw_value = f"{updated_flags:04x}"
+        datapoint_name = "advanced_flags"
+    if not _values_match(before, requested):
         try:
             response = _device(definition).set_value(
                 int(definition.dps[datapoint_name]), raw_value, nowait=False
