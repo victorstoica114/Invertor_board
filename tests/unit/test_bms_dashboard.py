@@ -44,12 +44,228 @@ def test_lan_control_handlers_do_not_require_an_additional_token():
     assert all("require_control" not in inspect.getsource(handler) for handler in handlers)
 
 
+def test_csp_allows_dynamic_chart_styles_but_not_inline_scripts():
+    source = inspect.getsource(dashboard.response_headers)
+    assert "style-src 'self' 'unsafe-inline'" in source
+    assert "script-src 'self'" in source
+    assert "script-src 'self' 'unsafe-inline'" not in source
+
+
 def test_config_validates_intervals():
     args = argparse.Namespace(host="127.0.0.1", port=9000, poll_interval=12.0)
     config = dashboard.DashboardConfig.from_env_and_args(args)
     assert config.host == "127.0.0.1"
     assert config.port == 9000
     assert config.poll_interval_seconds == 12.0
+
+
+def test_iot_polling_and_power_write_keep_secrets_out_of_snapshot():
+    plug = dashboard.miot_plugs.PlugDefinition(
+        "boiler", "Boiler", "192.168.1.207", "a" * 32
+    )
+    ac = dashboard.tuya_ac.AcDefinition(
+        "air-conditioner",
+        "Air conditioner",
+        "192.168.1.200",
+        "device-id",
+        "b" * 16,
+        "product-id",
+        3.3,
+        10,
+        dict(dashboard.tuya_ac.DEFAULT_DPS),
+    )
+    plug_on = False
+
+    def plug_reader(definition):
+        return {
+            **definition.public_identity(),
+            "telemetry": {
+                "on": plug_on,
+                "electric_power_w": 17.5,
+                "energy_counter": 2.25,
+                "fault_label": "No faults",
+            },
+        }
+
+    def plug_writer(definition, enabled):
+        nonlocal plug_on
+        before = plug_on
+        plug_on = enabled
+        return {
+            "written": before != enabled,
+            "verified": True,
+            "before": before,
+            "after": enabled,
+            "device": plug_reader(definition),
+        }
+
+    def ac_reader(definition):
+        return {
+            **definition.public_identity(),
+            "telemetry": {
+                "on": True,
+                "mode": "cold",
+                "fan": "auto",
+                "current_temperature_c": 24.2,
+                "target_temperature_c": 22.0,
+                "raw_dps": {"1": True},
+            },
+        }
+
+    state = dashboard.DashboardState(
+        dashboard.DashboardConfig(),
+        plug_inventory={"boiler": plug},
+        ac_definition=ac,
+        plug_reader=plug_reader,
+        plug_power_writer=plug_writer,
+        ac_reader=ac_reader,
+    )
+    assert asyncio.run(state.poll_iot_once()) is True
+    result = asyncio.run(state.set_plug_power("boiler", True))
+    snapshot = state.public_snapshot()
+
+    assert result["verified"] is True
+    assert snapshot["iot"]["plugs"]["devices"]["boiler"]["online"] is True
+    assert snapshot["iot"]["plugs"]["devices"]["boiler"]["telemetry"]["on"] is True
+    plug_telemetry = snapshot["iot"]["plugs"]["devices"]["boiler"]["telemetry"]
+    assert plug_telemetry["voltage_v"] == 230.0
+    assert plug_telemetry["voltage_source"] == "configured_fallback"
+    assert plug_telemetry["estimated_current_a"] == round(17.5 / 230, 4)
+    assert snapshot["iot"]["air_conditioner"]["online"] is True
+    assert len(snapshot["iot"]["plugs"]["history"]["boiler"]) == 2
+    serialized = json.dumps(snapshot)
+    assert "a" * 32 not in serialized
+    assert "b" * 16 not in serialized
+
+
+def test_private_iot_config_files_require_mode_0600():
+    with tempfile.TemporaryDirectory() as directory:
+        plug_path = Path(directory) / "plugs.json"
+        plug_path.write_text(json.dumps({"devices": [{
+            "id": "boiler",
+            "name": "Boiler",
+            "ip": "192.168.1.207",
+            "token": "a" * 32,
+            "model": "cuco.plug.v2eur",
+        }]}), encoding="utf-8")
+        plug_path.chmod(0o644)
+        try:
+            dashboard.miot_plugs.load_inventory(plug_path)
+        except dashboard.miot_plugs.MiotPlugError as exc:
+            assert "0600" in str(exc)
+        else:
+            raise AssertionError("world-readable plug inventory was accepted")
+
+        plug_path.chmod(0o600)
+        inventory = dashboard.miot_plugs.load_inventory(plug_path)
+        assert inventory["boiler"].ip == "192.168.1.207"
+
+
+def test_voltage_reference_uses_freshest_valid_inverter_output():
+    original = dashboard.read_inverter_snapshot
+    dashboard.read_inverter_snapshot = lambda *_args, **_kwargs: {
+        "available": True,
+        "error": None,
+        "devices": {
+            "old": {
+                "id": "old",
+                "name": "Old inverter",
+                "age_seconds": 350,
+                "last_sample": "old",
+                "telemetry": {"output_voltage_v": 229.0, "grid_voltage_v": 228.0},
+            },
+            "fresh": {
+                "id": "fresh",
+                "name": "Fresh inverter",
+                "age_seconds": 8,
+                "last_sample": "now",
+                "telemetry": {"output_voltage_v": 232.4, "grid_voltage_v": 231.0},
+            },
+        },
+    }
+    try:
+        reference = dashboard.read_inverter_voltage_reference(Path("unused"))
+    finally:
+        dashboard.read_inverter_snapshot = original
+    assert reference == {
+        "available": True,
+        "voltage_v": 232.4,
+        "source_id": "fresh",
+        "source_name": "Fresh inverter",
+        "sampled_at": "now",
+        "age_seconds": 8.0,
+        "measurement": "output_voltage_v",
+        "error": None,
+    }
+
+
+def test_direct_inverter_polling_exposes_live_output_without_database_writes():
+    calls = []
+
+    def inverter_reader(protocol, inverter_ip, local_ip, local_port, timeout):
+        calls.append((protocol, inverter_ip, local_ip, local_port, timeout))
+        return {
+            "protocol": "ANENJI_MODBUS_201_234",
+            "working_mode": "OFF_GRID",
+            "output_voltage_v": 230.3,
+            "output_frequency_hz": 50.0,
+            "output_power_w": 209.0,
+            "grid_voltage_v": 0.0,
+            "grid_frequency_hz": 0.0,
+        }
+
+    inventory = {
+        "inverter-anenji": {
+            "id": "inverter-anenji",
+            "name": "Anenji",
+            "protocol": "anenji_modbus",
+            "mac": "34:5f:45:48:cf:15",
+            "ip": "192.168.1.18",
+            "local_ip": "192.168.1.44",
+            "local_port": 8899,
+            "linked_board_id": "inverter-board-2",
+        }
+    }
+    with tempfile.TemporaryDirectory() as directory:
+        database = Path(directory) / "must-not-be-created.sqlite3"
+        state = dashboard.DashboardState(
+            dashboard.DashboardConfig(telemetry_database=database),
+            inverter_reader=inverter_reader,
+            inverter_inventory=inventory,
+            plug_inventory={},
+        )
+        assert asyncio.run(state.poll_iot_once()) is True
+        snapshot = state.public_snapshot()
+
+        assert not database.exists()
+    device = snapshot["inverters"]["devices"]["inverter-anenji"]
+    assert calls == [("anenji_modbus", "192.168.1.18", "192.168.1.44", 8899, 12.0)]
+    assert snapshot["inverters"]["source"] == "direct_lan"
+    assert device["online"] is True
+    assert device["stale"] is False
+    assert device["telemetry"]["output_voltage_v"] == 230.3
+    assert device["telemetry"]["grid_voltage_v"] == 0.0
+    assert snapshot["iot"]["inverter_voltage_reference"]["voltage_v"] == 230.3
+    assert snapshot["iot"]["inverter_voltage_reference"]["measurement"] == "output_voltage_v"
+
+
+def test_tuya_ac_setting_validation_uses_configured_limits_and_options():
+    definition = dashboard.tuya_ac.AcDefinition(
+        "air-conditioner", "AC", "192.168.1.200", "device", "k" * 16,
+        "product", 3.3, 10, dict(dashboard.tuya_ac.DEFAULT_DPS),
+    )
+    assert dashboard.tuya_ac._normalized_setting(
+        definition, "target_temperature_c", 22
+    ) == ("target_temperature_c", 22.0, 220)
+    assert dashboard.tuya_ac._normalized_setting(
+        definition, "mode", "cold"
+    ) == ("mode", "cold", "cold")
+    try:
+        dashboard.tuya_ac._normalized_setting(definition, "mode", "unsupported")
+    except ValueError as exc:
+        assert "unsupported" in str(exc)
+    else:
+        raise AssertionError("an unsupported AC mode was accepted")
 
 
 def test_polling_preserves_last_data_when_one_device_disappears():
@@ -159,11 +375,21 @@ def test_static_dashboard_is_english_and_renders_individual_cells():
     assert 'data-tab="inverters"' in index
     assert 'id="inverter-grid"' in index
     assert "function renderInverters(data)" in script
+    assert 'data-tab="iot"' in index
+    assert 'data-tab="air-conditioner"' in index
+    assert 'id="ac-control-content"' in index
+    assert 'id="iot-power-chart"' in index
+    assert "function renderIot(data)" in script
+    assert "async function applyIotPower(input)" in script
+    assert "async function applyAcSetting(setting, value)" in script
     assert "Anenji and EASUN inverters" in index
     assert 'data-tab="inverter-control"' in index
     assert 'id="inverter-config-content"' in index
     assert "function renderInverterConfiguration(configuration)" in script
     assert "function applyInverterSetting(key, button)" in script
+    assert 'id="inverter-config-restore"' in index
+    assert 'id="inverter-config-file"' in index
+    assert "async function restoreInverterConfiguration(file, button)" in script
     assert 'id="inverter-config-refresh"' not in index
     assert "const INVERTER_CONFIG_REFRESH_MS = 30_000" in script
     assert "function startInverterConfigPolling()" in script
@@ -174,6 +400,9 @@ def test_static_dashboard_is_english_and_renders_individual_cells():
     assert "operational telemetry continues through the ESP32 wired links" in index
     assert "function renderBmsConfiguration(configuration)" in script
     assert "function applyBmsSetting(key, button)" in script
+    assert 'id="bms-config-restore"' in index
+    assert 'id="bms-config-file"' in index
+    assert "async function restoreBmsConfiguration(file, button)" in script
     assert "const BMS_CONFIG_REFRESH_MS = 30_000" in script
     assert "function startBmsConfigPolling()" in script
     assert "Protocols and control" not in index
