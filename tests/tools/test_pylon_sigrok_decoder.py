@@ -68,7 +68,7 @@ def test_describe_pylon_status_63():
 
 def test_describe_pylon_analog_61_uses_millivolt_pack_voltage():
     payload = (
-        "DF360000640000000064640DF400010DF30002"
+        "DF36FE98640000000064640DF400010DF30002"
         "0BA40BAE00000BA800000BA60BA3"
     )
     frame = build_pylon_response(payload)
@@ -76,6 +76,7 @@ def test_describe_pylon_analog_61_uses_millivolt_pack_voltage():
     decoded = describe_info(frame, 0x61)
 
     assert "0x61 V=57.142V" in decoded
+    assert "I=-3.60A" in decoded
     assert "SOC=100%" in decoded
     assert "SOH=100%" in decoded
     assert "cell_max=3.572V#1" in decoded

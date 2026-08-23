@@ -67,6 +67,9 @@ extern "C" {
 #endif
 
 esp_err_t jkbmsModbusBmsTaskStart(QueueHandle_t outQueue);
+esp_err_t jkbmsModbusBmsTaskStartConfigured(QueueHandle_t outQueue,
+                                            uint8_t bmsPort,
+                                            bool publishBatteryModel);
 esp_err_t jkbmsModbusBmsTaskStop(void);
 bool jkbmsModbusBmsTaskGetLatestPacket(bms_decoded_packet_t *outPacket);
 bool jkbmsModbusBmsTaskGetLatestSnapshot(jkbms_modbus_snapshot_t *outSnapshot);

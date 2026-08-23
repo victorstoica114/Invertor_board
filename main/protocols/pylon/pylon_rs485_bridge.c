@@ -853,6 +853,20 @@ static uint16_t scaledU16OrDefault(float value, float scale, uint16_t fallback)
     return (uint16_t)scaled;
 }
 
+static int16_t scaledI16Saturated(float value, float scale)
+{
+    float scaled = value * scale;
+
+    if (scaled >= (float)INT16_MAX) {
+        return INT16_MAX;
+    }
+    if (scaled <= (float)INT16_MIN) {
+        return INT16_MIN;
+    }
+    scaled += (scaled >= 0.0f) ? 0.5f : -0.5f;
+    return (int16_t)scaled;
+}
+
 static bool pylonCellMvLooksUsable(uint16_t mv)
 {
     return mv >= 1500u && mv <= 5000u;
@@ -1157,7 +1171,7 @@ static bool buildCanDerivedInfo61(char *out, size_t outSize)
                 packCv = (uint32_t)(model.packVoltageV * 100.0f + 0.5f);
                 putBe16(&bytes[0], (packCv > UINT16_MAX) ? UINT16_MAX : (uint16_t)packCv);
             }
-            putBe16(&bytes[2], (uint16_t)((int16_t)(model.packCurrentA * 10.0f)));
+            putBe16(&bytes[2], (uint16_t)scaledI16Saturated(model.packCurrentA, 100.0f));
             bytes[4] = model.socPct;
             putBe16(&bytes[5], model.cycleCount);
             bytes[9] = model.sohPct;
@@ -2151,7 +2165,8 @@ static void updateSummary61(void)
     s_pylonSummary.valid = true;
     s_pylonSummary.raw_word0 = be16(&bytes[0]);
     s_pylonSummary.pack_voltage_cv = be16(&bytes[0]);
-    s_pylonSummary.current_a = (float)be16s(&bytes[2]) / 10.0f;
+    /* Pylon 0x61 current is a signed big-endian value in 10 mA units. */
+    s_pylonSummary.current_a = (float)be16s(&bytes[2]) / 100.0f;
     s_pylonSummary.soc_pct = bytes[4];
     s_pylonSummary.cycles = be16(&bytes[5]);
     s_pylonSummary.soh_pct = bytes[9];

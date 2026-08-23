@@ -106,6 +106,8 @@ def test_parse_daly_modbus_soc_and_temperature_candidates():
     regs = [0] * 91
     regs[0:4] = [3571, 3572, 3573, 3574]
     regs[48:52] = [66, 67, 68, 69]
+    regs[56] = 570
+    regs[57] = 29871
     regs[58] = 992
     regs[61] = 4
     regs[90] = 70
@@ -114,6 +116,8 @@ def test_parse_daly_modbus_soc_and_temperature_candidates():
     text = describe_frame(rsp)
 
     assert "SOC=99.2%" in text
+    assert "Pack=57.0V" in text
+    assert "I=-12.9A" in text
     assert "T1=26.0C" in text
     assert "T4=29.0C" in text
     assert "MOS=30.0C" in text

@@ -11,6 +11,9 @@ typedef struct {
     uint8_t inverter_protocol;
     uint8_t bms_port;
     uint8_t inverter_port;
+    bool dual_bms;
+    uint8_t bms2_protocol;
+    uint8_t bms2_port;
     uint16_t web_port;
     char wifi_ssid[33];
     char wifi_password[65];

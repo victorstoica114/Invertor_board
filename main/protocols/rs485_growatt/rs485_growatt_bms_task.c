@@ -80,6 +80,11 @@ static uint8_t clampU8(uint16_t v, uint8_t vmax)
     return (uint8_t)((v > vmax) ? vmax : v);
 }
 
+float rs485GrowattPackCurrentRawToA(uint16_t raw)
+{
+    return (float)(int16_t)raw / 100.0f;
+}
+
 static uint16_t rs485GrowattPackVoltageRawToCv(const modbusDecoder_t *decoder, uint16_t raw)
 {
     uint16_t status = 0u;
@@ -172,7 +177,8 @@ static void rs485GrowattPublishBatteryModel(const modbusDecoder_t *decoder,
         model.dischargeCurrentLimitA = (float)regVal / 100.0f;
     }
     if (modbusDecoderGetCachedReg(decoder, RS485_GROWATT_MB_REG_PACK_I_ABS_CA_TENTATIVE, &regVal)) {
-        model.packCurrentA = (float)regVal / 100.0f;
+        /* Growatt/SPF register 0x0017 is a signed centiamp value. */
+        model.packCurrentA = rs485GrowattPackCurrentRawToA(regVal);
     }
     if (modbusDecoderGetCachedReg(decoder, RS485_GROWATT_MB_REG_STATUS_FLAGS, &regVal)) {
         model.protocolState = regVal;

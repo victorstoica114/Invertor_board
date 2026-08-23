@@ -69,7 +69,10 @@ Implemented / available:
 - `CAN_PYLON -> CAN_PYLON` direct forward mode for split CAN ports, field-tested as `JKBMS Pylon CAN on CAN1 -> EASUN Pylon CAN on CAN2`
 - CAN snapshot decoders for Growatt-like, Pylon, Deye, and JK BMS CAN frame sets
 - web UI + API for runtime config and telemetry
+- optional dual-BMS mode with an independent, telemetry-only RS485 BMS 2 and a second telemetry tab/API
 - runtime `Fake Inverter Data` override for inverter-facing synthetic routes, Pylon RS485 passthrough, and Pylon CAN forward frames
+
+Dual-BMS configuration and current limitations are documented in [docs/dual_bms.md](docs/dual_bms.md).
 
 Partially implemented / scaffold:
 
@@ -89,6 +92,7 @@ Current bridge-mode route matrix:
 | RS485_JKBMS -> CAN_GROWATT translator | `bms_line=RS485`, `inv_line=CAN`, `bms_protocol in {JKBMS_MODBUS,JKBMS_MODBUS_115200,JKBMS_RS485_NATIVE}`, `inv_protocol=CAN_GROWATT` | Active; preferred when the web/API must show JK all-cell voltages while the inverter receives Growatt CAN |
 | RS485_JKBMS -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol in {JKBMS_MODBUS,JKBMS_MODBUS_115200,JKBMS_RS485_NATIVE}`, `inv_protocol in {RS485_PYLON,RS485_PYLON_115200}` | Active for Modbus; native is experimental |
 | RS485_GROWATT -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=RS485_GROWATT`, `inv_protocol=RS485_PYLON` | Active; covers JK UART profile `006` |
+| RS485_GROWATT -> CAN_PYLON translator | `bms_line=RS485`, `inv_line=CAN`, `bms_protocol=RS485_GROWATT`, `inv_protocol=CAN_PYLON` | Active; field-tested with Seplos selector `10` (Growatt SPF), signed current and all 16 cell voltages |
 | RS485_PACE -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=PACE_RS485_MODBUS`, `inv_protocol=RS485_PYLON` | Active |
 | RS485_VOLTRONIC -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=VOLTRONIC_MODBUS`, `inv_protocol=RS485_PYLON` | Active; covers JK UART profile `007` |
 | RS485_CHINA_TOWER -> RS485_PYLON translator | `bms_line=RS485`, `inv_line=RS485`, `bms_protocol=CHINA_TOWER_MODBUS`, `inv_protocol=RS485_PYLON` | Active; covers JK UART profile `008` |
@@ -525,6 +529,11 @@ These are useful for reference/history, but are not the primary active implement
 - active PACE BMS RS485 Modbus V1.3 poller + decoder
 - supports `RS485_PACE -> RS485_PYLON` bridge-mode translation
 - web/API telemetry includes pack values, all cell voltages, individual temperature registers, protections, alarms/faults, warnings, raw status flags, and Pylon status output
+
+`main/protocols/rs485_growatt/`
+
+- active Growatt/SPF Modbus poller with signed centiamp pack current, pack limits/status, warning/error fields, and individual cell registers
+- field-tested with Seplos V3 selector `10` (`Growatt SPF Modbus RS485 RTU`): the web/API exposes all 16 cells and the generic route forwards the battery model to `CAN_PYLON`
 
 `main/protocols/voltronic_modbus/`
 

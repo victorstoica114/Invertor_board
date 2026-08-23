@@ -52,6 +52,7 @@ HOST_C_TESTS = (
         sources=(
             "tests/unit/test_jkbms_modbus_freshness.c",
             "main/protocols/jkbms_modbus/jkbms_modbus_freshness.c",
+            "main/protocols/jkbms_modbus/jkbms_modbus_registers_map.c",
             "main/decoders/modbusDecoder.c",
         ),
     ),

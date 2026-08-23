@@ -421,20 +421,22 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "@media(max-width:720px){.tabs{position:static}.panel{padding:12px}.tab{padding:12px 8px}.card{padding:12px;border-radius:10px}td{display:block;width:100%;padding:7px 0}td:first-child{width:100%;padding-top:12px}.grid{grid-template-columns:1fr}select,input{width:100%;min-width:0}.actions button{width:100%}}"
         "</style></head><body>"
         "<div class='tabs'>"
-        "<button class='tab active' onclick='showTab(\"telemetry\",this)'>Telemetry</button>"
+        "<button id='telemetryTab' class='tab active' onclick='showTab(\"telemetry\",this)'>Telemetry</button>"
+        "<button id='telemetry2Tab' class='tab' style='display:none' onclick='showTab(\"telemetry2\",this)'>Telemetry BMS 2</button>"
         "<button class='tab' onclick='showTab(\"settings\",this)'>Settings</button>"
         "<button class='tab' onclick='showTab(\"logs\",this)'>Logs</button>"
         "</div>"
         "<div id='telemetry' class='panel active'><div id='telemetryCards' class='grid'></div></div>"
+        "<div id='telemetry2' class='panel'><div id='telemetry2Cards' class='grid'></div></div>"
         "<div id='settings' class='panel'><div class='card'><div id='settingsForm'>Loading...</div></div></div>"
         "<div id='logs' class='panel'><div class='card'><pre id='logsContent' class='mono' style='white-space:pre-wrap;margin:0'>Loading...</pre></div></div>"
         "<script>"
-        "let currentTab='telemetry';"
-        "const UI_BUILD='2026.07.19-light1';"
+        "let currentTab='telemetry';let dualBmsEnabled=false;"
+        "const UI_BUILD='2026.08.01-dual-bms1';"
         "function showTab(id,btn){document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));"
         "document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));"
         "if(btn){btn.classList.add('active');}"
-        "currentTab=id;document.getElementById(id).classList.add('active');if(id==='settings'){loadSettings();}if(id==='logs'){refreshLogs();}}"
+        "currentTab=id;document.getElementById(id).classList.add('active');if(id==='settings'){loadSettings();}if(id==='logs'){refreshLogs();}if(id==='telemetry2'){refreshTelemetry2();}}"
         "function row(k,v){return '<tr><td>'+k+'</td><td class=\"mono\">'+v+'</td></tr>';}"
         "function card(title,rows){return '<div class=\"card\"><h3>'+title+'</h3><table>'+rows.join('')+'</table></div>';}"
         "function isNum(v){return typeof v==='number'&&Number.isFinite(v);}"
@@ -523,7 +525,8 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "const labels=seplos?['MOS','Temp 1','Temp 2','Temp 3','Temp 4']:((pace||voltronic||china||wow)?['MOS','Battery T1','Battery T2','Battery T4','Battery T5']:(nativeJk?['Tube/MOS','Battery','Box','T4','T5']:['MOS','T1','T2','T4','T5']));"
         "return card('Temperatures',[row(labels[0],hasData?fmt(t.temp_mos_c,1,' C'):'-'),row(labels[1],hasData?fmt(t.temp_t1_c,1,' C'):'-'),row(labels[2],hasData?fmt(t.temp_t2_c,1,' C'):'-'),row(labels[3],hasData?fmt(t.temp_t4_c,1,' C'):'-'),row(labels[4],hasData?fmt(t.temp_t5_c,1,' C'):'-')]);"
         "}"
-        "function renderTelemetry(t){"
+        "function renderTelemetry(t,targetId){"
+        "targetId=targetId||'telemetryCards';"
         "const age=isNum(t.age_ms)?t.age_ms:0;"
         "const stale=Boolean(t.stale);"
         "const hasData=Boolean(t.valid)&&!stale;"
@@ -543,7 +546,13 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "(hasData?alertBadges('Alarms','alarm',t.alarms):''),"
         "(hasData?alertBadges('Warnings','warn',t.warnings):'')"
         "];"
-        "document.getElementById('telemetryCards').innerHTML=(banner?'<div class=\"card\">'+banner+'</div>':'')+cards.filter(Boolean).join('');"
+        "document.getElementById(targetId).innerHTML=(banner?'<div class=\"card\">'+banner+'</div>':'')+cards.filter(Boolean).join('');"
+        "}"
+        "function updateDualBmsUi(enabled){"
+        "dualBmsEnabled=!!enabled;"
+        "const tab=document.getElementById('telemetry2Tab');const primary=document.getElementById('telemetryTab');"
+        "if(tab){tab.style.display=dualBmsEnabled?'':'none';}if(primary){primary.textContent=dualBmsEnabled?'Telemetry BMS 1':'Telemetry';}"
+        "if(!dualBmsEnabled&&currentTab==='telemetry2'){showTab('telemetry',primary);}"
         "}"
         "function renderSettings(s){"
         "function sel(id,val,opts){return '<select id=\"'+id+'\">'+opts.map(o=>'<option value=\"'+o.value+'\"'+(String(o.value)===String(val)?' selected':'')+'>'+o.label+'</option>').join('')+'</select>';}"
@@ -553,6 +562,7 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "const bmsRsProtoOpts=[{value:2,label:'RS485_GROWATT (Modbus Poller)'},{value:6,label:'JKBMS_MODBUS (RS485 Poller, 9600)'},{value:16,label:'JKBMS_MODBUS (RS485 Poller, 115200)'},{value:12,label:'JKBMS_RS485_NATIVE (Native Poller)'},{value:21,label:'DALY_RS485 (Native Poller, 9600)'},{value:19,label:'SEPLOS_RS485 (Native Poller, 9600)'},{value:20,label:'SEPLOS_RS485 (Native Poller, 19200)'},{value:11,label:'PACE_RS485_MODBUS_V1.3 (Modbus Poller)'},{value:13,label:'VOLTRONIC_MODBUS'},{value:14,label:'CHINA_TOWER_MODBUS / JK 008 (RS485 Poller)'},{value:15,label:'WOW_MODBUS / JK 009 (RS485 Poller)'},{value:3,label:'RS485_PYLON (9600)'},{value:17,label:'RS485_PYLON (115200)'}];"
         "const invCanProtoOpts=[{value:1,label:'CAN_GROWATT'},{value:4,label:'CAN_PYLON'},{value:5,label:'CAN_DEYE'},{value:7,label:'CAN_GOODWE'},{value:8,label:'CAN_SOFAR'},{value:9,label:'CAN_SMA'},{value:10,label:'CAN_VICTRON'}];"
         "const invRsProtoOpts=[{value:2,label:'RS485_GROWATT'},{value:3,label:'RS485_PYLON (9600)'},{value:17,label:'RS485_PYLON (115200)'}];"
+        "const bms2ProtoOpts=[{value:21,label:'DALY_RS485 (Native Poller, 9600)'},{value:6,label:'JKBMS_MODBUS (RS485 Poller, 9600)'},{value:16,label:'JKBMS_MODBUS (RS485 Poller, 115200)'}];"
         "const portOpts=[{value:1,label:'1'},{value:2,label:'2'}];"
         "const rows=["
         "row('Mode',sel('mode',s.mode_id,modeOpts)),"
@@ -562,6 +572,9 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "row('Inverter protocol','<select id=\"inverter_protocol\"></select>'),"
         "row('BMS port',sel('bms_port',s.bms_port,portOpts)),"
         "row('Inverter port',sel('inverter_port',s.inverter_port,portOpts)),"
+        "row('Dual BMS','<input id=\"dual_bms\" type=\"checkbox\"'+(s.dual_bms?' checked':'')+' /> Enable telemetry-only BMS 2'),"
+        "row('BMS 2 protocol',sel('bms2_protocol',s.bms2_protocol_id,bms2ProtoOpts)),"
+        "row('BMS 2 RS485 port',sel('bms2_port',s.bms2_port,portOpts)),"
         "row('Wi-Fi SSID','<input id=\"wifi_ssid\" value=\"'+s.wifi_ssid+'\" />'),"
         "row('Wi-Fi PASS','<input id=\"wifi_password\" type=\"password\" value=\"'+s.wifi_password+'\" />'),"
         "row('Web port','<input id=\"web_port\" type=\"number\" min=\"1\" max=\"65535\" value=\"'+s.web_port+'\" />')"
@@ -569,6 +582,7 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "const actions='<div class=\"actions\"><button onclick=\"saveSettings()\">Apply</button><span id=\"settingsStatus\" class=\"mono\">UI '+UI_BUILD+'</span></div><div id=\"routeHint\" class=\"mono\" style=\"margin-top:8px;color:var(--muted)\"></div>';"
         "const fakePanel='<div class=\"card\" style=\"margin-top:16px\"><h3>Fake Inverter Data</h3><div class=\"mono\" style=\"margin-bottom:10px;color:var(--muted)\">Runtime-only debug override. When enabled, inverter-facing protocols use these values instead of live BMS data.</div><div id=\"fakeBmsPanel\"></div></div>';"
         "document.getElementById('settingsForm').innerHTML='<table>'+rows.join('')+'</table>'+actions+fakePanel;"
+        "function updateDualControls(){const on=document.getElementById('dual_bms').checked;document.getElementById('bms2_protocol').disabled=!on;document.getElementById('bms2_port').disabled=!on;updateDualBmsUi(on);}"
         "function applyProtoFilter(lineId,protoId,wanted,canOpts,rsOpts){"
         "const line=parseInt(document.getElementById(lineId).value,10);"
         "const opts=(line===1)?canOpts:rsOpts;"
@@ -580,9 +594,9 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "function lineLabel(v){return parseInt(v,10)===1?'CAN':'RS485';}"
         "function protoLabel(v){const all=bmsCanProtoOpts.concat(bmsRsProtoOpts,invCanProtoOpts,invRsProtoOpts);const p=all.find(o=>String(o.value)===String(v));return p?p.label:String(v);}"
         "function routeKey(mode,bl,il,bp,ip,bport,iport){return [mode,bl,il,bp,ip,bport,iport].join('|');}"
-        "const savedRouteKey=routeKey(s.mode_id,s.bms_line_id,s.inverter_line_id,s.bms_protocol_id,s.inverter_protocol_id,s.bms_port,s.inverter_port);"
+        "const savedRouteKey=routeKey(s.mode_id,s.bms_line_id,s.inverter_line_id,s.bms_protocol_id,s.inverter_protocol_id,s.bms_port,s.inverter_port)+'|'+(s.dual_bms?1:0)+'|'+s.bms2_protocol_id+'|'+s.bms2_port;"
         "function currentRouteArgs(){return [parseInt(document.getElementById('mode').value,10),parseInt(document.getElementById('bms_line').value,10),parseInt(document.getElementById('inverter_line').value,10),parseInt(document.getElementById('bms_protocol').value,10),parseInt(document.getElementById('inverter_protocol').value,10),parseInt(document.getElementById('bms_port').value,10),parseInt(document.getElementById('inverter_port').value,10)];}"
-        "function currentRouteKey(){const a=currentRouteArgs();return routeKey(a[0],a[1],a[2],a[3],a[4],a[5],a[6]);}"
+        "function currentRouteKey(){const a=currentRouteArgs();return routeKey(a[0],a[1],a[2],a[3],a[4],a[5],a[6])+'|'+(document.getElementById('dual_bms').checked?1:0)+'|'+document.getElementById('bms2_protocol').value+'|'+document.getElementById('bms2_port').value;}"
         "function renderRouteHint(mode,bl,il,bp,ip,bport,iport){"
         "let txt='';"
         "if(mode!==3){txt='Bridge inactive in this mode.';}"
@@ -630,7 +644,8 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "}"
         "function updateRouteHint(){"
         "const a=currentRouteArgs();"
-        "const txt=renderRouteHint(a[0],a[1],a[2],a[3],a[4],a[5],a[6]);"
+        "let txt=renderRouteHint(a[0],a[1],a[2],a[3],a[4],a[5],a[6]);"
+        "if(document.getElementById('dual_bms').checked){txt+=' BMS 2 telemetry: '+protoLabel(document.getElementById('bms2_protocol').value)+' on RS485_'+document.getElementById('bms2_port').value+'.';}"
         "document.getElementById('routeHint').textContent=txt;"
         "}"
         "function markSettingsDirty(){"
@@ -653,6 +668,10 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "document.getElementById('inverter_protocol').addEventListener('change',markSettingsDirty);"
         "document.getElementById('bms_port').addEventListener('change',markSettingsDirty);"
         "document.getElementById('inverter_port').addEventListener('change',markSettingsDirty);"
+        "document.getElementById('dual_bms').addEventListener('change',function(){updateDualControls();markSettingsDirty();});"
+        "document.getElementById('bms2_protocol').addEventListener('change',markSettingsDirty);"
+        "document.getElementById('bms2_port').addEventListener('change',markSettingsDirty);"
+        "updateDualControls();"
         "updateRouteHint();"
         "}"
         "function renderFakeBmsDebug(f){"
@@ -739,6 +758,9 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "inverter_protocol:parseInt(document.getElementById('inverter_protocol').value,10),"
         "bms_port:parseInt(document.getElementById('bms_port').value,10),"
         "inverter_port:parseInt(document.getElementById('inverter_port').value,10),"
+        "dual_bms:document.getElementById('dual_bms').checked,"
+        "bms2_protocol:parseInt(document.getElementById('bms2_protocol').value,10),"
+        "bms2_port:parseInt(document.getElementById('bms2_port').value,10),"
         "wifi_ssid:document.getElementById('wifi_ssid').value,"
         "wifi_password:document.getElementById('wifi_password').value,"
         "web_port:parseInt(document.getElementById('web_port').value,10)"
@@ -764,7 +786,12 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "}"
         "async function refreshTelemetry(){"
         "let t=await fetch('/api/telemetry?ts='+Date.now(),{cache:'no-store'}).then(r=>r.json());"
-        "renderTelemetry(t);"
+        "renderTelemetry(t,'telemetryCards');"
+        "}"
+        "async function refreshTelemetry2(){"
+        "if(!dualBmsEnabled){return;}"
+        "let t=await fetch('/api/telemetry2?ts='+Date.now(),{cache:'no-store'}).then(r=>r.json());"
+        "renderTelemetry(t,'telemetry2Cards');"
         "}"
         "async function loadSettings(){"
         "let s=await fetch('/api/settings?ts='+Date.now(),{cache:'no-store'}).then(r=>r.json());"
@@ -783,7 +810,7 @@ static esp_err_t rootHandler(httpd_req_t *req)
         "el.textContent='Log fetch failed: '+(e&&e.message?e.message:String(e));"
         "}"
         "}"
-        "refreshTelemetry();refreshLogs();setInterval(refreshTelemetry,2000);"
+        "refreshTelemetry();refreshLogs();loadSettings();setInterval(function(){refreshTelemetry();if(dualBmsEnabled){refreshTelemetry2();}},2000);"
         "setInterval(function(){if(currentTab==='logs'){refreshLogs();}},5000);"
         "</script></body></html>";
 
@@ -835,14 +862,18 @@ static void overlayFakeTelemetry(bridgeTelemetrySnapshot_t *snap)
              model.balanceEnabled ? "ON" : "OFF");
 }
 
-static esp_err_t telemetryHandler(httpd_req_t *req)
+static esp_err_t telemetryResponse(httpd_req_t *req, bool secondary)
 {
     bridgeTelemetrySnapshot_t snap = {0};
-    const bool fakeOverride = batteryModelIsDebugOverrideEnabled();
+    const bool fakeOverride = !secondary && batteryModelIsDebugOverrideEnabled();
     char json[3072];
     int pos = 0;
 
-    bridgeGetTelemetrySnapshot(&snap);
+    if (secondary) {
+        bridgeGetSecondaryTelemetrySnapshot(&snap);
+    } else {
+        bridgeGetTelemetrySnapshot(&snap);
+    }
     if (fakeOverride) {
         overlayFakeTelemetry(&snap);
     }
@@ -954,6 +985,16 @@ static esp_err_t telemetryHandler(httpd_req_t *req)
     setNoCacheHeaders(req);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t telemetryHandler(httpd_req_t *req)
+{
+    return telemetryResponse(req, false);
+}
+
+static esp_err_t telemetry2Handler(httpd_req_t *req)
+{
+    return telemetryResponse(req, true);
 }
 
 static esp_err_t fakeBmsGetHandler(httpd_req_t *req)
@@ -1153,7 +1194,7 @@ static esp_err_t logsHandler(httpd_req_t *req)
 static esp_err_t settingsHandler(httpd_req_t *req)
 {
     bridge_runtime_settings_t settings = runtimeSettingsGet();
-    char json[768];
+    char json[1024];
 
     snprintf(json,
              sizeof(json),
@@ -1170,6 +1211,10 @@ static esp_err_t settingsHandler(httpd_req_t *req)
              "\"inverter_protocol_id\":%u,"
              "\"bms_port\":%d,"
              "\"inverter_port\":%d,"
+             "\"dual_bms\":%s,"
+             "\"bms2_protocol\":\"%s\","
+             "\"bms2_protocol_id\":%u,"
+             "\"bms2_port\":%d,"
              "\"wifi_ssid\":\"%s\","
              "\"wifi_password\":\"%s\","
              "\"web_port\":%d"
@@ -1186,6 +1231,10 @@ static esp_err_t settingsHandler(httpd_req_t *req)
              (unsigned)settings.inverter_protocol,
              settings.bms_port,
              settings.inverter_port,
+             settings.dual_bms ? "true" : "false",
+             protocolToStr(settings.bms2_protocol),
+             (unsigned)settings.bms2_protocol,
+             settings.bms2_port,
              settings.wifi_ssid,
              settings.wifi_password,
              settings.web_port);
@@ -1267,6 +1316,9 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
     (void)jsonGetUInt8(root, "inverter_protocol", &settings.inverter_protocol);
     (void)jsonGetUInt8(root, "bms_port", &settings.bms_port);
     (void)jsonGetUInt8(root, "inverter_port", &settings.inverter_port);
+    (void)jsonGetBool(root, "dual_bms", &settings.dual_bms);
+    (void)jsonGetUInt8(root, "bms2_protocol", &settings.bms2_protocol);
+    (void)jsonGetUInt8(root, "bms2_port", &settings.bms2_port);
     (void)jsonCopyString(root, "wifi_ssid", settings.wifi_ssid, sizeof(settings.wifi_ssid));
     (void)jsonCopyString(root, "wifi_password", settings.wifi_password, sizeof(settings.wifi_password));
     (void)jsonGetUInt16(root, "web_port", &settings.web_port);
@@ -1286,7 +1338,7 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
     httpd_resp_send(req, okResp, HTTPD_RESP_USE_STRLEN);
 
     ESP_LOGI(WEB_TAG,
-             "Settings POST accepted: mode=%u bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) web_port=%u",
+             "Settings POST accepted: mode=%u bms(line=%u prot=%u port=%u) inv(line=%u prot=%u port=%u) dual=%s bms2(prot=%u port=%u) web_port=%u",
              (unsigned)settings.mode,
              (unsigned)settings.bms_line,
              (unsigned)settings.bms_protocol,
@@ -1294,6 +1346,9 @@ static esp_err_t settingsPostHandler(httpd_req_t *req)
              (unsigned)settings.inverter_line,
              (unsigned)settings.inverter_protocol,
              (unsigned)settings.inverter_port,
+             settings.dual_bms ? "yes" : "no",
+             (unsigned)settings.bms2_protocol,
+             (unsigned)settings.bms2_port,
              (unsigned)settings.web_port);
 
     settingsApplyReq_t applyReq = {
@@ -1351,6 +1406,12 @@ static void startHttpServer(void)
         .handler = telemetryHandler,
         .user_ctx = NULL
     };
+    httpd_uri_t telemetry2Uri = {
+        .uri = "/api/telemetry2",
+        .method = HTTP_GET,
+        .handler = telemetry2Handler,
+        .user_ctx = NULL
+    };
     httpd_uri_t logsUri = {
         .uri = "/api/logs",
         .method = HTTP_GET,
@@ -1384,6 +1445,7 @@ static void startHttpServer(void)
 
     httpd_register_uri_handler(s_httpd, &rootUri);
     httpd_register_uri_handler(s_httpd, &telemetryUri);
+    httpd_register_uri_handler(s_httpd, &telemetry2Uri);
     httpd_register_uri_handler(s_httpd, &logsUri);
     httpd_register_uri_handler(s_httpd, &settingsUri);
     httpd_register_uri_handler(s_httpd, &settingsPostUri);

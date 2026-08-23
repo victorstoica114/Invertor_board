@@ -1,5 +1,22 @@
 #include "protocols/jkbms_modbus/jkbms_modbus_registers_map.h"
 
+bool jkbmsModbusRuntimeCacheAddress(uint16_t protocolAddress, uint16_t *cacheAddressOut)
+{
+    const uint16_t runtimeStart = JKBMS_RT_REG_TEMP_MOS_DECIC;
+
+    if (cacheAddressOut == NULL || protocolAddress < runtimeStart) {
+        return false;
+    }
+
+    const uint16_t byteOffset = (uint16_t)(protocolAddress - runtimeStart);
+    if ((byteOffset & 1u) != 0u) {
+        return false;
+    }
+
+    *cacheAddressOut = (uint16_t)(runtimeStart + (byteOffset / 2u));
+    return true;
+}
+
 /*
  * Keep poll blocks compact and explicit. Some JK firmwares are sensitive to large
  * ranges that include sparse/undocumented addresses.

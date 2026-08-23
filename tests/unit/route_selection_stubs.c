@@ -33,6 +33,10 @@ int g_routeStubWowBmsStartCount;
 int g_routeStubSeplosBmsStartCount;
 int g_routeStubDalyRs485BmsStartCount;
 int g_routeStubDalyCanBmsStartCount;
+int g_routeStubJkbmsConfiguredStartCount;
+int g_routeStubDalyConfiguredStartCount;
+uint8_t g_routeStubSecondaryBmsPort;
+bool g_routeStubSecondaryPublishesBatteryModel;
 int g_routeStubGrowattInverterStartCount;
 int g_routeStubPylonInverterStartCount;
 int g_routeStubPylonBridgeEnableCount;
@@ -50,6 +54,10 @@ void routeSelectionStubReset(void)
     g_routeStubSeplosBmsStartCount = 0;
     g_routeStubDalyRs485BmsStartCount = 0;
     g_routeStubDalyCanBmsStartCount = 0;
+    g_routeStubJkbmsConfiguredStartCount = 0;
+    g_routeStubDalyConfiguredStartCount = 0;
+    g_routeStubSecondaryBmsPort = 0;
+    g_routeStubSecondaryPublishesBatteryModel = true;
     g_routeStubGrowattInverterStartCount = 0;
     g_routeStubPylonInverterStartCount = 0;
     g_routeStubPylonBridgeEnableCount = 0;
@@ -103,6 +111,18 @@ esp_err_t jkbmsModbusBmsTaskStart(QueueHandle_t outQueue)
 {
     (void)outQueue;
     g_routeStubJkbmsModbusBmsStartCount++;
+    return ESP_OK;
+}
+
+esp_err_t jkbmsModbusBmsTaskStartConfigured(QueueHandle_t outQueue,
+                                            uint8_t bmsPort,
+                                            bool publishBatteryModel)
+{
+    (void)outQueue;
+    g_routeStubJkbmsModbusBmsStartCount++;
+    g_routeStubJkbmsConfiguredStartCount++;
+    g_routeStubSecondaryBmsPort = bmsPort;
+    g_routeStubSecondaryPublishesBatteryModel = publishBatteryModel;
     return ESP_OK;
 }
 
@@ -197,6 +217,18 @@ esp_err_t dalyRs485BmsTaskStart(QueueHandle_t outQueue)
 {
     (void)outQueue;
     g_routeStubDalyRs485BmsStartCount++;
+    return ESP_OK;
+}
+
+esp_err_t dalyRs485BmsTaskStartConfigured(QueueHandle_t outQueue,
+                                         uint8_t bmsPort,
+                                         bool publishBatteryModel)
+{
+    (void)outQueue;
+    g_routeStubDalyRs485BmsStartCount++;
+    g_routeStubDalyConfiguredStartCount++;
+    g_routeStubSecondaryBmsPort = bmsPort;
+    g_routeStubSecondaryPublishesBatteryModel = publishBatteryModel;
     return ESP_OK;
 }
 

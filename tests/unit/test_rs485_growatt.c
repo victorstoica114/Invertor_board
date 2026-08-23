@@ -101,9 +101,16 @@ void test_rs485_growatt_decodes_error_and_warning_registers(void)
     TEST_ASSERT_EQUAL_UINT16(0x0441u, packet.warningFlags);
 }
 
+void test_rs485_growatt_decodes_signed_centiamp_current(void)
+{
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, -2.94f, rs485GrowattPackCurrentRawToA(0xFEDAu));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 2.94f, rs485GrowattPackCurrentRawToA(0x0126u));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_rs485_growatt_decodes_error_and_warning_registers);
+    RUN_TEST(test_rs485_growatt_decodes_signed_centiamp_current);
     return UNITY_END();
 }
